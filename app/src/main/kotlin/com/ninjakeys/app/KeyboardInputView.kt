@@ -35,6 +35,9 @@ import com.ninjakeys.core.layout.KeyboardLayout
 fun KeyboardInputView(
     sessionId: Int,
     onSwipe: (GesturePath, KeyboardLayout) -> Unit,
+    onTap: (String) -> Unit = {},
+    onFlick: (String, FlickDirection) -> Unit = { _, _ -> },
+    onPunctuationToSpace: (String) -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
@@ -44,16 +47,18 @@ fun KeyboardInputView(
         val layout = remember(widthPx) { keyboardLayoutFor(keySizePx) }
         var gesturePoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var activePointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
+        var startKey by remember(sessionId) { mutableStateOf<String?>(null) }
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(keySize * 3)
+                .height(keySize * 4)
                 .pointerInteropFilter { event ->
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
                             activePointerId = event.getPointerId(0)
                             gesturePoints = listOf(event.toGesturePoint(0))
+                            startKey = keyAt(event.x, event.y, keySizePx, layout)
                             true
                         }
 
@@ -73,10 +78,21 @@ fun KeyboardInputView(
                                 gesturePoints
                             }
                             if (completed.size >= 2) {
-                                onSwipe(GesturePath(completed), layout)
+                                val key = startKey
+                                val end = completed.last()
+                                when {
+                                    key in punctuationKeys && end.y >= keySizePx * 3f ->
+                                        onPunctuationToSpace(key!!)
+                                    key != null && end.y < completed.first().y - keySizePx / 2f ->
+                                        onFlick(key, FlickDirection.UP)
+                                    else -> onSwipe(GesturePath(completed), layout)
+                                }
+                            } else if (startKey != null) {
+                                onTap(startKey!!)
                             }
                             gesturePoints = emptyList()
                             activePointerId = MotionEvent.INVALID_POINTER_ID
+                            startKey = null
                             true
                         }
 
@@ -93,6 +109,7 @@ fun KeyboardInputView(
             KeyboardRow("qwertyuiop", 0.dp, keySize)
             KeyboardRow("asdfghjkl", keySize / 2, keySize)
             KeyboardRow("zxcvbnm", keySize, keySize)
+            KeyboardBottomRow(keySize)
         }
     }
 }
@@ -109,9 +126,54 @@ private fun BoxScope.KeyboardRow(letters: String, offset: Dp, keySize: Dp) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(letter.uppercase())
+                numberFor(letter)?.let { number ->
+                    Text(number, modifier = Modifier.align(Alignment.TopEnd))
+                }
             }
         }
     }
+}
+
+@Composable
+private fun BoxScope.KeyboardBottomRow(keySize: Dp) {
+    Row(modifier = Modifier.offset(y = keySize * 3)) {
+        listOf("'", "?", ",", ".", "space", "⌫").forEach { label ->
+            Box(
+                modifier = Modifier
+                    .size(if (label == "space") keySize * 4 else keySize)
+                    .border(1.dp, MaterialTheme.colorScheme.outline)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) { Text(label) }
+        }
+    }
+}
+
+private val punctuationKeys = setOf("'", "?", ",", ".")
+
+private fun numberFor(letter: Char): String? =
+    "qwertyuiop".indexOf(letter).takeIf { it >= 0 }?.let { index ->
+        if (index == 9) "0" else (index + 1).toString()
+    }
+
+private fun keyAt(x: Float, y: Float, keySizePx: Float, layout: KeyboardLayout): String? {
+    if (y >= keySizePx * 3f) {
+        val index = (x / keySizePx).toInt()
+        return when {
+            index == 0 -> "'"
+            index == 1 -> "?"
+            index == 2 -> ","
+            index == 3 -> "."
+            index in 4..7 -> " "
+            index == 8 -> "⌫"
+            else -> null
+        }
+    }
+    return layout.keys.minByOrNull { key ->
+        val dx = x - key.x * keySizePx / 1f
+        val dy = y - key.y * keySizePx / 1f
+        dx * dx + dy * dy
+    }?.letter?.toString()
 }
 
 private fun keyboardLayoutFor(keySizePx: Float): KeyboardLayout {

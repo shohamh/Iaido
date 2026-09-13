@@ -23,7 +23,15 @@ class NinjaKeysInputMethodService : InputMethodService() {
         SwipeCommitController(
             recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer()),
             dictionary = dictionaryRepository.words(),
-            commitText = { word -> currentInputConnection?.commitText(word, 1) },
+            commitText = typingController::commitWord,
+        )
+    }
+
+    private val typingController by lazy {
+        TypingController(
+            commitText = { text -> currentInputConnection?.commitText(text, 1) },
+            deleteSurroundingText = { count -> currentInputConnection?.deleteSurroundingText(count, 0) },
+            textBeforeCursor = { currentInputConnection?.getTextBeforeCursor(100, 0)?.toString().orEmpty() },
         )
     }
 
@@ -58,6 +66,14 @@ class NinjaKeysInputMethodService : InputMethodService() {
                 KeyboardInputView(
                     sessionId = currentSession,
                     onSwipe = { path, layout -> controller.commit(path, layout) },
+                    onTap = { value ->
+                        when (value) {
+                            "⌫" -> typingController.backspace()
+                            else -> typingController.tap(value)
+                        }
+                    },
+                    onFlick = { letter, direction -> typingController.flick(letter, direction) },
+                    onPunctuationToSpace = typingController::punctuationToSpace,
                 )
             }
         }
