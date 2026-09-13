@@ -1,0 +1,591 @@
+<title>NinjaKeys Theme Baseline</title>
+<style>
+  :root{
+    --paper:#f6f4f0;
+    --paper-raised:#ffffff;
+    --ink:#1c1e1f;
+    --ink-soft:#5b6165;
+    --line:#dcd8d1;
+    --accent:#1f7a72;
+    --accent-ink:#f3faf9;
+    --key-shadow:0 1px 0 rgba(28,30,31,0.06);
+    --chip-bg:#eef0ee;
+    --chip-active:#dff2ef;
+    --frame:#17181a;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: 'Manrope', system-ui, sans-serif;
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme: dark){
+      --paper:#17181a;
+      --paper-raised:#222426;
+      --ink:#eceae6;
+      --ink-soft:#98a0a3;
+      --line:#33363a;
+      --accent:#37c9ba;
+      --accent-ink:#0c1b19;
+      --key-shadow:0 1px 0 rgba(0,0,0,0.5);
+      --chip-bg:#2a2d2f;
+      --chip-active:#123834;
+      --frame:#0e0f10;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#17181a;
+    --paper-raised:#222426;
+    --ink:#eceae6;
+    --ink-soft:#98a0a3;
+    --line:#33363a;
+    --accent:#37c9ba;
+    --accent-ink:#0c1b19;
+    --key-shadow:0 1px 0 rgba(0,0,0,0.5);
+    --chip-bg:#2a2d2f;
+    --chip-active:#123834;
+    --frame:#0e0f10;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    padding:32px 20px 120px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:28px;
+  }
+  h1{
+    font-size:1.1rem;
+    font-weight:800;
+    letter-spacing:0.01em;
+    margin:0;
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:0.7rem;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin:0 0 4px;
+  }
+  header{text-align:center;max-width:520px;}
+  p.sub{
+    color:var(--ink-soft);
+    font-size:0.92rem;
+    line-height:1.5;
+    margin:8px 0 0;
+  }
+
+  .stage{
+    display:flex;
+    gap:36px;
+    flex-wrap:wrap;
+    justify-content:center;
+    align-items:flex-start;
+  }
+
+  .phone{
+    width:300px;
+    background:var(--frame);
+    border-radius:34px;
+    padding:10px;
+    box-shadow:0 20px 44px -18px rgba(0,0,0,0.45);
+  }
+  .screen{
+    background:var(--paper-raised);
+    border-radius:24px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+    min-height:560px;
+  }
+  .statusbar{
+    height:26px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 16px;
+    font-family:var(--mono);
+    font-size:0.62rem;
+    color:var(--ink-soft);
+  }
+  .thread{
+    flex:1;
+    padding:14px 14px 6px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .bubble{
+    max-width:74%;
+    padding:8px 12px;
+    border-radius:14px;
+    font-size:0.82rem;
+    line-height:1.35;
+  }
+  .bubble.them{
+    background:var(--chip-bg);
+    color:var(--ink);
+    align-self:flex-start;
+    border-bottom-left-radius:4px;
+  }
+  .bubble.me{
+    background:var(--accent);
+    color:var(--accent-ink);
+    align-self:flex-end;
+    border-bottom-right-radius:4px;
+  }
+
+  .keyboard{
+    background:var(--paper);
+    border-top:1px solid var(--line);
+    padding:8px 6px 10px;
+  }
+
+  .strip{
+    display:flex;
+    gap:6px;
+    padding:2px 4px 8px;
+    overflow-x:auto;
+    direction: ltr;
+  }
+  .strip[data-rtl="true"]{ direction:rtl; }
+  .chip{
+    font-family:var(--mono);
+    font-size:0.72rem;
+    padding:5px 10px;
+    border-radius:999px;
+    background:var(--chip-bg);
+    color:var(--ink-soft);
+    white-space:nowrap;
+    flex:none;
+  }
+  .chip.top{
+    background:var(--chip-active);
+    color:var(--accent);
+    font-weight:700;
+  }
+  .chip.corrected{
+    outline:1.5px solid var(--accent);
+    outline-offset:-1.5px;
+    color:var(--ink);
+  }
+
+  .row{
+    display:flex;
+    gap:4px;
+    margin-bottom:4px;
+  }
+  .row.indent-1{ padding:0 12px; }
+  .row.indent-2{ padding:0 26px; }
+
+  .key{
+    flex:1;
+    position:relative;
+    background:var(--paper-raised);
+    border-radius:8px;
+    box-shadow:var(--key-shadow);
+    height:40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:0.92rem;
+    font-weight:600;
+    color:var(--ink);
+  }
+  .key .corner{
+    position:absolute;
+    top:2px;
+    right:4px;
+    font-family:var(--mono);
+    font-size:0.5rem;
+    color:var(--ink-soft);
+    font-weight:500;
+  }
+  .key.punct{
+    color:var(--accent);
+  }
+  .bottom-row{
+    display:flex;
+    gap:4px;
+  }
+  .key.wide{ flex:1.5; font-size:0.68rem; color:var(--ink-soft); font-weight:600;}
+  .key.space{
+    flex:5;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    color:var(--ink-soft);
+    font-size:0.66rem;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    font-weight:700;
+  }
+  .globe{
+    width:14px;height:14px;
+    border-radius:50%;
+    border:1.4px solid var(--ink-soft);
+    position:relative;
+    flex:none;
+  }
+  .globe::before{
+    content:"";
+    position:absolute;inset:0;
+    border-radius:50%;
+    border-top:1.4px solid var(--ink-soft);
+    border-bottom:1.4px solid var(--ink-soft);
+    transform:scaleX(0.4);
+  }
+  .globe::after{
+    content:"";
+    position:absolute;
+    left:50%;top:-1.4px;bottom:-1.4px;
+    width:0;
+    border-left:1.4px solid var(--ink-soft);
+    transform:translateX(-50%);
+  }
+
+  .callouts{
+    max-width:280px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    padding-top:6px;
+  }
+  .callout{
+    display:flex;
+    gap:10px;
+  }
+  .callout .mark{
+    font-family:var(--mono);
+    font-size:0.7rem;
+    color:var(--accent);
+    font-weight:700;
+    padding-top:1px;
+  }
+  .callout .text b{ font-size:0.86rem; }
+  .callout .text p{
+    margin:2px 0 0;
+    font-size:0.8rem;
+    color:var(--ink-soft);
+    line-height:1.45;
+  }
+
+  .dock{
+    position:fixed;
+    left:50%;
+    bottom:22px;
+    transform:translateX(-50%);
+    display:flex;
+    gap:6px;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    padding:6px;
+    border-radius:14px;
+    box-shadow:0 10px 30px -12px rgba(0,0,0,0.35);
+  }
+  .dock button{
+    font-family:var(--sans);
+    font-size:0.76rem;
+    font-weight:700;
+    padding:8px 14px;
+    border-radius:9px;
+    border:none;
+    background:transparent;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .dock button.active{
+    background:var(--accent);
+    color:var(--accent-ink);
+  }
+  .dock .sep{ width:1px; background:var(--line); margin:2px 2px; }
+
+  .chip[data-reelable="true"]{ cursor:grab; user-select:none; touch-action:none; }
+  .word-edit{
+    cursor:grab;
+    user-select:none;
+    touch-action:none;
+    border-bottom:1.5px dotted currentColor;
+    opacity:0.92;
+    padding:0 1px;
+  }
+  .word-edit.corrected{
+    outline:1.5px solid var(--accent);
+    outline-offset:1px;
+    border-radius:3px;
+    border-bottom-style:solid;
+  }
+  .reel-layer{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    z-index:5;
+  }
+  .reel{
+    position:fixed;
+    width:120px;
+    height:112px;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:12px;
+    box-shadow:0 14px 30px -10px rgba(0,0,0,0.35);
+    overflow:hidden;
+    pointer-events:auto;
+    opacity:0;
+    transform:translateY(4px) scale(0.98);
+    transition:opacity 0.12s ease, transform 0.12s ease;
+  }
+  .reel.open{ opacity:1; transform:translateY(0) scale(1); }
+  .reel::before{
+    content:"";
+    position:absolute;
+    top:36px; left:6px; right:6px; height:32px;
+    background:var(--chip-active);
+    border-radius:7px;
+    z-index:0;
+  }
+  .reel-track{
+    position:relative;
+    z-index:1;
+    padding-top:36px;
+  }
+  .reel-item{
+    height:32px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:var(--mono);
+    font-size:0.78rem;
+    color:var(--ink-soft);
+  }
+  .reel-item.centered{
+    color:var(--accent);
+    font-weight:700;
+  }
+  .reel-hint{
+    position:absolute;
+    bottom:-20px;
+    left:0; right:0;
+    text-align:center;
+    font-family:var(--mono);
+    font-size:0.62rem;
+    color:var(--ink-soft);
+    opacity:0;
+    transition:opacity 0.12s ease;
+  }
+  .reel.open .reel-hint{ opacity:1; }
+</style>
+
+<header>
+  <p class="eyebrow">Wayfinder · Theming baseline</p>
+  <h1>NinjaKeys — default theme, light &amp; dark</h1>
+  <p class="sub">Single default theme for v1, following system light/dark. Toggle below to compare — the underlying token set is the same in both, only the values swap.</p>
+</header>
+
+<div class="stage">
+  <div class="phone">
+    <div class="screen">
+      <div class="statusbar"><span>9:41</span><span>NinjaKeys</span></div>
+      <div class="thread">
+        <div class="bubble them">omw, where should we meet?</div>
+        <div class="bubble me" id="meBubble">there by the entrance, save <span id="w-us">us</span> <span id="w-a">a</span> <span id="w-spot">spot</span></div>
+      </div>
+      <div class="keyboard" style="position:relative;">
+        <div class="strip" id="chipStrip">
+          <span class="chip" data-reelable="true" data-target="w-us" data-candidates="us,use,is,as">us</span>
+          <span class="chip" data-reelable="true" data-target="w-a" data-candidates="a,an,at,the">a</span>
+          <span class="chip corrected" data-reelable="true" data-target="w-spot" data-candidates="spot,spa,stop,slot">spot</span>
+        </div>
+        <div class="reel-layer" id="reelLayer"></div>
+
+        <div class="row">
+          <div class="key">q<span class="corner">1</span></div>
+          <div class="key">w<span class="corner">2</span></div>
+          <div class="key">e<span class="corner">3</span></div>
+          <div class="key">r<span class="corner">4</span></div>
+          <div class="key">t<span class="corner">5</span></div>
+          <div class="key">y<span class="corner">6</span></div>
+          <div class="key">u<span class="corner">7</span></div>
+          <div class="key">i<span class="corner">8</span></div>
+          <div class="key">o<span class="corner">9</span></div>
+          <div class="key">p<span class="corner">0</span></div>
+        </div>
+        <div class="row indent-1">
+          <div class="key">a</div>
+          <div class="key">s</div>
+          <div class="key">d</div>
+          <div class="key">f</div>
+          <div class="key">g</div>
+          <div class="key">h</div>
+          <div class="key">j</div>
+          <div class="key">k</div>
+          <div class="key">l</div>
+        </div>
+        <div class="row indent-2">
+          <div class="key wide">⇧</div>
+          <div class="key">z</div>
+          <div class="key">x</div>
+          <div class="key">c</div>
+          <div class="key">v</div>
+          <div class="key">b</div>
+          <div class="key">n</div>
+          <div class="key">m</div>
+          <div class="key wide">⌫</div>
+        </div>
+        <div class="bottom-row">
+          <div class="key wide">?123</div>
+          <div class="key punct" style="flex:0.9">,</div>
+          <div class="key space"><span class="globe"></span>space</div>
+          <div class="key punct" style="flex:0.9">.</div>
+          <div class="key wide">⏎</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callouts">
+    <div class="callout">
+      <span class="mark">01</span>
+      <div class="text"><b>Corner number</b><p>Swipe up on any letter for its number — no dedicated number row, keeping the minimal look.</p></div>
+    </div>
+    <div class="callout">
+      <span class="mark">02</span>
+      <div class="text"><b>Strip mirrors the sentence</b><p>The strip shows the last 2-3 words you actually typed, not generic suggestions — drag a word's reel and release to swap it, and the message updates live. This is the real mechanism: the IME can't touch the host app's text view directly, so correction happens here and edits the message via the keyboard's own text-editing API.</p></div>
+    </div>
+    <div class="callout">
+      <span class="mark">03</span>
+      <div class="text"><b>Comma / period, in place</b><p>No new punctuation row — they keep their normal slot and pick up swipe-to-space from there.</p></div>
+    </div>
+    <div class="callout">
+      <span class="mark">04</span>
+      <div class="text"><b>Globe on spacebar</b><p>Discoverable tap-to-switch language, alongside the 2-finger swipe shortcut.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dock">
+  <button id="btn-light" onclick="setTheme('light')">Light</button>
+  <button id="btn-dark" onclick="setTheme('dark')">Dark</button>
+  <div class="sep"></div>
+  <button id="btn-en" onclick="setLang('en')">EN</button>
+  <button id="btn-he" onclick="setLang('he')">HE (RTL strip)</button>
+</div>
+
+<script>
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('btn-light').classList.toggle('active', t==='light');
+  document.getElementById('btn-dark').classList.toggle('active', t==='dark');
+}
+function setLang(l){
+  var strip = document.getElementById('chipStrip');
+  strip.setAttribute('data-rtl', l==='he' ? 'true' : 'false');
+  var bubble = document.getElementById('meBubble');
+  if(l === 'he'){
+    bubble.innerHTML = 'שם ליד הכניסה, תשמרו <span id="w-us">לנו</span> <span id="w-a">מקום</span> <span id="w-spot">טוב</span>';
+    strip.innerHTML = '<span class="chip" data-reelable="true" data-target="w-us" data-candidates="לנו,לכם,איתנו">לנו</span><span class="chip" data-reelable="true" data-target="w-a" data-candidates="מקום,זמן,צד">מקום</span><span class="chip corrected" data-reelable="true" data-target="w-spot" data-candidates="טוב,נחמד,קרוב">טוב</span>';
+  } else {
+    bubble.innerHTML = 'there by the entrance, save <span id="w-us">us</span> <span id="w-a">a</span> <span id="w-spot">spot</span>';
+    strip.innerHTML = '<span class="chip" data-reelable="true" data-target="w-us" data-candidates="us,use,is,as">us</span><span class="chip" data-reelable="true" data-target="w-a" data-candidates="a,an,at,the">a</span><span class="chip corrected" data-reelable="true" data-target="w-spot" data-candidates="spot,spa,stop,slot">spot</span>';
+  }
+  document.getElementById('btn-en').classList.toggle('active', l==='en');
+  document.getElementById('btn-he').classList.toggle('active', l==='he');
+  wireReels();
+}
+
+var ITEM_H = 32;
+function wireReels(){
+  var chips = document.querySelectorAll('[data-reelable="true"]');
+  chips.forEach(function(chip){
+    chip.onpointerdown = function(e){ startReel(e, chip); };
+  });
+}
+
+function startReel(e, chip){
+  e.preventDefault();
+  var candidates = chip.getAttribute('data-candidates').split(',');
+  var currentWord = chip.textContent.trim();
+  var foundIndex = candidates.indexOf(currentWord);
+  var startIndex = foundIndex >= 0 ? foundIndex : 0; // reel opens centered on whatever's currently picked, not always the first candidate
+  var chipRect = chip.getBoundingClientRect();
+
+  var reel = document.createElement('div');
+  reel.className = 'reel';
+  reel.style.left = Math.max(4, chipRect.left - 20) + 'px';
+  reel.style.top = (chipRect.top - 122) + 'px';
+
+  var track = document.createElement('div');
+  track.className = 'reel-track';
+  candidates.forEach(function(word){
+    var item = document.createElement('div');
+    item.className = 'reel-item';
+    item.textContent = word;
+    track.appendChild(item);
+  });
+  reel.appendChild(track);
+  var hint = document.createElement('div');
+  hint.className = 'reel-hint';
+  hint.textContent = 'release to pick';
+  reel.appendChild(hint);
+  document.body.appendChild(reel);
+  requestAnimationFrame(function(){ reel.classList.add('open'); });
+
+  var dragOffset = -startIndex * ITEM_H;
+  track.style.transform = 'translateY(' + dragOffset + 'px)';
+  updateCentered(track, candidates.length, startIndex);
+
+  var startY = e.clientY;
+  var baseOffset = dragOffset;
+  var maxDelta = 0;
+
+  function onMove(ev){
+    var delta = ev.clientY - startY;
+    maxDelta = Math.max(maxDelta, Math.abs(delta));
+    var raw = baseOffset + delta;
+    var maxOffset = 0;
+    var minOffset = -(candidates.length - 1) * ITEM_H;
+    raw = Math.max(minOffset, Math.min(maxOffset, raw));
+    track.style.transform = 'translateY(' + raw + 'px)';
+    var idx = Math.round(-raw / ITEM_H);
+    updateCentered(track, candidates.length, idx);
+    track.dataset.idx = idx;
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    // A plain click/tap (no meaningful drag) is a no-op -- it just closes the
+    // reel without touching the chip, matching the "release to pick" gesture
+    // rather than treating every tap as a commit.
+    if(maxDelta >= 6){
+      var idx = parseInt(track.dataset.idx || startIndex, 10);
+      if(idx !== startIndex){
+        chip.textContent = candidates[idx];
+        chip.classList.add('corrected');
+        var targetId = chip.getAttribute('data-target');
+        if(targetId){
+          var span = document.getElementById(targetId);
+          if(span) span.textContent = candidates[idx];
+        }
+      }
+    }
+    reel.classList.remove('open');
+    setTimeout(function(){ reel.remove(); }, 140);
+  }
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+function updateCentered(track, count, idx){
+  var items = track.querySelectorAll('.reel-item');
+  items.forEach(function(item, i){
+    item.classList.toggle('centered', i === idx);
+  });
+}
+
+setTheme('light');
+setLang('en');
+</script>
