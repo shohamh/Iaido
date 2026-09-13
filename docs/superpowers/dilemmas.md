@@ -14,3 +14,12 @@ until answered or intentionally resolved by the implementation.
   surface needed by the ticket (letters, comma, period, question mark, quote,
   space, backspace, and number flicks) and will record any later UX choices
   here rather than blocking implementation.
+- Stage 4 long-press and mixed-word behavior: the pure policy seam supports
+  accent resolution, but Android long-press timing and tap/swipe accumulation
+  still need instrumented validation and completion.
+- Stage 5 asset reproducibility: Hebrew export currently uses the locally
+  installed `wordfreq` package; before release, pin that tool version and add a
+  dependency/bootstrap check to the data pipeline.
+- Stages 6-12: command execution/settings persistence, personal learning,
+  contextual correction, split-word gestures, theming, test infrastructure,
+  and release packaging are not yet implemented.
