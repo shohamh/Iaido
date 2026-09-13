@@ -51,4 +51,32 @@ class ShapePathScorerTest {
 
         assertEquals(0, results.size)
     }
+
+    @Test
+    fun `equivalent gestures on differently scaled layouts receive the same score`() {
+        val scaledLayout = KeyboardLayout(
+            layout.keys.map { key ->
+                key.copy(x = key.x * 100f + 50f, y = key.y * 100f + 20f)
+            }
+        )
+        val normalPath = pathThrough('h', 'i')
+        val scaledPath = GesturePath(
+            normalPath.points.map { point ->
+                point.copy(x = point.x * 100f + 50f, y = point.y * 100f + 20f)
+            }
+        )
+
+        val normalScore = scorer.score(
+            normalPath,
+            listOf(WordEntry("hi", 1.0)),
+            layout,
+        ).single().score
+        val scaledScore = scorer.score(
+            scaledPath,
+            listOf(WordEntry("hi", 1.0)),
+            scaledLayout,
+        ).single().score
+
+        assertEquals(normalScore, scaledScore, 0.0001)
+    }
 }

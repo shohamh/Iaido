@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * later without changing [CandidateGenerator] callers.
  */
 class TrieCandidateGenerator(
-    private val proximityThreshold: Float = 1.5f,
+    private val proximityThreshold: Float = ScoringConstants.PROXIMITY_THRESHOLD,
 ) : CandidateGenerator {
 
     override fun generateCandidates(
@@ -22,13 +22,14 @@ class TrieCandidateGenerator(
         layout: KeyboardLayout,
         dictionary: List<WordEntry>,
     ): List<WordEntry> {
-        return dictionary.filter { entry -> isPlausible(entry.word, path, layout) }
+        val normalizedPath = layout.normalize(path)
+        return dictionary.filter { entry -> isPlausible(entry.word, normalizedPath, layout) }
     }
 
     private fun isPlausible(word: String, path: GesturePath, layout: KeyboardLayout): Boolean {
         var searchStartIndex = 0
         for (letter in word) {
-            val key = layout.centerOf(letter)
+            val key = layout.normalize(layout.centerOf(letter))
             val matchIndex = findNearestPointFrom(searchStartIndex, key, path)
             if (matchIndex == -1) return false
             searchStartIndex = matchIndex

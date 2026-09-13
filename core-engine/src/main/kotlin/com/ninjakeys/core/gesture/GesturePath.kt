@@ -21,32 +21,20 @@ data class GesturePath(val points: List<GesturePoint>) {
         }
 
         val step = totalLength / (targetPointCount - 1)
-        val result = mutableListOf<GesturePoint>()
-        result.add(points.first())
-
-        var segmentIndex = 0
-        var distanceIntoSegment = 0f
-        var accumulatedTarget = step
-
-        while (result.size < targetPointCount - 1) {
-            val segLen = segmentLengths[segmentIndex]
-            val remainingInSegment = segLen - distanceIntoSegment
-            if (remainingInSegment >= step) {
-                distanceIntoSegment += step
-                val t = distanceIntoSegment / segLen
-                result.add(interpolate(points[segmentIndex], points[segmentIndex + 1], t))
+        val cumulativeLengths = segmentLengths.runningFold(0f) { total, segment -> total + segment }
+        val result = (0 until targetPointCount).map { sampleIndex ->
+            val targetDistance = step * sampleIndex
+            if (sampleIndex == targetPointCount - 1) {
+                points.last()
             } else {
-                accumulatedTarget = step - remainingInSegment
-                segmentIndex++
-                distanceIntoSegment = accumulatedTarget
-                if (segmentIndex >= segmentLengths.size) break
-                val segLen2 = segmentLengths[segmentIndex]
-                val t = (distanceIntoSegment / segLen2).coerceIn(0f, 1f)
-                result.add(interpolate(points[segmentIndex], points[segmentIndex + 1], t))
+                val segmentIndex = cumulativeLengths.indexOfFirst { it > targetDistance }
+                    .coerceAtLeast(1) - 1
+                val segmentStart = cumulativeLengths[segmentIndex]
+                val segmentLength = segmentLengths[segmentIndex]
+                val fraction = ((targetDistance - segmentStart) / segmentLength).coerceIn(0f, 1f)
+                interpolate(points[segmentIndex], points[segmentIndex + 1], fraction)
             }
         }
-
-        result.add(points.last())
         return GesturePath(result)
     }
 

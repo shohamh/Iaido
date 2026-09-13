@@ -8,7 +8,7 @@ import kotlin.math.ln
 import kotlin.math.sqrt
 
 class ShapePathScorer(
-    private val resamplePointCount: Int = 32,
+    private val resamplePointCount: Int = ScoringConstants.RESAMPLE_POINT_COUNT,
 ) : PathScorer {
 
     override fun score(
@@ -18,7 +18,7 @@ class ShapePathScorer(
     ): List<ScoredCandidate> {
         if (candidates.isEmpty()) return emptyList()
 
-        val userPath = path.resample(resamplePointCount)
+        val userPath = layout.normalize(path).resample(resamplePointCount)
 
         return candidates
             .map { entry -> ScoredCandidate(entry, scoreOne(userPath, entry, layout)) }
@@ -26,11 +26,11 @@ class ShapePathScorer(
     }
 
     private fun scoreOne(userPath: GesturePath, entry: WordEntry, layout: KeyboardLayout): Double {
-        val idealPath = idealPathFor(entry.word, layout).resample(resamplePointCount)
+        val idealPath = layout.normalize(idealPathFor(entry.word, layout)).resample(resamplePointCount)
 
         val shapeDistance = elasticDistance(userPath, idealPath)
         val cornerBonus = cornerMatchBonus(userPath, idealPath)
-        val frequencyTerm = ln(entry.frequency.coerceAtLeast(1.0))
+        val frequencyTerm = ln(entry.frequency.coerceAtLeast(ScoringConstants.MIN_FREQUENCY))
 
         // Distance is a cost (lower is better), so it's subtracted; the
         // corner bonus and frequency term add to the score.
@@ -69,7 +69,9 @@ class ShapePathScorer(
         if (cornersA.isEmpty() && cornersB.isEmpty()) return 1.0
 
         val matched = cornersA.count { indexA ->
-            cornersB.any { indexB -> kotlin.math.abs(indexA - indexB) <= 2 }
+            cornersB.any {
+                indexB -> kotlin.math.abs(indexA - indexB) <= ScoringConstants.CORNER_MATCH_INDEX_TOLERANCE
+            }
         }
         val totalCorners = maxOf(cornersA.size, cornersB.size, 1)
         return matched.toDouble() / totalCorners
@@ -84,7 +86,7 @@ class ShapePathScorer(
             val dx2 = points[i + 1].x - points[i].x
             val dy2 = points[i + 1].y - points[i].y
             val cross = dx1 * dy2 - dy1 * dx2
-            if (kotlin.math.abs(cross) > 0.3f) {
+            if (kotlin.math.abs(cross) > ScoringConstants.CORNER_CROSS_PRODUCT_THRESHOLD) {
                 indices.add(i)
             }
         }

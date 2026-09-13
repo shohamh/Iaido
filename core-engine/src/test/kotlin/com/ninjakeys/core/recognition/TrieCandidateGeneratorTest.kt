@@ -40,4 +40,26 @@ class TrieCandidateGeneratorTest {
 
         assertFalse(candidates.any { it.word == "bye" })
     }
+
+    @Test
+    fun `candidate matching is independent of layout scale and offset`() {
+        val scaledLayout = KeyboardLayout(
+            layout.keys.map { key ->
+                key.copy(x = key.x * 100f + 50f, y = key.y * 100f + 20f)
+            }
+        )
+        val scaledPath = GesturePath(
+            pathThrough('h', 'i').points.map { point ->
+                point.copy(x = point.x * 100f + 50f, y = point.y * 100f + 20f)
+            }
+        )
+
+        val candidates = generator.generateCandidates(
+            scaledPath,
+            scaledLayout,
+            listOf(WordEntry("hi", 1.0)),
+        )
+
+        assertTrue(candidates.any { it.word == "hi" })
+    }
 }

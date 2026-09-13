@@ -55,4 +55,39 @@ class GesturePathTest {
         assertEquals(10f, resampled.points[1].x, 0.001f)
         assertEquals(20f, resampled.points[2].x, 0.001f)
     }
+
+    @Test
+    fun `resample crosses multiple short segments at the correct arc length`() {
+        val path = GesturePath(
+            listOf(
+                GesturePoint(0f, 0f, 0),
+                GesturePoint(1f, 0f, 1),
+                GesturePoint(2f, 0f, 2),
+                GesturePoint(12f, 0f, 12),
+            )
+        )
+
+        val resampled = path.resample(3)
+
+        assertEquals(0f, resampled.points[0].x, 0.001f)
+        assertEquals(6f, resampled.points[1].x, 0.001f)
+        assertEquals(12f, resampled.points[2].x, 0.001f)
+    }
+
+    @Test
+    fun `resample skips duplicate points without changing arc length`() {
+        val path = GesturePath(
+            listOf(
+                GesturePoint(0f, 0f, 0),
+                GesturePoint(0f, 0f, 0),
+                GesturePoint(10f, 0f, 10),
+            )
+        )
+
+        val resampled = path.resample(3)
+
+        assertEquals(0f, resampled.points[0].x, 0.001f)
+        assertEquals(5f, resampled.points[1].x, 0.001f)
+        assertEquals(10f, resampled.points[2].x, 0.001f)
+    }
 }
