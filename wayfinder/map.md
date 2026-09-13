@@ -33,6 +33,7 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Research Swype's flick-punctuation mapping](tickets/005-flick-punctuation-research.md) — per Swype's patent, each letter key had 4 directional flicks (up=shift, down=alt-lower, right/left=number/symbol alternates); Swype-key command gestures (cut/copy/select-all) are separate and belong with the multi-finger gesture ticket instead.
 - [Personal dictionary & on-device learning model](tickets/003-personal-dictionary-learning-model.md) — separate `personal_overrides` overlay table over the immutable base dictionary; six learning signals including delete-and-retype amplifying n-gram context; usage-activity-based decay (not time-based); backup via Android's own app-data backup; reset-all and per-word forget controls.
 - [Research Nintype's multi-finger mechanic](tickets/012-nintype-multitouch-research.md) — corrected understanding: it's one word split across simultaneous partial gestures/taps from two hands (e.g. "th" + "ere" → "there"), not two independent concurrent words. Core-engine extension, not a command-gesture binding.
+- [Multi-finger gesture set & customization](tickets/004-multi-finger-gestures.md) — discrete command gestures only (language-switch, dismiss, undo/redo direct; cut/copy/paste/select-all via long-press-space command mode), global customizable bindings. Split off two-handed split-word typing as its own ticket.
 
 ## Not yet specified
 
