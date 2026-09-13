@@ -41,10 +41,11 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Theming baseline](tickets/010-theming-baseline.md) — validated via prototype (branch `prototype/theming-baseline`): warm-neutral palette with teal accent, Manrope + JetBrains Mono, flat low-elevation Swype-era keys. Suggestion strip mirrors the actual sentence tail with a slot-machine reel per word (drag-to-scroll, release-to-commit, resumes at last pick, RTL in Hebrew). Confirms correction lives in the strip, not on host-app text.
 - [Standard IME conveniences beyond swipe-typing](tickets/014-standard-ime-conveniences.md) — tap-typing reuses the same scoring pipeline as swipe-typing; standard autocapitalization; double-space-for-period coexists with swipe-to-space; long-press accents for English (none needed for Hebrew); seamless tap/swipe mixing within one word.
 - [Settings app UX beyond gesture customization](tickets/015-settings-app-ux.md) — five sections (Setup/Gestures/Typing/Dictionary & Learning/Help) grouped by user intent; only explicitly-called-out tunables (cascading depth, grace window) get UI, raw scoring weights stay internal; guided Android keyboard-enable/switch flow; every settings screen keeps a live preview textbox with NinjaKeys active beneath it.
+- [Automated testing strategy](tickets/016-testing-strategy.md) — JUnit unit tests for `core-engine` (no device needed) using shared path-point fixtures also converted to `MotionEvent`s for Espresso/UiAutomator instrumented tests on `app`; both emulator and physical Galaxy S25 are just ADB targets of `connectedAndroidTest`; GitHub Actions runs unit+emulator tests on every push, physical-device testing stays a manual local step.
+- [Fast-iteration distribution to physical phone](tickets/017-dev-distribution-hot-reload.md) — `core-engine` ships as a separately-loadable `.jar`/`.dex` via `DexClassLoader` for genuinely silent hot-updates (checked via GitHub Releases); `app`-module changes need a full APK install with one required tap (Android platform constraint, no rooting); Compose Live Edit/Apply Changes for active-session hot reload; wireless ADB throughout. Explicitly incompatible with future Play distribution — accepted as a deferred tradeoff.
 
 ## Not yet specified
 
-- Testing/QA plan details (beyond "Galaxy S25 + emulator").
 - Release packaging concerns (app icon, store listing) — deferred until publishing is actually pursued.
 - Accessibility considerations.
 
