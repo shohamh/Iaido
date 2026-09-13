@@ -35,6 +35,7 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Research Nintype's multi-finger mechanic](tickets/012-nintype-multitouch-research.md) — corrected understanding: it's one word split across simultaneous partial gestures/taps from two hands (e.g. "th" + "ere" → "there"), not two independent concurrent words. Core-engine extension, not a command-gesture binding.
 - [Multi-finger gesture set & customization](tickets/004-multi-finger-gestures.md) — discrete command gestures only (language-switch, dismiss, undo/redo direct; cut/copy/paste/select-all via long-press-space command mode), global customizable bindings. Split off two-handed split-word typing as its own ticket.
 - [Two-handed split-word gesture typing](tickets/013-two-handed-split-word-typing.md) — concurrent partial paths merged by touch-down order and re-scored via existing PathScorer; grace window (~300-400ms) after lift for near-simultaneous typing; taps-as-doubled-letters only while a word gesture is active; single-finger case falls out for free.
+- [Design NinjaKeys' flick-punctuation mapping](tickets/006-flick-punctuation-design.md) — swipe-up on letter keys = number (corner-labeled); swipe-to-spacebar on comma/period/question-mark/quotes (English) and geresh/gershayim (Hebrew) = character + trailing space; no full 4-direction-per-key scheme.
 
 ## Not yet specified
 
