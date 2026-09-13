@@ -13,10 +13,16 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private var sessionId = 0
 
+    private val dictionaryRepository by lazy {
+        EnglishDictionaryRepository {
+            assets.open(englishDictionaryAsset).bufferedReader().use { it.readText() }
+        }
+    }
+
     private val controller by lazy {
         SwipeCommitController(
             recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer()),
-            dictionary = stageOneDictionary,
+            dictionary = dictionaryRepository.words(),
             commitText = { word -> currentInputConnection?.commitText(word, 1) },
         )
     }

@@ -79,4 +79,14 @@ class ShapePathScorerTest {
 
         assertEquals(normalScore, scaledScore, 0.0001)
     }
+
+    @Test
+    fun `a genuine three-letter cornered path rewards its matching candidate`() {
+        val path = pathThrough('b', 'y', 'e')
+        val candidates = listOf(WordEntry("bye", 1.0), WordEntry("buy", 1.0))
+
+        val results = scorer.score(path, candidates, layout)
+
+        assertEquals("bye", results.first().word.word)
+    }
 }
