@@ -30,15 +30,18 @@ import com.ninjakeys.core.layout.KeyPosition
 import com.ninjakeys.core.layout.KeyboardLayout
 
 @Composable
-fun KeyboardInputView(onSwipe: (GesturePath, KeyboardLayout) -> Unit) {
+fun KeyboardInputView(
+    sessionId: Int,
+    onSwipe: (GesturePath, KeyboardLayout) -> Unit,
+) {
     BoxWithConstraints {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
         val keySizePx = widthPx / 10f
         val keySize = with(density) { keySizePx.toDp() }
         val layout = remember(widthPx) { keyboardLayoutFor(keySizePx) }
-        var gesturePoints by remember { mutableStateOf<List<GesturePoint>>(emptyList()) }
-        var activePointerId by remember { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
+        var gesturePoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
+        var activePointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
 
         Box(
             modifier = Modifier
