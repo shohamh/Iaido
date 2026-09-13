@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -29,6 +30,7 @@ import com.ninjakeys.core.gesture.GesturePoint
 import com.ninjakeys.core.layout.KeyPosition
 import com.ninjakeys.core.layout.KeyboardLayout
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun KeyboardInputView(
     sessionId: Int,
@@ -114,14 +116,19 @@ private fun BoxScope.KeyboardRow(letters: String, offset: Dp, keySize: Dp) {
 
 private fun keyboardLayoutFor(keySizePx: Float): KeyboardLayout {
     val keys = buildList {
-        addRow("qwertyuiop", 0f, 0)
-        addRow("asdfghjkl", 0.5f, 1)
-        addRow("zxcvbnm", 1f, 2)
+        addRow("qwertyuiop", 0f, 0, keySizePx)
+        addRow("asdfghjkl", 0.5f, 1, keySizePx)
+        addRow("zxcvbnm", 1f, 2, keySizePx)
     }
     return KeyboardLayout(keys)
 }
 
-private fun MutableList<KeyPosition>.addRow(letters: String, xOffset: Float, row: Int) {
+private fun MutableList<KeyPosition>.addRow(
+    letters: String,
+    xOffset: Float,
+    row: Int,
+    keySizePx: Float,
+) {
     letters.forEachIndexed { index, letter ->
         add(KeyPosition(letter, (index + 0.5f + xOffset) * keySizePx, (row + 0.5f) * keySizePx))
     }
