@@ -43,11 +43,11 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Settings app UX beyond gesture customization](tickets/015-settings-app-ux.md) — five sections (Setup/Gestures/Typing/Dictionary & Learning/Help) grouped by user intent; only explicitly-called-out tunables (cascading depth, grace window) get UI, raw scoring weights stay internal; guided Android keyboard-enable/switch flow; every settings screen keeps a live preview textbox with NinjaKeys active beneath it.
 - [Automated testing strategy](tickets/016-testing-strategy.md) — JUnit unit tests for `core-engine` (no device needed) using shared path-point fixtures also converted to `MotionEvent`s for Espresso/UiAutomator instrumented tests on `app`; both emulator and physical Galaxy S25 are just ADB targets of `connectedAndroidTest`; GitHub Actions runs unit+emulator tests on every push, physical-device testing stays a manual local step.
 - [Fast-iteration distribution to physical phone](tickets/017-dev-distribution-hot-reload.md) — `core-engine` ships as a separately-loadable `.jar`/`.dex` via `DexClassLoader` for genuinely silent hot-updates (checked via GitHub Releases); `app`-module changes need a full APK install with one required tap (Android platform constraint, no rooting); Compose Live Edit/Apply Changes for active-session hot reload; wireless ADB throughout. Explicitly incompatible with future Play distribution — accepted as a deferred tradeoff.
+- [Accessibility considerations](tickets/018-accessibility.md) — dedicated accessibility work deferred (like release packaging) in favor of standard Compose semantics; 48dp minimum touch targets regardless (benefits everyone); basic WCAG contrast check on the locked theming palette; tap-typing already serves as the de facto non-gesture fallback.
 
 ## Not yet specified
 
 - Release packaging concerns (app icon, store listing) — deferred until publishing is actually pursued.
-- Accessibility considerations.
 
 ## Out of scope
 
