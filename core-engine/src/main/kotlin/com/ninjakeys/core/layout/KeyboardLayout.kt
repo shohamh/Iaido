@@ -61,5 +61,17 @@ class KeyboardLayout(val keys: List<KeyPosition>) {
             row3.forEachIndexed { i, c -> keys.add(KeyPosition(c, i * 1f + 1f, 2f)) }
             return KeyboardLayout(keys)
         }
+
+        fun hebrewTestLayout(): KeyboardLayout {
+            val rows = listOf("קראטוןםפ", "שדגכעיחלךף", "זסבהנמצתץ")
+            val keys = mutableListOf<KeyPosition>()
+            rows.forEachIndexed { row, letters ->
+                val offset = row * 0.5f
+                letters.forEachIndexed { index, letter ->
+                    keys.add(KeyPosition(letter, index + offset.toFloat(), row.toFloat()))
+                }
+            }
+            return KeyboardLayout(keys)
+        }
     }
 }
