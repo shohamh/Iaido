@@ -36,6 +36,8 @@ Traces to: [007](../../../wayfinder/tickets/007-android-ime-architecture-researc
 
 Build-time pipeline that processes `wordfreq` + Google Books Ngrams data into a bundled Room/SQLite asset, loaded on first run; wire real base-frequency scoring into the Stage 1 `PathScorer`. **Demoable as:** swipe-typing resolving correctly against a real ~25k+ word English vocabulary instead of the tiny test dictionary.
 
+**Carried forward from Stage 1's SDD review (Task 5, parked finding):** `ShapePathScorer`'s corner-matching-bonus branch was never exercised by Stage 1's tests (all fixture words were 2-letter/straight-line paths, so `turningPointIndices` always returned empty). Once real multi-letter dictionary words are in play, add a unit test with a genuine 3+ letter cornered path before trusting this branch in production — it's untested logic, not verified-safe logic.
+
 Traces to: [002](../../../wayfinder/tickets/002-dictionary-research.md).
 
 ## Stage 4: Flick punctuation + standard IME conveniences
