@@ -34,3 +34,5 @@ Needs: exact margin-threshold tuning approach, how far back the background pass 
 - **Cascading is allowed, but bounded**: correcting word N can re-trigger re-evaluation of preceding words, up to a default depth of **2 words**, tunable in settings. This is a deliberate departure from a stricter "one bounded pass, no cascading" default — the user wants limited cascading rather than none, so depth is capped and configurable rather than unlimited.
 
 **Learning signals**: unchanged from the [personal dictionary & learning](003-personal-dictionary-learning-model.md) ticket — undoing a flow-correction is a negative signal on the word it changed to and a positive signal for the original.
+
+**Addendum (from [Keyboard layouts](009-keyboard-layouts.md))**: the word-correction chip strip renders right-to-left when the active language is Hebrew, matching natural reading order for the words it displays.
