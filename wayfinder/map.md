@@ -26,7 +26,8 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 
 ## Decisions so far
 
-(none yet — map just charted)
+- [Research Android IME architecture patterns](tickets/007-android-ime-architecture-research.md) — extend `InputMethodService` with a Compose-rendered input view for UI, raw `MotionEvent` handling for gesture capture, and a separate pure-Kotlin core engine module (dictionary/gesture/prediction) decoupled from the Android IME service module.
+- [Tech stack & project structure](tickets/008-tech-stack-and-project-structure.md) — Kotlin + Compose, two modules (`core-engine` pure-Kotlin, `app` for IME/UI/persistence), Room + DataStore, minSdk 31, current-stable tooling.
 
 ## Not yet specified
 
