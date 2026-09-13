@@ -39,12 +39,11 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Flow correction & text-correction gestures](tickets/011-flow-correction-and-undo-gestures.md) — corrections happen via a word-chip strip in the IME's own suggestion bar (not on host-app text, which IMEs can't touch), slot-machine-style scroll-to-pick alternates, cursor-position-synced history for the current input session only, bounded cascading correction (default depth 2, tunable). Renders RTL in Hebrew mode (addendum from the layouts ticket).
 - [Keyboard layouts & switching UX](tickets/009-keyboard-layouts.md) — no new punctuation row (swipe-to-space uses each character's existing standard slot); Hebrew apostrophe-slot becomes geresh/gershayim; globe-key + 2-finger-swipe for language switch; no permanent number row, `?123` layout for the rest; keyboard layout doesn't mirror for Hebrew RTL, only text does.
 - [Theming baseline](tickets/010-theming-baseline.md) — validated via prototype (branch `prototype/theming-baseline`): warm-neutral palette with teal accent, Manrope + JetBrains Mono, flat low-elevation Swype-era keys. Suggestion strip mirrors the actual sentence tail with a slot-machine reel per word (drag-to-scroll, release-to-commit, resumes at last pick, RTL in Hebrew). Confirms correction lives in the strip, not on host-app text.
+- [Standard IME conveniences beyond swipe-typing](tickets/014-standard-ime-conveniences.md) — tap-typing reuses the same scoring pipeline as swipe-typing; standard autocapitalization; double-space-for-period coexists with swipe-to-space; long-press accents for English (none needed for Hebrew); seamless tap/swipe mixing within one word.
 
 ## Not yet specified
 
-- Full word-prediction ranking/scoring algorithm once the dictionary format and learning model are decided.
 - Settings app UX beyond gesture customization (general preferences, about/help screens).
-- Standard IME conveniences beyond swipe-typing: autocorrect-on-tap-typing, autocapitalization, long-press secondary characters on number/symbol rows — need a decision on which are in scope for v1.
 - Testing/QA plan details (beyond "Galaxy S25 + emulator").
 - Release packaging concerns (app icon, store listing) — deferred until publishing is actually pursued.
 - Accessibility considerations.
