@@ -3,7 +3,7 @@ id: 4
 title: Multi-finger gesture set & customization
 type: grilling
 status: open
-assignee: null
+assignee: agent
 blocked_by: []
 ---
 
