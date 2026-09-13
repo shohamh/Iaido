@@ -29,6 +29,8 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Research Android IME architecture patterns](tickets/007-android-ime-architecture-research.md) — extend `InputMethodService` with a Compose-rendered input view for UI, raw `MotionEvent` handling for gesture capture, and a separate pure-Kotlin core engine module (dictionary/gesture/prediction) decoupled from the Android IME service module.
 - [Tech stack & project structure](tickets/008-tech-stack-and-project-structure.md) — Kotlin + Compose, two modules (`core-engine` pure-Kotlin, `app` for IME/UI/persistence), Room + DataStore, minSdk 31, current-stable tooling.
 - [Gesture-recognition algorithm architecture](tickets/001-gesture-algorithm-architecture.md) — swappable `CandidateGenerator`/`PathScorer` interfaces, DTW+corner shape scoring combined with frequency/personal/n-gram-context weights, incremental + finger-lift recognition, top-5 ranked output. Split off flow-correction/undo gestures as a new ticket.
+- [Research English + Hebrew word-frequency dictionaries](tickets/002-dictionary-research.md) — use `wordfreq` (CC BY-SA 4.0) for base English+Hebrew word frequency; Google Books Ngrams (CC BY 3.0) for English n-grams; self-generate Hebrew n-grams from OPUS/Wikipedia text (no ready-made open dataset found); ship as a bundled binary/SQLite asset.
+- [Research Swype's flick-punctuation mapping](tickets/005-flick-punctuation-research.md) — per Swype's patent, each letter key had 4 directional flicks (up=shift, down=alt-lower, right/left=number/symbol alternates); Swype-key command gestures (cut/copy/select-all) are separate and belong with the multi-finger gesture ticket instead.
 
 ## Not yet specified
 
