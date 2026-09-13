@@ -34,6 +34,7 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Personal dictionary & on-device learning model](tickets/003-personal-dictionary-learning-model.md) — separate `personal_overrides` overlay table over the immutable base dictionary; six learning signals including delete-and-retype amplifying n-gram context; usage-activity-based decay (not time-based); backup via Android's own app-data backup; reset-all and per-word forget controls.
 - [Research Nintype's multi-finger mechanic](tickets/012-nintype-multitouch-research.md) — corrected understanding: it's one word split across simultaneous partial gestures/taps from two hands (e.g. "th" + "ere" → "there"), not two independent concurrent words. Core-engine extension, not a command-gesture binding.
 - [Multi-finger gesture set & customization](tickets/004-multi-finger-gestures.md) — discrete command gestures only (language-switch, dismiss, undo/redo direct; cut/copy/paste/select-all via long-press-space command mode), global customizable bindings. Split off two-handed split-word typing as its own ticket.
+- [Two-handed split-word gesture typing](tickets/013-two-handed-split-word-typing.md) — concurrent partial paths merged by touch-down order and re-scored via existing PathScorer; grace window (~300-400ms) after lift for near-simultaneous typing; taps-as-doubled-letters only while a word gesture is active; single-finger case falls out for free.
 
 ## Not yet specified
 
