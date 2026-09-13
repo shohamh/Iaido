@@ -10,10 +10,10 @@ class SwipeCommitController(
     private val dictionary: List<WordEntry>,
     private val commitText: (String) -> Unit,
 ) {
-    fun commit(path: GesturePath, layout: KeyboardLayout) {
+    fun commit(path: GesturePath, layout: KeyboardLayout, dictionaryOverride: List<WordEntry>? = null) {
         if (path.points.size < 2) return
 
-        val result = recognizer.recognize(path, layout, dictionary).firstOrNull() ?: return
+        val result = recognizer.recognize(path, layout, dictionaryOverride ?: dictionary).firstOrNull() ?: return
         commitText(result.word.word)
     }
 }

@@ -19,14 +19,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ninjakeys.core.gesture.GesturePath
 import com.ninjakeys.core.gesture.GesturePoint
+import com.ninjakeys.core.language.Language
 import com.ninjakeys.core.layout.KeyPosition
 import com.ninjakeys.core.layout.KeyboardLayout
 
@@ -38,16 +39,19 @@ fun KeyboardInputView(
     onTap: (String) -> Unit = {},
     onFlick: (String, FlickDirection) -> Unit = { _, _ -> },
     onPunctuationToSpace: (String) -> Unit = {},
+    language: Language = Language.ENGLISH,
+    onLanguageSwitch: () -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
         val keySizePx = widthPx / 10f
         val keySize = with(density) { keySizePx.toDp() }
-        val layout = remember(widthPx) { keyboardLayoutFor(keySizePx) }
-        var gesturePoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
-        var activePointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
+        val layout = remember(widthPx, language) { keyboardLayoutFor(keySizePx, language) }
+        var points by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
+        var pointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
         var startKey by remember(sessionId) { mutableStateOf<String?>(null) }
+        var multiFingerHandled by remember(sessionId) { mutableStateOf(false) }
 
         Box(
             modifier = Modifier
@@ -56,145 +60,112 @@ fun KeyboardInputView(
                 .pointerInteropFilter { event ->
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
-                            activePointerId = event.getPointerId(0)
-                            gesturePoints = listOf(event.toGesturePoint(0))
-                            startKey = keyAt(event.x, event.y, keySizePx, layout)
+                            pointerId = event.getPointerId(0)
+                            points = listOf(event.toGesturePoint(0))
+                            startKey = keyAt(event.x, event.y, keySizePx, layout, language)
+                            multiFingerHandled = false
                             true
                         }
-
                         MotionEvent.ACTION_MOVE -> {
-                            val index = event.findPointerIndex(activePointerId)
-                            if (index >= 0) {
-                                gesturePoints = gesturePoints + event.toGesturePoint(index)
+                            if (event.pointerCount >= 2 && !multiFingerHandled) {
+                                val dx = event.getX(1) - event.getX(0)
+                                val dy = event.getY(1) - event.getY(0)
+                                if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                    multiFingerHandled = true
+                                    onLanguageSwitch()
+                                }
                             }
+                            val index = event.findPointerIndex(pointerId)
+                            if (index >= 0) points += event.toGesturePoint(index)
                             true
                         }
-
                         MotionEvent.ACTION_UP -> {
-                            val index = event.findPointerIndex(activePointerId)
-                            val completed = if (index >= 0) {
-                                gesturePoints + event.toGesturePoint(index)
-                            } else {
-                                gesturePoints
-                            }
-                            if (completed.size >= 2) {
-                                val key = startKey
-                                val end = completed.last()
+                            val index = event.findPointerIndex(pointerId)
+                            val completed = if (index >= 0) points + event.toGesturePoint(index) else points
+                            if (!multiFingerHandled && startKey != null) {
+                                val end = completed.lastOrNull()
                                 when {
-                                    key in punctuationKeys && end.y >= keySizePx * 3f ->
-                                        onPunctuationToSpace(key!!)
-                                    key != null && end.y < completed.first().y - keySizePx / 2f ->
-                                        onFlick(key, FlickDirection.UP)
+                                    completed.size < 2 -> onTap(startKey!!)
+                                    startKey in punctuationKeys && end != null && end.y >= keySizePx * 3 ->
+                                        onPunctuationToSpace(startKey!!)
+                                    end != null && end.y < completed.first().y - keySizePx / 2 ->
+                                        onFlick(startKey!!, FlickDirection.UP)
                                     else -> onSwipe(GesturePath(completed), layout)
                                 }
-                            } else if (startKey != null) {
-                                onTap(startKey!!)
                             }
-                            gesturePoints = emptyList()
-                            activePointerId = MotionEvent.INVALID_POINTER_ID
+                            points = emptyList()
+                            pointerId = MotionEvent.INVALID_POINTER_ID
                             startKey = null
                             true
                         }
-
                         MotionEvent.ACTION_CANCEL -> {
-                            gesturePoints = emptyList()
-                            activePointerId = MotionEvent.INVALID_POINTER_ID
+                            points = emptyList()
+                            pointerId = MotionEvent.INVALID_POINTER_ID
+                            startKey = null
                             true
                         }
-
                         else -> true
                     }
-                }
+                },
         ) {
-            KeyboardRow("qwertyuiop", 0.dp, keySize)
-            KeyboardRow("asdfghjkl", keySize / 2, keySize)
-            KeyboardRow("zxcvbnm", keySize, keySize)
-            KeyboardBottomRow(keySize)
+            val rows = if (language == Language.ENGLISH) listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+            else listOf("קראטוןםפ", "שדגכעיחלךף", "זסבהנמצתץ")
+            rows.forEachIndexed { index, row -> KeyboardRow(row, keySize * index / 2, keySize * index, keySize) }
+            KeyboardBottomRow(keySize, language)
         }
     }
 }
 
 @Composable
-private fun BoxScope.KeyboardRow(letters: String, offset: Dp, keySize: Dp) {
-    Row(modifier = Modifier.offset(x = offset)) {
+private fun BoxScope.KeyboardRow(letters: String, offset: Dp, y: Dp, keySize: Dp) {
+    Row(modifier = Modifier.offset(x = offset, y = y)) {
         letters.forEach { letter ->
-            Box(
-                modifier = Modifier
-                    .size(keySize)
-                    .border(1.dp, MaterialTheme.colorScheme.outline)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(letter.uppercase())
-                numberFor(letter)?.let { number ->
-                    Text(number, modifier = Modifier.align(Alignment.TopEnd))
-                }
+            Box(Modifier.size(keySize).border(1.dp, MaterialTheme.colorScheme.outline).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                Text(letter.toString().uppercase())
+                numberFor(letter)?.let { Text(it, modifier = Modifier.align(Alignment.TopEnd)) }
             }
         }
     }
 }
 
 @Composable
-private fun BoxScope.KeyboardBottomRow(keySize: Dp) {
+private fun BoxScope.KeyboardBottomRow(keySize: Dp, language: Language) {
+    val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("׳", "״")
     Row(modifier = Modifier.offset(y = keySize * 3)) {
-        listOf("'", "?", ",", ".", "space", "⌫").forEach { label ->
-            Box(
-                modifier = Modifier
-                    .size(if (label == "space") keySize * 4 else keySize)
-                    .border(1.dp, MaterialTheme.colorScheme.outline)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) { Text(label) }
+        (listOf("🌐") + punctuation + listOf("space", "⌫")).forEach { label ->
+            Box(Modifier.size(if (label == "space") keySize * 4 else keySize).border(1.dp, MaterialTheme.colorScheme.outline).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) { Text(label) }
         }
     }
 }
 
-private val punctuationKeys = setOf("'", "?", ",", ".")
+private val punctuationKeys = setOf("'", "?", ",", ".", "׳", "״")
 
-private fun numberFor(letter: Char): String? =
-    "qwertyuiop".indexOf(letter).takeIf { it >= 0 }?.let { index ->
-        if (index == 9) "0" else (index + 1).toString()
-    }
+private fun numberFor(letter: Char): String? = "qwertyuiop".indexOf(letter).takeIf { it >= 0 }?.let { if (it == 9) "0" else (it + 1).toString() }
 
-private fun keyAt(x: Float, y: Float, keySizePx: Float, layout: KeyboardLayout): String? {
-    if (y >= keySizePx * 3f) {
-        val index = (x / keySizePx).toInt()
+private fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, language: Language): String? {
+    if (y >= size * 3) {
+        val index = (x / size).toInt()
+        val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("׳", "״")
         return when {
-            index == 0 -> "'"
-            index == 1 -> "?"
-            index == 2 -> ","
-            index == 3 -> "."
-            index in 4..7 -> " "
-            index == 8 -> "⌫"
+            index == 0 -> "🌐"
+            index in 1..punctuation.size -> punctuation[index - 1]
+            index in (punctuation.size + 1)..(punctuation.size + 4) -> " "
+            index == punctuation.size + 5 -> "⌫"
             else -> null
         }
     }
-    return layout.keys.minByOrNull { key ->
-        val dx = x - key.x * keySizePx / 1f
-        val dy = y - key.y * keySizePx / 1f
-        dx * dx + dy * dy
-    }?.letter?.toString()
+    return layout.keys.minByOrNull { (x - it.x * size) * (x - it.x * size) + (y - it.y * size) * (y - it.y * size) }?.letter?.toString()
 }
 
-private fun keyboardLayoutFor(keySizePx: Float): KeyboardLayout {
-    val keys = buildList {
-        addRow("qwertyuiop", 0f, 0, keySizePx)
-        addRow("asdfghjkl", 0.5f, 1, keySizePx)
-        addRow("zxcvbnm", 1f, 2, keySizePx)
-    }
+private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {
+    val rows = if (language == Language.ENGLISH) listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+    else listOf("קראטוןםפ", "שדגכעיחלךף", "זסבהנמצתץ")
+    val keys = buildList { rows.forEachIndexed { row, letters -> addRow(letters, row * 0.5f, row, size) } }
     return KeyboardLayout(keys)
 }
 
-private fun MutableList<KeyPosition>.addRow(
-    letters: String,
-    xOffset: Float,
-    row: Int,
-    keySizePx: Float,
-) {
-    letters.forEachIndexed { index, letter ->
-        add(KeyPosition(letter, (index + 0.5f + xOffset) * keySizePx, (row + 0.5f) * keySizePx))
-    }
+private fun MutableList<KeyPosition>.addRow(letters: String, offset: Float, row: Int, size: Float) {
+    letters.forEachIndexed { index, letter -> add(KeyPosition(letter, (index + 0.5f + offset) * size, (row + 0.5f) * size)) }
 }
 
-private fun MotionEvent.toGesturePoint(index: Int): GesturePoint =
-    GesturePoint(getX(index), getY(index), eventTime)
+private fun MotionEvent.toGesturePoint(index: Int) = GesturePoint(getX(index), getY(index), eventTime)

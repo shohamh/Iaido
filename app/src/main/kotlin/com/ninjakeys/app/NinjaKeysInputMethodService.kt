@@ -8,14 +8,24 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.ninjakeys.core.recognition.GestureRecognizer
 import com.ninjakeys.core.recognition.ShapePathScorer
 import com.ninjakeys.core.recognition.TrieCandidateGenerator
+import com.ninjakeys.core.language.Language
+import com.ninjakeys.core.language.LanguageSwitcher
 
 class NinjaKeysInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private var sessionId = 0
+    private val languageSwitcher = LanguageSwitcher()
+    private var activeLanguage = Language.ENGLISH
 
     private val dictionaryRepository by lazy {
         EnglishDictionaryRepository {
             assets.open(englishDictionaryAsset).bufferedReader().use { it.readText() }
+        }
+    }
+
+    private val hebrewDictionaryRepository by lazy {
+        EnglishDictionaryRepository {
+            assets.open("dictionary/he.csv").bufferedReader().use { it.readText() }
         }
     }
 
@@ -65,17 +75,29 @@ class NinjaKeysInputMethodService : InputMethodService() {
             MaterialTheme {
                 KeyboardInputView(
                     sessionId = currentSession,
-                    onSwipe = { path, layout -> controller.commit(path, layout) },
+                    onSwipe = { path, layout ->
+                        val dictionary = if (activeLanguage == Language.ENGLISH) dictionaryRepository.words()
+                        else hebrewDictionaryRepository.words()
+                        controller.commit(path, layout, dictionary)
+                    },
                     onTap = { value ->
                         when (value) {
                             "⌫" -> typingController.backspace()
+                            "🌐" -> switchLanguage()
                             else -> typingController.tap(value)
                         }
                     },
                     onFlick = { letter, direction -> typingController.flick(letter, direction) },
                     onPunctuationToSpace = typingController::punctuationToSpace,
+                    language = activeLanguage,
+                    onLanguageSwitch = ::switchLanguage,
                 )
             }
         }
+    }
+
+    private fun switchLanguage() {
+        activeLanguage = languageSwitcher.next()
+        composeInputView?.let(::renderInputView)
     }
 }

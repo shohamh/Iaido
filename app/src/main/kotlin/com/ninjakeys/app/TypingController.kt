@@ -41,7 +41,7 @@ class TypingController(
     }
 
     fun punctuationToSpace(punctuation: String) {
-        if (punctuation in setOf(",", ".", "?", "\"", "'")) {
+        if (punctuation in setOf(",", ".", "?", "\"", "'", "׳", "״")) {
             commitText(punctuation + " ")
         }
     }
