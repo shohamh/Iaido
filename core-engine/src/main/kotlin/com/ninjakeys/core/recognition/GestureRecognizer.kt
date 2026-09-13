@@ -12,13 +12,20 @@ import com.ninjakeys.core.layout.KeyboardLayout
 class GestureRecognizer(
     private val candidateGenerator: CandidateGenerator,
     private val pathScorer: PathScorer,
+    private val contextScorer: NgramContextScorer? = null,
 ) {
     fun recognize(
         path: GesturePath,
         layout: KeyboardLayout,
         dictionary: List<WordEntry>,
+        previousWords: List<String> = emptyList(),
     ): List<ScoredCandidate> {
         val candidates = candidateGenerator.generateCandidates(path, layout, dictionary)
-        return pathScorer.score(path, candidates, layout)
+        val shaped = pathScorer.score(path, candidates, layout)
+        return contextScorer?.let { scorer ->
+            shaped.map { result ->
+                result.copy(score = result.score + scorer.score(previousWords, result.word.word))
+            }.sortedByDescending { it.score }
+        } ?: shaped
     }
 }

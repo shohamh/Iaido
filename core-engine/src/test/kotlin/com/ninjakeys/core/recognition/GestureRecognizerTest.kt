@@ -44,4 +44,21 @@ class GestureRecognizerTest {
 
         assertEquals(0, results.size)
     }
+
+    @Test
+    fun `context evidence can reorder otherwise shape-ranked candidates`() {
+        val recognizer = GestureRecognizer(
+            TrieCandidateGenerator(),
+            ShapePathScorer(),
+            NgramContextScorer(bigrams = mapOf(("to" to "there") to 10.0)),
+        )
+        val results = recognizer.recognize(
+            pathThrough('t', 'h', 'e', 'r', 'e'),
+            layout,
+            listOf(WordEntry("there", 1.0), WordEntry("three", 1.0)),
+            previousWords = listOf("to"),
+        )
+
+        assertEquals("there", results.first().word.word)
+    }
 }
