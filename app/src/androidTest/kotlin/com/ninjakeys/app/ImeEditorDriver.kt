@@ -1,6 +1,7 @@
 package com.ninjakeys.app
 
 import android.view.KeyEvent
+import android.os.SystemClock
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
@@ -23,7 +24,17 @@ class ImeEditorDriver(
         waitForText("")
     }
 
-    fun text(): String = editor().text.orEmpty()
+    fun text(): String {
+        if (length() == 0) return ""
+        return editor().text.orEmpty()
+    }
+
+    private fun length(): Int {
+        val status = markedView("ime_test_status").text.orEmpty()
+        val match = LENGTH_REGEX.find(status)
+            ?: error("Host status did not expose length: '$status'")
+        return match.groupValues[1].toInt()
+    }
 
     fun selection(): IntRange {
         val status = markedView("ime_test_status").contentDescription.orEmpty() + " " +
@@ -54,21 +65,30 @@ class ImeEditorDriver(
     }
 
     fun waitForText(expected: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS) {
-        check(device.wait(Until.hasObject(editorSelector().text(expected)), timeoutMs)) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        do {
+            if (text() == expected) return
+            device.waitForIdle()
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        check(false) {
             "Expected editor text '$expected', observed '${text()}'"
         }
     }
 
     private fun editor(): UiObject2 = markedView("ime_test_editor")
 
-    private fun markedView(id: String): UiObject2 = device.findObject(By.res(resourceId(id)))
-        ?: error("Missing host view $id")
+    private fun markedView(id: String): UiObject2 = device.wait(
+        Until.findObject(By.res(resourceId(id))),
+        ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ) ?: error("Missing host view $id")
 
     private fun editorSelector() = By.res(resourceId("ime_test_editor"))
 
     private fun resourceId(id: String) = "$packageName:id/$id"
 
     private companion object {
+        val LENGTH_REGEX = Regex("length=(\\d+)")
         val SELECTION_REGEX = Regex("selection=(\\d+):(\\d+)")
     }
 }

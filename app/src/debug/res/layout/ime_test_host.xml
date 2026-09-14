@@ -12,18 +12,6 @@
         android:contentDescription="NinjaKeys test host status"
         android:text="length=0 selection=0:0" />
 
-    <EditText
-        android:id="@+id/ime_test_editor"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:contentDescription="NinjaKeys test host editor"
-        android:gravity="top|start"
-        android:hint="IME test text"
-        android:inputType="textCapSentences|textMultiLine"
-        android:minLines="5"
-        android:textIsSelectable="true" />
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -45,4 +33,16 @@
             android:contentDescription="NinjaKeys test move cursor left"
             android:text="Cursor left" />
     </LinearLayout>
+
+    <EditText
+        android:id="@+id/ime_test_editor"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:contentDescription="NinjaKeys test host editor"
+        android:gravity="top|start"
+        android:hint="IME test text"
+        android:inputType="textCapSentences|textMultiLine"
+        android:minLines="5"
+        android:textIsSelectable="true" />
 </LinearLayout>

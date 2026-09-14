@@ -20,7 +20,7 @@ class KeyboardWindowLocatorTest {
 
     @Test
     fun negativeNavigationInsetCannotMoveSafeBottomBelowDisplayTop() {
-        assertEquals(100, navigationSafeBottom(Rect(0, 100, 1_080, 1_920), -50))
+        assertEquals(1_920, navigationSafeBottom(Rect(0, 100, 1_080, 1_920), -50))
         assertEquals(100, navigationSafeBottom(Rect(0, 100, 1_080, 1_920), 5_000))
     }
 

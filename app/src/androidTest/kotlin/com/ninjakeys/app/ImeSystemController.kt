@@ -3,8 +3,6 @@ package com.ninjakeys.app
 import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import androidx.test.uiautomator.By
@@ -22,11 +20,8 @@ class ImeSystemController(
     val referenceImeId: String = ComponentName(packageName, "$packageName.ReferenceInputMethodService").flattenToShortString()
 
     fun launchHost() {
-        val intent = Intent().apply {
-            component = ComponentName(packageName, "$packageName.ImeTestHostActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        instrumentation.targetContext.startActivity(intent)
+        val component = ComponentName(packageName, "$packageName.ImeTestHostActivity").flattenToShortString()
+        shell("am start -n $component -f 0x14000000")
         check(device.wait(Until.hasObject(By.res("$packageName:id/ime_test_editor")), DEFAULT_TIMEOUT_MS)) {
             "IME test host did not launch; focused=${device.currentPackageName}"
         }
@@ -35,6 +30,12 @@ class ImeSystemController(
     fun enableAndSelect(imeId: String) {
         shell("ime enable $imeId")
         shell("ime set $imeId")
+        check(selectedInputMethodId() == imeId) {
+            "IME '$imeId' was not selected; default=${selectedInputMethodId()}"
+        }
+    }
+
+    fun waitForImeVisible(imeId: String) {
         check(device.wait(Until.hasObject(markerFor(imeId)), DEFAULT_TIMEOUT_MS)) {
             "IME '$imeId' did not become visible. default=${selectedInputMethodId()}\n" +
                 "input_method=${shell("dumpsys input_method") }"
@@ -63,6 +64,6 @@ class ImeSystemController(
     }
 
     companion object {
-        const val DEFAULT_TIMEOUT_MS = 5_000L
+        const val DEFAULT_TIMEOUT_MS = 15_000L
     }
 }

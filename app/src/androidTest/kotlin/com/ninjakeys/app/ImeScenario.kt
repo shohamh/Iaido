@@ -353,6 +353,8 @@ class ImeScenario(
 
     fun switchKeyboard(imeId: String) {
         system.enableAndSelect(imeId)
+        editor.focus()
+        system.waitForImeVisible(imeId)
         expectedIme = imeId
         checkpoint("switchKeyboard($imeId)")
     }
@@ -369,10 +371,10 @@ class ImeScenario(
     }
 
     private fun setup() {
-        system.launchHost()
         system.enableAndSelect(system.ninjaKeysImeId)
+        system.launchHost()
         editor.focus()
-        editor.clear()
+        system.waitForImeVisible(system.ninjaKeysImeId)
         expectedText = ""
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH

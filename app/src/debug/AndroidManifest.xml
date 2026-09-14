@@ -4,7 +4,8 @@
         <activity
             android:name=".ImeTestHostActivity"
             android:exported="true"
-            android:label="NinjaKeys IME Test Host" />
+            android:label="NinjaKeys IME Test Host"
+            android:windowSoftInputMode="stateAlwaysVisible|adjustResize" />
         <service
             android:name=".ReferenceInputMethodService"
             android:exported="true"

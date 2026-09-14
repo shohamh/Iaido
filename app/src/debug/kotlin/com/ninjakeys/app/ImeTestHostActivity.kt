@@ -1,11 +1,12 @@
 package com.ninjakeys.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.inputmethod.InputMethodManager
 import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -41,10 +42,20 @@ class ImeTestHostActivity : Activity() {
         super.onResume()
         editor.post {
             editor.requestFocus()
-            val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            manager.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+            editor.postDelayed({
+                val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                manager.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+            }, 500L)
             updateStatus()
         }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        editor.setText("")
+        editor.setSelection(0)
+        editor.requestFocus()
+        updateStatus()
     }
 
     private fun updateStatus() {

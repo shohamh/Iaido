@@ -33,13 +33,13 @@ object KeyboardWindowLocator {
             throw missingMarker("root '$ROOT_DESCRIPTION'", device)
         }
 
-        val root = device.findObject(By.desc(ROOT_DESCRIPTION))
+        val root = device.wait(Until.findObject(By.desc(ROOT_DESCRIPTION)), timeoutMs)
             ?: throw missingMarker("root '$ROOT_DESCRIPTION'", device)
-        val surface = device.findObject(By.desc(SURFACE_DESCRIPTION))
+        val surface = device.wait(Until.findObject(By.desc(SURFACE_DESCRIPTION)), timeoutMs)
             ?: throw missingMarker("surface '$SURFACE_DESCRIPTION'", device)
         val language = waitForLanguage(device, timeoutMs)
         val keyObjects = requiredKeys.associateWith { key ->
-            device.findObject(By.desc(KEY_DESCRIPTION_PREFIX + key))
+            device.wait(Until.findObject(By.desc(KEY_DESCRIPTION_PREFIX + key)), timeoutMs)
                 ?: throw missingMarker("key '$key'", device)
         }
         val displayBounds = Rect(0, 0, device.displayWidth, device.displayHeight)
