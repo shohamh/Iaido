@@ -4,6 +4,10 @@
     <application
         android:label="NinjaKeys"
         android:allowBackup="true">
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="true"
+            android:label="NinjaKeys Settings" />
         <service
             android:name=".NinjaKeysInputMethodService"
             android:exported="true"

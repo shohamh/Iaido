@@ -37,8 +37,10 @@ android {
 dependencies {
     implementation(project(":core-engine"))
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.datastore.preferences)
     annotationProcessor(libs.androidx.room.compiler)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
