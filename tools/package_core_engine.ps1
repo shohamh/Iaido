@@ -20,17 +20,17 @@ $checksumTarget = Join-Path $resolvedOutput "$jarName.sha256"
 $manifestTarget = Join-Path $resolvedOutput "core-engine-manifest.json"
 
 $versionLine = Get-Content -LiteralPath (Join-Path $repoRoot "gradle.properties") |
-    Where-Object { $_ -match "^ninjaKeysVersion=" } |
+    Where-Object { $_ -match "^iaidoVersion=" } |
     Select-Object -First 1
 if ($null -eq $versionLine) {
-    throw "gradle.properties must define ninjaKeysVersion"
+    throw "gradle.properties must define iaidoVersion"
 }
 $version = ($versionLine -split "=", 2)[1].Trim()
 if ([string]::IsNullOrWhiteSpace($version)) {
-    throw "ninjaKeysVersion must not be empty"
+    throw "iaidoVersion must not be empty"
 }
 if ($version -notmatch "^\d+\.\d+\.\d+$") {
-    throw "ninjaKeysVersion must use MAJOR.MINOR.PATCH format"
+    throw "iaidoVersion must use MAJOR.MINOR.PATCH format"
 }
 
 Push-Location $repoRoot

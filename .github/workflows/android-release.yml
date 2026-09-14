@@ -30,18 +30,23 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
       - name: Validate release version
-        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^ninjaKeysVersion=//p' gradle.properties)"
+        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^iaidoVersion=//p' gradle.properties)"
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ninjakeys-release.jks"
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/iaido-release.jks"
       - name: Build signed release APK
         env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/ninjakeys-release.jks
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/iaido-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew :app:assembleRelease --no-daemon --console=plain
+      - name: Verify release APK identity and signature
+        run: |
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "package: name='com.iaido.app'"
+          "$BUILD_TOOLS/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

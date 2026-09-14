@@ -18,5 +18,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NinjaKeys"
+rootProject.name = "Iaido"
 include(":core-engine", ":app")

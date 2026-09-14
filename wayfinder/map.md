@@ -2,11 +2,11 @@
 type: wayfinder:map
 ---
 
-# NinjaKeys — map
+# Iaido — map
 
 ## Destination
 
-A full product + technical spec for NinjaKeys, an Android gesture-typing keyboard combining Swype's trace-to-word matching and directional flick punctuation with Nintype's multi-finger gestures — detailed enough that a future agent session, with no memory of this conversation, can implement it without re-deriving decisions.
+A full product + technical spec for Iaido, an Android gesture-typing keyboard combining Swype's trace-to-word matching and directional flick punctuation with Nintype's multi-finger gestures — detailed enough that a future agent session, with no memory of this conversation, can implement it without re-deriving decisions.
 
 ## Notes
 
@@ -35,12 +35,12 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 - [Research Nintype's multi-finger mechanic](tickets/012-nintype-multitouch-research.md) — corrected understanding: it's one word split across simultaneous partial gestures/taps from two hands (e.g. "th" + "ere" → "there"), not two independent concurrent words. Core-engine extension, not a command-gesture binding.
 - [Multi-finger gesture set & customization](tickets/004-multi-finger-gestures.md) — discrete command gestures only (language-switch, dismiss, undo/redo direct; cut/copy/paste/select-all via long-press-space command mode), global customizable bindings. Split off two-handed split-word typing as its own ticket.
 - [Two-handed split-word gesture typing](tickets/013-two-handed-split-word-typing.md) — concurrent partial paths merged by touch-down order and re-scored via existing PathScorer; grace window (~300-400ms) after lift for near-simultaneous typing; taps-as-doubled-letters only while a word gesture is active; single-finger case falls out for free.
-- [Design NinjaKeys' flick-punctuation mapping](tickets/006-flick-punctuation-design.md) — swipe-up on letter keys = number (corner-labeled); swipe-to-spacebar on comma/period/question-mark/quotes (English) and geresh/gershayim (Hebrew) = character + trailing space; no full 4-direction-per-key scheme.
+- [Design Iaido' flick-punctuation mapping](tickets/006-flick-punctuation-design.md) — swipe-up on letter keys = number (corner-labeled); swipe-to-spacebar on comma/period/question-mark/quotes (English) and geresh/gershayim (Hebrew) = character + trailing space; no full 4-direction-per-key scheme.
 - [Flow correction & text-correction gestures](tickets/011-flow-correction-and-undo-gestures.md) — corrections happen via a word-chip strip in the IME's own suggestion bar (not on host-app text, which IMEs can't touch), slot-machine-style scroll-to-pick alternates, cursor-position-synced history for the current input session only, bounded cascading correction (default depth 2, tunable). Renders RTL in Hebrew mode (addendum from the layouts ticket).
 - [Keyboard layouts & switching UX](tickets/009-keyboard-layouts.md) — no new punctuation row (swipe-to-space uses each character's existing standard slot); Hebrew apostrophe-slot becomes geresh/gershayim; globe-key + 2-finger-swipe for language switch; no permanent number row, `?123` layout for the rest; keyboard layout doesn't mirror for Hebrew RTL, only text does.
 - [Theming baseline](tickets/010-theming-baseline.md) — validated via prototype (branch `prototype/theming-baseline`): warm-neutral palette with teal accent, Manrope + JetBrains Mono, flat low-elevation Swype-era keys. Suggestion strip mirrors the actual sentence tail with a slot-machine reel per word (drag-to-scroll, release-to-commit, resumes at last pick, RTL in Hebrew). Confirms correction lives in the strip, not on host-app text.
 - [Standard IME conveniences beyond swipe-typing](tickets/014-standard-ime-conveniences.md) — tap-typing reuses the same scoring pipeline as swipe-typing; standard autocapitalization; double-space-for-period coexists with swipe-to-space; long-press accents for English (none needed for Hebrew); seamless tap/swipe mixing within one word.
-- [Settings app UX beyond gesture customization](tickets/015-settings-app-ux.md) — five sections (Setup/Gestures/Typing/Dictionary & Learning/Help) grouped by user intent; only explicitly-called-out tunables (cascading depth, grace window) get UI, raw scoring weights stay internal; guided Android keyboard-enable/switch flow; every settings screen keeps a live preview textbox with NinjaKeys active beneath it.
+- [Settings app UX beyond gesture customization](tickets/015-settings-app-ux.md) — five sections (Setup/Gestures/Typing/Dictionary & Learning/Help) grouped by user intent; only explicitly-called-out tunables (cascading depth, grace window) get UI, raw scoring weights stay internal; guided Android keyboard-enable/switch flow; every settings screen keeps a live preview textbox with Iaido active beneath it.
 - [Automated testing strategy](tickets/016-testing-strategy.md) — JUnit unit tests for `core-engine` (no device needed) using shared path-point fixtures also converted to `MotionEvent`s for Espresso/UiAutomator instrumented tests on `app`; both emulator and physical Galaxy S25 are just ADB targets of `connectedAndroidTest`; GitHub Actions runs unit+emulator tests on every push, physical-device testing stays a manual local step.
 - [Fast-iteration distribution to physical phone](tickets/017-dev-distribution-hot-reload.md) — `core-engine` ships as a separately-loadable `.jar`/`.dex` via `DexClassLoader` for genuinely silent hot-updates (checked via GitHub Releases); `app`-module changes need a full APK install with one required tap (Android platform constraint, no rooting); Compose Live Edit/Apply Changes for active-session hot reload; wireless ADB throughout. Explicitly incompatible with future Play distribution — accepted as a deferred tradeoff.
 - [Accessibility considerations](tickets/018-accessibility.md) — dedicated accessibility work deferred (like release packaging) in favor of standard Compose semantics; 48dp minimum touch targets regardless (benefits everyone); basic WCAG contrast check on the locked theming palette; tap-typing already serves as the de facto non-gesture fallback.
@@ -48,7 +48,7 @@ A full product + technical spec for NinjaKeys, an Android gesture-typing keyboar
 
 ## Not yet specified
 
-(none — every decision needed to implement NinjaKeys v1 is resolved)
+(none — every decision needed to implement Iaido v1 is resolved)
 
 ## Out of scope
 

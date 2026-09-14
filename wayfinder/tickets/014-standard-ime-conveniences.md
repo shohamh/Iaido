@@ -9,7 +9,7 @@ blocked_by: []
 
 ## Question
 
-Decide which conventional keyboard conveniences NinjaKeys supports alongside gesture typing: autocorrect/autocapitalize behavior for tap-typed text (not swiped), long-press secondary characters on keys not already covered by the swipe-up-number/swipe-to-space schemes, and any other standard behaviors (double-space-for-period, auto-capitalize after sentence-ending punctuation, etc.) expected of a modern Android keyboard.
+Decide which conventional keyboard conveniences Iaido supports alongside gesture typing: autocorrect/autocapitalize behavior for tap-typed text (not swiped), long-press secondary characters on keys not already covered by the swipe-up-number/swipe-to-space schemes, and any other standard behaviors (double-space-for-period, auto-capitalize after sentence-ending punctuation, etc.) expected of a modern Android keyboard.
 
 ## Resolution
 

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("ninjakeys-package-test-" + [Guid]::NewGuid().ToString("N"))
+$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("iaido-package-test-" + [Guid]::NewGuid().ToString("N"))
 $firstOutput = Join-Path $temporaryRoot "first"
 $secondOutput = Join-Path $temporaryRoot "second"
 $packageScript = Join-Path $repoRoot "tools\package_core_engine.ps1"

@@ -1,6 +1,6 @@
 # Pinned bilingual wordfreq source
 
-NinjaKeys bundles the letter-only CSV assets generated from the tagged
+Iaido bundles the letter-only CSV assets generated from the tagged
 `rspeer/wordfreq` v3.0.2 `small_en` and `small_he` cBpack files. The source
 files are kept here so dictionary generation is reproducible offline:
 

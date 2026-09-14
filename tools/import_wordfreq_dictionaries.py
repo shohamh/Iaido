@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert pinned wordfreq cBpack files into NinjaKeys CSV assets."""
+"""Convert pinned wordfreq cBpack files into Iaido CSV assets."""
 
 from __future__ import annotations
 

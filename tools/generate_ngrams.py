@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build compact bilingual bigram/trigram assets for NinjaKeys."""
+"""Build compact bilingual bigram/trigram assets for Iaido."""
 
 from __future__ import annotations
 
@@ -282,7 +282,7 @@ def build_binary(db_path: Path, output: Path, language: str, word_count: int, mi
     connection = sqlite3.connect(db_path)
     maximum = max(max_selected_count(connection, 2, minimum, top_k), max_selected_count(connection, 3, minimum, top_k))
     max_log_count = math.log1p(maximum)
-    with tempfile.TemporaryDirectory(prefix="ninjakeys-edges-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="iaido-edges-") as temporary:
         temporary_path = Path(temporary)
         bg_edges = temporary_path / "bigram.edges"
         bg_index = temporary_path / "bigram.index"
@@ -339,7 +339,7 @@ def build_language(
     context_allowed = set(dictionary_words[:context_vocabulary_limit]) & allowed
     if not allowed:
         raise ValueError(f"No dictionary words survived {language} vocabulary filtering")
-    with tempfile.TemporaryDirectory(prefix=f"ninjakeys-{language}-") as temporary:
+    with tempfile.TemporaryDirectory(prefix=f"iaido-{language}-") as temporary:
         db_path = Path(temporary) / "ngrams.sqlite3"
         counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path, context_allowed)
         counts["context_vocabulary"] = len(context_allowed)
@@ -369,7 +369,7 @@ def main() -> None:
             args.vocabulary_limit < 1 or args.context_vocabulary_limit < 1):
         raise SystemExit("count and vocabulary limits must be positive; --top-k must be in 1..65535")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ninjakeys-sources-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="iaido-sources-") as temporary:
         temporary_path = Path(temporary)
         paths = {}
         source_manifest = {}

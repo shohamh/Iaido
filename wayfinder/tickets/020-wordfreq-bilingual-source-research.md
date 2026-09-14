@@ -10,7 +10,7 @@ blocked_by: []
 ## Question
 
 Choose a stable, high-quality English and Hebrew word-list source for
-NinjaKeys' offline Android IME context model. Verify the real download URLs,
+Iaido' offline Android IME context model. Verify the real download URLs,
 approximate artifact sizes, the available coverage, and whether the source's
 normalization rules fit the keyboard's English and Hebrew layouts.
 
@@ -42,9 +42,9 @@ text file.
 The two `small` artifacts together are about 377 KiB compressed and 896 KiB
 uncompressed. The two `large` artifacts together are about 4.18 MiB
 compressed and 9.92 MiB uncompressed. These measurements are source-artifact
-sizes, before conversion to NinjaKeys' compact runtime dictionary/trie format.
+sizes, before conversion to Iaido' compact runtime dictionary/trie format.
 
-### Recommendation for NinjaKeys
+### Recommendation for Iaido
 
 Start with the two `small` lists as the default bundled vocabulary. Upstream
 defines `small` as words appearing at least once per million words and `large`
@@ -79,7 +79,7 @@ NFKC for Hebrew, while enabling mark removal for Hebrew. The corresponding
 normalizes Unicode, removes Unicode combining marks for abjad scripts, and
 case-folds before token lookup.
 
-For NinjaKeys this means:
+For Iaido this means:
 
 - English lookup/assets: Unicode NFC, then case-fold; retain only the layout's
   supported alphabetic tokens for the current dictionary asset.

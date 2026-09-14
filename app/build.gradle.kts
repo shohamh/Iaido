@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.ninjakeys.app"
+    namespace = "com.iaido.app"
     compileSdk = 36
 
     val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
@@ -21,7 +21,7 @@ android {
     ).all { !it.isNullOrBlank() }
 
     signingConfigs {
-        create("ninjaKeysRelease") {
+        create("iaidoRelease") {
             if (releaseSigningConfigured) {
                 storeFile = file(releaseKeystorePath!!)
                 storePassword = releaseKeystorePassword
@@ -32,18 +32,18 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.ninjakeys.app"
+        applicationId = "com.iaido.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = providers.gradleProperty("ninjaKeysVersionCode").getOrElse("1").toInt()
-        versionName = providers.gradleProperty("ninjaKeysVersion").getOrElse("0.1.3")
+        versionCode = providers.gradleProperty("iaidoVersionCode").getOrElse("1").toInt()
+        versionName = providers.gradleProperty("iaidoVersion").getOrElse("0.1.3")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         getByName("release") {
             if (releaseSigningConfigured) {
-                signingConfig = signingConfigs.getByName("ninjaKeysRelease")
+                signingConfig = signingConfigs.getByName("iaidoRelease")
             }
         }
     }

@@ -10,7 +10,7 @@
         android:id="@+id/ime_test_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:contentDescription="NinjaKeys test host status"
+        android:contentDescription="Iaido test host status"
         android:text="length=0 selection=0:0" />
 
     <LinearLayout
@@ -23,7 +23,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:contentDescription="NinjaKeys test clear"
+            android:contentDescription="Iaido test clear"
             android:text="Clear" />
 
         <Button
@@ -31,7 +31,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:contentDescription="NinjaKeys test move cursor left"
+            android:contentDescription="Iaido test move cursor left"
             android:text="Cursor left" />
     </LinearLayout>
 
@@ -40,7 +40,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:contentDescription="NinjaKeys test host editor"
+        android:contentDescription="Iaido test host editor"
         android:gravity="top|start"
         android:hint="IME test text"
         android:inputType="textCapSentences|textMultiLine"

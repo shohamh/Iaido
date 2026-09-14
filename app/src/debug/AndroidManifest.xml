@@ -4,13 +4,13 @@
         <activity
             android:name=".ImeTestHostActivity"
             android:exported="true"
-            android:label="NinjaKeys IME Test Host"
+            android:label="Iaido IME Test Host"
             android:theme="@style/ImeTestHostTheme"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize" />
         <service
             android:name=".ReferenceInputMethodService"
             android:exported="true"
-            android:label="NinjaKeys Reference Keyboard"
+            android:label="Iaido Reference Keyboard"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
                 <action android:name="android.view.InputMethod" />

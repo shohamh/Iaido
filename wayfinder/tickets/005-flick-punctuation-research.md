@@ -9,7 +9,7 @@ blocked_by: []
 
 ## Question
 
-Document how Swype's per-key directional flicks for punctuation/alternate characters actually worked (which directions mapped to which characters, on which keys) as a factual reference for designing NinjaKeys' own mapping.
+Document how Swype's per-key directional flicks for punctuation/alternate characters actually worked (which directions mapped to which characters, on which keys) as a factual reference for designing Iaido' own mapping.
 
 ## Resolution
 
@@ -24,4 +24,4 @@ Per Swype's own patent filing ("Key swipe gestures for touch sensitive UI virtua
 - Net effect for a swipe-typing keyboard: numbers and common symbols became reachable via directional flicks directly on the letter keys, without switching to a separate symbols layout for common cases — this is the specific behavior the user called out wanting replicated.
 - Nuance discontinued Swype in February 2018, so no living reference implementation exists to test against directly; this reconstruction is from patent text and period reviews/tutorials, not firsthand testing.
 
-This gives enough of a factual base for the [Design NinjaKeys' flick-punctuation mapping](006-flick-punctuation-design.md) ticket to decide the concrete per-key/per-direction mapping for both English and Hebrew layouts.
+This gives enough of a factual base for the [Design Iaido' flick-punctuation mapping](006-flick-punctuation-design.md) ticket to decide the concrete per-key/per-direction mapping for both English and Hebrew layouts.

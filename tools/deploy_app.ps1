@@ -38,10 +38,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "ADB install failed for device $DeviceSerial"
     }
-    Write-Output "Installed NinjaKeys debug APK on $DeviceSerial"
+    Write-Output "Installed Iaido debug APK on $DeviceSerial"
 
     if ($Logcat) {
-        & adb -s $DeviceSerial logcat -v time "NinjaKeys:*" "*:S"
+        & adb -s $DeviceSerial logcat -v time "Iaido:*" "*:S"
     }
 }
 finally {

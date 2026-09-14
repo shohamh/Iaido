@@ -1,6 +1,6 @@
 ---
 id: 6
-title: Design NinjaKeys' flick-punctuation mapping
+title: Design Iaido' flick-punctuation mapping
 type: grilling
 status: closed
 assignee: agent
@@ -9,11 +9,11 @@ blocked_by: [5]
 
 ## Question
 
-Using the researched Swype reference mapping, decide NinjaKeys' own per-key directional flick mapping for punctuation/alternate characters, for both the English and Hebrew layouts.
+Using the researched Swype reference mapping, decide Iaido' own per-key directional flick mapping for punctuation/alternate characters, for both the English and Hebrew layouts.
 
 ## Resolution
 
-NinjaKeys uses two independent, coexisting mechanics rather than Swype's original generic 4-direction-per-key scheme:
+Iaido uses two independent, coexisting mechanics rather than Swype's original generic 4-direction-per-key scheme:
 
 **1. Swipe-up for numbers** (modern convention, not Swype's original scheme): swipe up on any letter key inserts that key's number (the one shown in its small corner label) — matches contemporary keyboard muscle memory (Gboard etc.) more than Swype's own up=shift/down/left/right layout, since the goal is the *feel* of fast access, not literal parity with the original scheme.
 
@@ -25,4 +25,4 @@ Other punctuation (colon, semicolon, exclamation mark, etc.) is not flick-access
 
 **Visual hinting**: letter keys show a small corner label for their number (swipe-up target), matching modern convention and costing nothing in unfamiliarity. The swipe-to-space keys stay visually clean/unlabeled (no icon clutter for "this key can swipe to space") — discoverability is handled via a one-time help screen rather than on-key hints.
 
-**Interaction with per-key directional flicks generally**: NinjaKeys does not implement Swype's full 4-direction-per-key scheme (up/down/left/right all bound to different characters on every key) — only swipe-up (numbers, all letter keys) and swipe-to-spacebar (the specific punctuation keys above) are used, keeping the gesture vocabulary small and consistent with the multi-finger command gestures already designed.
+**Interaction with per-key directional flicks generally**: Iaido does not implement Swype's full 4-direction-per-key scheme (up/down/left/right all bound to different characters on every key) — only swipe-up (numbers, all letter keys) and swipe-to-spacebar (the specific punctuation keys above) are used, keeping the gesture vocabulary small and consistent with the multi-finger command gestures already designed.

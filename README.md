@@ -1,4 +1,4 @@
-# NinjaKeys
+# Iaido
 
 An Android keyboard combining the best of Swype and Nintype gesture-typing, reimagined for modern Android.
 
@@ -33,6 +33,6 @@ release workflow expects these repository secrets:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-For each release, update both `ninjaKeysVersion` and the strictly increasing
-`ninjaKeysVersionCode` in `gradle.properties`, then push the matching `v<version>`
+For each release, update both `iaidoVersion` and the strictly increasing
+`iaidoVersionCode` in `gradle.properties`, then push the matching `v<version>`
 tag. The workflow publishes the resulting signed APK as `app-release.apk`.

@@ -76,9 +76,9 @@ try {
     & adb -s $DeviceSerial install -r $testApk
     if ($LASTEXITCODE -ne 0) { throw "Installing the instrumentation APK failed" }
 
-    $ninjaIme = "com.ninjakeys.app/.NinjaKeysInputMethodService"
-    & adb -s $DeviceSerial shell ime enable $ninjaIme | Out-Host
-    & adb -s $DeviceSerial shell ime set $ninjaIme | Out-Host
+    $iaidoIme = "com.iaido.app/.IaidoInputMethodService"
+    & adb -s $DeviceSerial shell ime enable $iaidoIme | Out-Host
+    & adb -s $DeviceSerial shell ime set $iaidoIme | Out-Host
 
     $testArguments = @()
     if ($Class) {

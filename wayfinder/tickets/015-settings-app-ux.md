@@ -9,7 +9,7 @@ blocked_by: []
 
 ## Question
 
-Design the overall settings app structure (screens/sections) that organizes every configurable behavior already decided across the map's tickets — gesture bindings, tunable constants (cascading depth, grace window, etc.), personal-dictionary reset/forget, language management, and enabling NinjaKeys as the system IME — into a coherent settings UX, plus decide what (if anything) still needs a general "about/help" screen.
+Design the overall settings app structure (screens/sections) that organizes every configurable behavior already decided across the map's tickets — gesture bindings, tunable constants (cascading depth, grace window, etc.), personal-dictionary reset/forget, language management, and enabling Iaido as the system IME — into a coherent settings UX, plus decide what (if anything) still needs a general "about/help" screen.
 
 ## Resolution
 
@@ -24,4 +24,4 @@ Language management (English/Hebrew) isn't a separate section — v1 has no per-
 
 **Tunable depth**: only constants explicitly called out as user-tunable during design (cascading depth, grace window) get real UI controls. Raw internal scoring weights (λ's, corner-bonus weight, proximity thresholds, margin thresholds) stay as internal `core-engine` constants, not exposed anywhere in Settings — they're developer-tuning knobs, not user preferences, and exposing them would turn Settings into an incomprehensible science-fair project.
 
-**Live preview**: every settings screen keeps a persistent textbox with NinjaKeys itself active beneath it, so any change (a rebound gesture, an adjusted tunable) can be tried immediately without leaving Settings.
+**Live preview**: every settings screen keeps a persistent textbox with Iaido itself active beneath it, so any change (a rebound gesture, an adjusted tunable) can be tried immediately without leaving Settings.

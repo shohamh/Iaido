@@ -9,7 +9,7 @@ blocked_by: []
 
 ## Question
 
-Decide what release packaging NinjaKeys needs: app icon/branding, whether and how to prepare for eventual publishing (Play Store / F-Droid / open source), and how this interacts with the already-decided dev-distribution approach (dynamic `core-engine` loading, which is incompatible with Play distribution).
+Decide what release packaging Iaido needs: app icon/branding, whether and how to prepare for eventual publishing (Play Store / F-Droid / open source), and how this interacts with the already-decided dev-distribution approach (dynamic `core-engine` loading, which is incompatible with Play distribution).
 
 ## Resolution
 

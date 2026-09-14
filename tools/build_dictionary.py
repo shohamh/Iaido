@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a wordfreq JSON export into NinjaKeys' compact CSV asset."""
+"""Convert a wordfreq JSON export into Iaido' compact CSV asset."""
 
 import csv
 import json

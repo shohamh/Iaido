@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "adb did not reach device $DeviceSerial"
 }
 
-$remotePath = "/sdcard/Android/data/com.ninjakeys.app/files/ime-e2e"
+$remotePath = "/sdcard/Android/data/com.iaido.app/files/ime-e2e"
 & adb -s $DeviceSerial pull $remotePath $destinationPath
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "No IME artifact directory was available at $remotePath"

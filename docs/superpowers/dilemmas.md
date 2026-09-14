@@ -19,7 +19,7 @@ left here as false blockers.
   fallback to the current engine on update failure. The private signing key is
   local at `secrets/core-engine-update-ed25519-private.pem` and ignored by Git.
 - Manual-edit learning: monitor extracted text only for non-password text
-  fields, suppress expected NinjaKeys edits, show external changes as a
+  fields, suppress expected Iaido edits, show external changes as a
   confirmation candidate, and record `MANUAL_EDIT` only after confirmation.
 
 ## Resolved on 2026-09-14 (continued)
