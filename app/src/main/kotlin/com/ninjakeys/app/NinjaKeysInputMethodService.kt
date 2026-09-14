@@ -10,12 +10,19 @@ import com.ninjakeys.core.recognition.ShapePathScorer
 import com.ninjakeys.core.recognition.TrieCandidateGenerator
 import com.ninjakeys.core.language.Language
 import com.ninjakeys.core.language.LanguageSwitcher
+import com.ninjakeys.core.commands.CommandBindingSet
+import com.ninjakeys.core.commands.CommandGestureDispatcher
+import com.ninjakeys.core.commands.CommandModeController
+import com.ninjakeys.core.commands.GestureAction
+import com.ninjakeys.core.commands.GestureTrigger
 
 class NinjaKeysInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private var sessionId = 0
     private val languageSwitcher = LanguageSwitcher()
     private var activeLanguage = Language.ENGLISH
+    private val commandMode = CommandModeController(::executeCommand)
+    private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
 
     private val dictionaryRepository by lazy {
         EnglishDictionaryRepository {
@@ -91,6 +98,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
                     onPunctuationToSpace = typingController::punctuationToSpace,
                     language = activeLanguage,
                     onLanguageSwitch = ::switchLanguage,
+                    onCommand = ::handleCommand,
                 )
             }
         }
@@ -99,5 +107,43 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private fun switchLanguage() {
         activeLanguage = languageSwitcher.next()
         composeInputView?.let(::renderInputView)
+    }
+
+    private fun handleCommand(trigger: GestureTrigger) {
+        if (commandMode.isActive) {
+            val commandTrigger = when (trigger) {
+                GestureTrigger.LEFT -> GestureTrigger.COMMAND_COPY
+                GestureTrigger.RIGHT -> GestureTrigger.COMMAND_PASTE
+                GestureTrigger.DOWN -> GestureTrigger.COMMAND_SELECT_ALL
+                else -> GestureTrigger.NONE
+            }
+            if (commandTrigger != GestureTrigger.NONE) commandMode.handle(commandTrigger)
+            return
+        }
+        if (trigger == GestureTrigger.LONG_PRESS_SPACE) {
+            commandMode.handle(trigger)
+            return
+        }
+        val binding = mapOf(
+            GestureTrigger.HORIZONTAL to "two-finger-horizontal",
+            GestureTrigger.DOWN to "two-finger-down",
+            GestureTrigger.LEFT to "two-finger-left",
+            GestureTrigger.RIGHT to "two-finger-right",
+        )[trigger] ?: return
+        commandDispatcher.dispatch(binding)
+    }
+
+    private fun executeCommand(action: GestureAction) {
+        when (action) {
+            GestureAction.SWITCH_LANGUAGE -> switchLanguage()
+            GestureAction.DISMISS -> requestHideSelf(0)
+            GestureAction.UNDO -> currentInputConnection?.performContextMenuAction(android.R.id.undo)
+            GestureAction.REDO -> currentInputConnection?.performContextMenuAction(android.R.id.redo)
+            GestureAction.CUT -> currentInputConnection?.performContextMenuAction(android.R.id.cut)
+            GestureAction.COPY -> currentInputConnection?.performContextMenuAction(android.R.id.copy)
+            GestureAction.PASTE -> currentInputConnection?.performContextMenuAction(android.R.id.paste)
+            GestureAction.SELECT_ALL -> currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
+            GestureAction.ENTER_COMMAND_MODE -> Unit
+        }
     }
 }

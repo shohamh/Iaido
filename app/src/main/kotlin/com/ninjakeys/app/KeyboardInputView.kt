@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import com.ninjakeys.core.gesture.GesturePath
 import com.ninjakeys.core.gesture.GesturePoint
 import com.ninjakeys.core.language.Language
+import com.ninjakeys.core.commands.GestureTrigger
+import com.ninjakeys.core.commands.MultiFingerGestureDetector
 import com.ninjakeys.core.layout.KeyPosition
 import com.ninjakeys.core.layout.KeyboardLayout
 
@@ -41,17 +43,22 @@ fun KeyboardInputView(
     onPunctuationToSpace: (String) -> Unit = {},
     language: Language = Language.ENGLISH,
     onLanguageSwitch: () -> Unit = {},
+    onCommand: (GestureTrigger) -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
-        val keySizePx = widthPx / 10f
+        val keySizePx = widthPx / if (language == Language.HEBREW) 11f else 10f
         val keySize = with(density) { keySizePx.toDp() }
         val layout = remember(widthPx, language) { keyboardLayoutFor(keySizePx, language) }
         var points by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var pointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
         var startKey by remember(sessionId) { mutableStateOf<String?>(null) }
         var multiFingerHandled by remember(sessionId) { mutableStateOf(false) }
+        var multiStartX by remember(sessionId) { mutableStateOf(0f) }
+        var multiStartY by remember(sessionId) { mutableStateOf(0f) }
+        var startTime by remember(sessionId) { mutableStateOf(0L) }
+        val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
 
         Box(
             modifier = Modifier
@@ -64,15 +71,22 @@ fun KeyboardInputView(
                             points = listOf(event.toGesturePoint(0))
                             startKey = keyAt(event.x, event.y, keySizePx, layout, language)
                             multiFingerHandled = false
+                            startTime = event.eventTime
+                            true
+                        }
+                        MotionEvent.ACTION_POINTER_DOWN -> {
+                            multiStartX = (0 until event.pointerCount).map { event.getX(it) }.average().toFloat()
+                            multiStartY = (0 until event.pointerCount).map { event.getY(it) }.average().toFloat()
                             true
                         }
                         MotionEvent.ACTION_MOVE -> {
                             if (event.pointerCount >= 2 && !multiFingerHandled) {
-                                val dx = event.getX(1) - event.getX(0)
-                                val dy = event.getY(1) - event.getY(0)
-                                if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                val x = (0 until event.pointerCount).map { event.getX(it) }.average().toFloat()
+                                val y = (0 until event.pointerCount).map { event.getY(it) }.average().toFloat()
+                                val trigger = multiFingerDetector.detect(multiStartX, multiStartY, x, y, event.pointerCount)
+                                if (trigger != GestureTrigger.NONE) {
                                     multiFingerHandled = true
-                                    onLanguageSwitch()
+                                    onCommand(trigger)
                                 }
                             }
                             val index = event.findPointerIndex(pointerId)
@@ -82,7 +96,11 @@ fun KeyboardInputView(
                         MotionEvent.ACTION_UP -> {
                             val index = event.findPointerIndex(pointerId)
                             val completed = if (index >= 0) points + event.toGesturePoint(index) else points
-                            if (!multiFingerHandled && startKey != null) {
+                            if (multiFingerHandled) {
+                                // The command was already emitted once when its threshold was crossed.
+                            } else if (startKey == " " && event.eventTime - startTime >= 500L) {
+                                onCommand(GestureTrigger.LONG_PRESS_SPACE)
+                            } else if (startKey != null) {
                                 val end = completed.lastOrNull()
                                 when {
                                     completed.size < 2 -> onTap(startKey!!)
