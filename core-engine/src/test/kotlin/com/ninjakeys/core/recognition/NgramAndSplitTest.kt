@@ -15,6 +15,17 @@ class NgramAndSplitTest {
     }
 
     @Test
+    fun `context window can be limited to one preceding word`() {
+        val scorer = NgramContextScorer(
+            windowSize = 1,
+            bigrams = mapOf(("to" to "there") to 2.0),
+            trigrams = mapOf(Triple("go", "to", "there") to 3.0),
+        )
+
+        assertEquals(2.0, scorer.score(listOf("go", "to"), "there"))
+    }
+
+    @Test
     fun `split candidates concatenate in touch down order within grace window`() {
         val merger = SplitWordMerger()
         val result = merger.merge(listOf("th"), listOf("ere"), listOf(WordEntry("there", 1.0)), 100, 350)
