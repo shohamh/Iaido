@@ -2,46 +2,53 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the three-word Stage 2 dictionary with a reproducibly generated, bundled English frequency asset loaded through a testable repository and used by the recognizer.
+**Goal:** Replace the Stage 2 fixture with a reproducible, verified English frequency pipeline and a production dictionary boundary used by recognition.
 
-**Architecture:** A small build-tool script converts the CC BY-SA wordfreq JSON export into normalized CSV. The Android app bundles the generated asset and loads it lazily through a pure Kotlin repository boundary, while the existing recognizer continues to receive `List<WordEntry>` and uses the real frequencies. No network access occurs at runtime.
+**Architecture:** A pinned upstream wordfreq export is checked into `tools/data` with attribution. A tested converter produces a normalized CSV asset containing only words the letter-only engine can represent. The app loads that asset through a cached repository; the recognizer receives a validated immutable snapshot, so runtime has no network or Python dependency.
 
-**Tech Stack:** Kotlin/JVM, Android resources, Python build tooling, JUnit 5.
+**Tech Stack:** Python 3 standard library, Kotlin/JVM, Android assets, JUnit 5, Gradle 9.7.1.
 
 **Spec:** `wayfinder/tickets/002-dictionary-research.md` and Stage 3 in `docs/superpowers/plans/2026-09-13-ninjakeys-roadmap.md`.
 
 ## Global Constraints
 
-- Keep `core-engine` pure Kotlin with zero Android dependencies.
-- Keep the generated English asset at 24,000+ alphabetic entries and preserve frequency ordering.
-- Do not add raw source data or build caches to git.
-- Add a genuine 3+ letter cornered-path scorer regression before trusting the corner bonus.
+- `core-engine` remains pure Kotlin with zero Android dependencies.
+- The runtime dictionary is on-device and immutable; no network access is allowed.
+- The source snapshot, source URL, license, and generated row-count/checksum are documented.
+- The generated asset contains at least 24,000 unique lowercase alphabetic words in descending frequency order.
+- The scorer has a genuine multi-letter corner regression.
 
 ---
 
-### Task 1: Dictionary asset conversion and metadata
+### Task 1: Pin and verify source data
 
-**Files:** Create `tools/build_dictionary.py`, `app/src/main/assets/dictionary/en.csv`, `app/src/main/assets/dictionary/README.md`; modify `.gitignore` only if needed.
+**Files:** Create `tools/data/wordfreq-en-25000-log.json`, `tools/data/README.md`.
 
-- [ ] Write converter tests or executable validation for JSON-to-CSV normalization.
-- [ ] Download/convert the pinned wordfreq export into UTF-8 `word,frequency` rows, filtering alphabetic lowercase words and converting log-frequency with `exp`.
-- [ ] Validate count, ordering, duplicate absence, and representative words; record source/license/commit in asset metadata.
-- [ ] Commit the generated asset and converter.
+- [ ] Check in the exact upstream export used to generate the asset.
+- [ ] Record upstream URL, license, retrieval date, and SHA-256 checksum.
+- [ ] Verify the source parses and contains at least 25,000 rows.
 
-### Task 2: Repository boundary and app wiring
+### Task 2: Tested deterministic conversion
 
-**Files:** Create `app/src/main/kotlin/com/ninjakeys/app/EnglishDictionaryRepository.kt` and tests; modify `StageOneDictionary.kt`, `NinjaKeysInputMethodService.kt`.
+**Files:** Modify `tools/build_dictionary.py`; create `tools/test_build_dictionary.py`.
 
-- [ ] Write failing tests for loading rows, skipping malformed rows, and caching the immutable result.
-- [ ] Implement the repository with an injected text loader so JVM tests do not require Android.
-- [ ] Wire the service to load the bundled asset once and feed it to `SwipeCommitController`.
-- [ ] Verify focused tests, core tests, and debug assembly.
-- [ ] Commit the verified stage.
+- [ ] Write failing Python tests for filtering, numeric conversion, sorting, duplicate handling, and the 24k minimum.
+- [ ] Run the tests and observe the expected failure before implementation changes.
+- [ ] Implement the converter and a `--verify` mode that checks generated output invariants.
+- [ ] Run the focused tests and regenerate `app/src/main/assets/dictionary/en.csv`.
 
-### Task 3: Corner-bonus regression and scoring verification
+### Task 3: Runtime repository contract
 
-**Files:** Modify `core-engine/src/test/kotlin/com/ninjakeys/core/recognition/ShapePathScorerTest.kt`.
+**Files:** Modify `EnglishDictionaryRepository.kt` and its tests; modify service wiring.
 
-- [ ] Add a 3+ letter path with a real direction change and assert the intended cornered candidate outranks a same-length decoy.
-- [ ] Run the focused scorer tests and the complete JVM suite.
-- [ ] Commit the regression separately.
+- [ ] Test malformed rows, invalid frequencies, immutable caching, and representative real words.
+- [ ] Implement the cached repository and wire the generated asset without a Stage 2 fallback.
+- [ ] Run app focused tests, core tests, and debug assembly.
+
+### Task 4: Scorer regression and stage gate
+
+**Files:** Modify `ShapePathScorerTest.kt`; create `tools/verify_dictionary.ps1`.
+
+- [ ] Verify the corner branch with a 3+ letter path.
+- [ ] Run converter tests, dictionary verification, all JVM tests, app unit tests, assembly, and `git diff --check`.
+- [ ] Commit only after every gate is green and record exact evidence.

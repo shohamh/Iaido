@@ -33,10 +33,30 @@ def convert(source: Path, destination: Path) -> int:
     return len(ordered)
 
 
+def verify(dictionary: Path, minimum_entries: int = 24_000) -> None:
+    with dictionary.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    words = [row.get("word", "") for row in rows]
+    frequencies = [float(row["frequency"]) for row in rows]
+    if len(rows) < minimum_entries:
+        raise ValueError(f"expected at least {minimum_entries} rows, got {len(rows)}")
+    if any(not WORD_RE.fullmatch(word) for word in words):
+        raise ValueError("dictionary contains a non-alphabetic word")
+    if len(set(words)) != len(words):
+        raise ValueError("dictionary contains duplicate words")
+    if any(not math.isfinite(value) or value <= 0 for value in frequencies):
+        raise ValueError("dictionary contains an invalid frequency")
+    if any(left < right for left, right in zip(frequencies, frequencies[1:])):
+        raise ValueError("dictionary is not sorted by descending frequency")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: build_dictionary.py SOURCE_JSON DESTINATION_CSV")
-    count = convert(Path(sys.argv[1]), Path(sys.argv[2]))
-    if count < 24_000:
-        raise SystemExit(f"expected at least 24000 alphabetic entries, wrote {count}")
-    print(f"wrote {count} entries")
+    if len(sys.argv) == 3:
+        count = convert(Path(sys.argv[1]), Path(sys.argv[2]))
+        verify(Path(sys.argv[2]))
+        print(f"wrote {count} entries")
+    elif len(sys.argv) == 2 and sys.argv[1] == "--verify":
+        verify(Path("app/src/main/assets/dictionary/en.csv"))
+        print("dictionary verified")
+    else:
+        raise SystemExit("usage: build_dictionary.py SOURCE_JSON DESTINATION_CSV | --verify")
