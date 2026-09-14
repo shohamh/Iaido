@@ -1,6 +1,7 @@
 package com.ninjakeys.app
 
 import android.app.UiAutomation
+import android.graphics.PointF
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
@@ -58,6 +59,24 @@ class PointerInjector(private val automation: UiAutomation) {
             InjectedPointerEvent(MotionEvent.ACTION_UP, 0, startTimeMs + DEFAULT_STEP_MS, listOf(sample)),
         ).also(::inject)
     }
+
+    fun injectScreenSwipe(
+        points: List<PointF>,
+        startTimeMs: Long = SystemClock.uptimeMillis(),
+        stepMs: Long = DEFAULT_STEP_MS,
+        cancel: Boolean = false,
+    ): List<InjectedPointerEvent> = buildScreenSwipeEvents(points, startTimeMs, stepMs, cancel).also(::inject)
+
+    fun injectLongPress(
+        centerX: Float,
+        centerY: Float,
+        durationMs: Long = 750L,
+        startTimeMs: Long = SystemClock.uptimeMillis(),
+    ): List<InjectedPointerEvent> = injectScreenSwipe(
+        points = listOf(PointF(centerX, centerY), PointF(centerX, centerY)),
+        startTimeMs = startTimeMs,
+        stepMs = durationMs,
+    )
 
     private fun inject(events: List<InjectedPointerEvent>) {
         require(events.isNotEmpty()) { "Cannot inject an empty pointer sequence" }
@@ -188,6 +207,31 @@ class PointerInjector(private val automation: UiAutomation) {
                 actionIndex = 0,
                 eventTimeMs = lastTime + stepMs,
                 pointers = listOf(samplesAt(maxLength - 1).first()),
+            )
+            return events
+        }
+
+        private fun buildScreenSwipeEvents(
+            points: List<PointF>,
+            startTimeMs: Long,
+            stepMs: Long,
+            cancel: Boolean,
+        ): List<InjectedPointerEvent> {
+            require(points.isNotEmpty()) { "Screen swipe must contain at least one point" }
+            require(stepMs > 0L) { "stepMs must be positive" }
+            val events = points.mapIndexedTo(mutableListOf()) { index, point ->
+                InjectedPointerEvent(
+                    action = if (index == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE,
+                    actionIndex = 0,
+                    eventTimeMs = startTimeMs + index * stepMs,
+                    pointers = listOf(PointerSample(0, point.x, point.y)),
+                )
+            }
+            events += InjectedPointerEvent(
+                action = if (cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP,
+                actionIndex = 0,
+                eventTimeMs = startTimeMs + points.size * stepMs,
+                pointers = listOf(PointerSample(0, points.last().x, points.last().y)),
             )
             return events
         }

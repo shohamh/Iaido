@@ -19,6 +19,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ninjakeys.core.recognition.SuggestionChip
 import kotlin.math.abs
@@ -36,6 +38,7 @@ fun SuggestionStrip(
         itemsIndexed(ordered, key = { index, chip -> "${chip.id ?: index}" }) { index, chip ->
             SuggestionChipView(
                 chip = chip,
+                index = index,
                 modifier = Modifier,
                 onRelease = { candidate -> onRelease(index, candidate) },
                 onUndo = { onUndo(index) },
@@ -47,6 +50,7 @@ fun SuggestionStrip(
 @Composable
 private fun SuggestionChipView(
     chip: SuggestionChip,
+    index: Int,
     modifier: Modifier,
     onRelease: (Int) -> Unit,
     onUndo: () -> Unit,
@@ -68,6 +72,7 @@ private fun SuggestionChipView(
 
     Row(
         modifier = modifier
+            .semantics { contentDescription = "NinjaKeys suggestion $index" }
             .padding(2.dp)
             .border(
                 width = 1.dp,

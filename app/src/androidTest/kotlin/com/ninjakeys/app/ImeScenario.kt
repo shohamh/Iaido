@@ -1,7 +1,10 @@
 package com.ninjakeys.app
 
 import android.app.Instrumentation
+import android.graphics.PointF
+import android.view.KeyEvent
 import androidx.test.InstrumentationRegistry
+import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import com.ninjakeys.core.language.Language
 import com.ninjakeys.core.testing.SwipeFixtures
@@ -25,6 +28,15 @@ data class ImeScenarioState(
     val expectedIme: String,
     val expectedLanguage: Language,
     val trace: List<ImeScenarioEvent>,
+)
+
+data class PathTransform(
+    val jitterSeed: Long = 0L,
+    val jitterPx: Float = 0f,
+    val stepMs: Long = 16L,
+    val reverseStart: Int? = null,
+    val reverseEndExclusive: Int? = null,
+    val cancelAfterPoint: Int? = null,
 )
 
 class ImeScenario(
@@ -64,6 +76,10 @@ class ImeScenario(
     }
 
     fun swipeWord(word: String) {
+        swipePath(word)
+    }
+
+    fun swipePath(word: String, transform: PathTransform = PathTransform()) {
         require(word.isNotEmpty() && word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
         val window = keyboard()
         check(window.language == expectedLanguage) {
@@ -76,14 +92,39 @@ class ImeScenario(
         } else {
             error("Hebrew swipe fixtures are added by the bilingual scenarios")
         }
-        pointer.injectSwipe(path.points, window.surfaceBounds)
+        val transformedPoints = path.points.toMutableList().apply {
+            val start = transform.reverseStart
+            val end = transform.reverseEndExclusive
+            if (start != null || end != null) {
+                require(start != null && end != null && start in indices && end in 1..size && start < end) {
+                    "Invalid reverse segment ${transform.reverseStart}..${transform.reverseEndExclusive} for '$word'"
+                }
+                subList(start, end).reverse()
+            }
+        }
+        val cancelled = transform.cancelAfterPoint != null
+        val injectedPoints = transform.cancelAfterPoint?.let { index ->
+            require(index in transformedPoints.indices) { "Invalid cancel point $index for '$word'" }
+            transformedPoints.take(index + 1)
+        } ?: transformedPoints
+        pointer.injectSwipe(
+            points = injectedPoints,
+            surfaceBounds = window.surfaceBounds,
+            stepMs = transform.stepMs,
+            jitterSeed = transform.jitterSeed,
+            jitterPx = transform.jitterPx,
+            cancel = cancelled,
+        )
+        if (cancelled) {
+            checkpoint("cancelledSwipe($word)")
+            return
+        }
         val committed = if (expectedText.isEmpty() || expectedText.last() in ".!?\n") {
             word.replaceFirstChar { it.uppercase() }
         } else {
             word
         }
-        expectedText += committed
-        expectedSelection += committed.length
+        insertExpected(committed)
         checkpoint("swipeWord($word)")
     }
 
@@ -99,21 +140,16 @@ class ImeScenario(
         editor.tapMarkedKey(keyDescription(logicalKey))
         when (logicalKey) {
             "space" -> {
-                expectedText += " "
-                expectedSelection += 1
+                insertExpected(" ")
             }
             "backspace" -> {
-                if (expectedText.isNotEmpty()) {
-                    expectedText = expectedText.dropLast(1)
-                    expectedSelection = (expectedSelection - 1).coerceAtLeast(0)
-                }
+                deleteExpectedOne()
             }
             else -> {
                 val value = if (logicalKey.length == 1 && logicalKey.first().isLetter() &&
                     (expectedText.isEmpty() || expectedText.last() in ".!?\n")
                 ) logicalKey.uppercase() else logicalKey
-                expectedText += value
-                expectedSelection += value.length
+                insertExpected(value)
             }
         }
         checkpoint("tapKey($key)")
@@ -125,12 +161,77 @@ class ImeScenario(
         require(count >= 0) { "Backspace count cannot be negative" }
         repeat(count) {
             editor.pressBackspace()
-            if (expectedText.isNotEmpty()) {
-                expectedText = expectedText.dropLast(1)
-                expectedSelection = (expectedSelection - 1).coerceAtLeast(0)
-            }
+            deleteExpectedOne()
             checkpoint("pressBackspace")
         }
+    }
+
+    fun moveCursorLeft(count: Int = 1) {
+        require(count >= 0) { "Cursor movement count cannot be negative" }
+        repeat(count) {
+            editor.pressKey(KeyEvent.KEYCODE_DPAD_LEFT)
+            expectedSelection = (expectedSelection - 1).coerceAtLeast(0)
+            checkpoint("moveCursorLeft")
+        }
+    }
+
+    fun waitForCorrection(expected: String) {
+        editor.waitForText(expected)
+        expectedText = expected
+        expectedSelection = editor.selection().last
+        checkpoint("waitForCorrection")
+    }
+
+    fun tapSuggestion(index: Int, correctedText: String? = null) {
+        require(index >= 0) { "Suggestion index cannot be negative" }
+        val suggestion = device.findObject(By.desc("NinjaKeys suggestion $index"))
+            ?: error("Missing suggestion $index")
+        val bounds = suggestion.visibleBounds
+        pointer.injectScreenSwipe(
+            listOf(
+                PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
+                PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 64f),
+            ),
+        )
+        if (correctedText != null) {
+            expectedText = correctedText
+            expectedSelection = editor.selection().last
+        } else {
+            editor.waitForText(editor.text())
+            expectedText = editor.text()
+            expectedSelection = editor.selection().last
+        }
+        checkpoint("tapSuggestion($index)")
+    }
+
+    fun injectCancelledSwipe(word: String, transform: PathTransform = PathTransform(cancelAfterPoint = 1)) {
+        require(transform.cancelAfterPoint != null) { "Cancelled swipe transform must specify cancelAfterPoint" }
+        swipePath(word, transform)
+    }
+
+    fun injectSplitWords(words: List<String>, expected: String? = null) {
+        require(words.size >= 2) { "Split gesture needs at least two words/parts" }
+        val window = keyboard()
+        val keySizePx = window.surfaceBounds.width().toFloat() / 10f
+        val paths = words.map { word -> SwipeFixtures.pathThroughQwerty(word, keySizePx).points }
+        pointer.injectMultiPointer(paths, window.surfaceBounds)
+        if (expected != null) {
+            editor.waitForText(expected)
+            expectedText = expected
+            expectedSelection = editor.selection().last
+        }
+        checkpoint("injectSplitWords(${words.joinToString("+")})")
+    }
+
+    fun longPressKey(key: String) {
+        val marked = device.findObject(By.desc(keyDescription(key.lowercase())))
+            ?: error("Missing key '$key'")
+        val bounds = marked.visibleBounds
+        pointer.injectLongPress(
+            centerX = (bounds.left + bounds.right) / 2f,
+            centerY = (bounds.top + bounds.bottom) / 2f,
+        )
+        checkpoint("longPressKey($key)")
     }
 
     fun pressKey(keyCode: Int) {
@@ -211,4 +312,16 @@ class ImeScenario(
 
     private fun keyDescription(key: String): String =
         KeyboardWindowLocator.KEY_DESCRIPTION_PREFIX + key
+
+    private fun insertExpected(value: String) {
+        val cursor = expectedSelection.coerceIn(0, expectedText.length)
+        expectedText = expectedText.take(cursor) + value + expectedText.drop(cursor)
+        expectedSelection = cursor + value.length
+    }
+
+    private fun deleteExpectedOne() {
+        if (expectedSelection <= 0) return
+        expectedText = expectedText.removeRange(expectedSelection - 1, expectedSelection)
+        expectedSelection -= 1
+    }
 }
