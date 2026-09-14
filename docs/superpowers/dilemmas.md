@@ -23,3 +23,8 @@ until answered or intentionally resolved by the implementation.
 - Stages 6-12: command execution/settings persistence, personal learning,
   contextual correction, split-word gestures, theming, test infrastructure,
   and release packaging are not yet implemented.
+- Stage 8 context data: the runtime correction seam is wired with a small,
+  conservative built-in context seed so the feature is deterministic; the
+  production n-gram asset still needs an approved source/license and size
+  budget. Please choose the approved corpus and whether Hebrew ships with the
+  first production model.

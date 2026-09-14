@@ -62,4 +62,21 @@ class SwipeCommitControllerTest {
 
         assertEquals(emptyList<String>(), committed)
     }
+
+    @Test
+    fun `exposes the ranked candidates before committing the winner`() {
+        val committed = mutableListOf<String>()
+        var candidates: List<String> = emptyList()
+        val controller = SwipeCommitController(
+            recognizer,
+            listOf(WordEntry("hi", 1.0), WordEntry("no", 1.0)),
+            committed::add,
+            onRecognized = { results -> candidates = results.map { it.word.word } },
+        )
+
+        controller.commit(pathThrough('h', 'i'), layout)
+
+        assertEquals(listOf("hi", "no"), candidates)
+        assertEquals(listOf("hi"), committed)
+    }
 }

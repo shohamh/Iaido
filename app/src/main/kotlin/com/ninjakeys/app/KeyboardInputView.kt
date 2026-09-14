@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import com.ninjakeys.core.commands.GestureTrigger
 import com.ninjakeys.core.commands.MultiFingerGestureDetector
 import com.ninjakeys.core.layout.KeyPosition
 import com.ninjakeys.core.layout.KeyboardLayout
+import com.ninjakeys.core.recognition.SuggestionChip
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -44,6 +46,9 @@ fun KeyboardInputView(
     language: Language = Language.ENGLISH,
     onLanguageSwitch: () -> Unit = {},
     onCommand: (GestureTrigger) -> Unit = {},
+    suggestionChips: List<SuggestionChip> = emptyList(),
+    onSuggestionRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
+    onSuggestionUndo: (chipIndex: Int) -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
@@ -60,7 +65,14 @@ fun KeyboardInputView(
         var startTime by remember(sessionId) { mutableStateOf(0L) }
         val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
 
-        Box(
+        Column(modifier = Modifier.fillMaxWidth()) {
+            SuggestionStrip(
+                chips = suggestionChips,
+                rtl = language == Language.HEBREW,
+                onRelease = onSuggestionRelease,
+                onUndo = onSuggestionUndo,
+            )
+            Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(keySize * 4)
@@ -125,11 +137,12 @@ fun KeyboardInputView(
                         else -> true
                     }
                 },
-        ) {
+            ) {
             val rows = if (language == Language.ENGLISH) listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
             else listOf("קראטוןםפ", "שדגכעיחלךף", "זסבהנמצתץ")
             rows.forEachIndexed { index, row -> KeyboardRow(row, keySize * index / 2, keySize * index, keySize) }
             KeyboardBottomRow(keySize, language)
+            }
         }
     }
 }

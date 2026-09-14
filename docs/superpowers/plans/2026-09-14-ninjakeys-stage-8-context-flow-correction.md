@@ -25,27 +25,27 @@
 
 **Files:** Modify `NgramContextScorer.kt` and tests.
 
-- [ ] Test configurable window sizes, weighted bigram/trigram scores, and empty-context behavior.
-- [ ] Implement normalized scoring with explicit context-window configuration.
-- [ ] Integrate the scorer into recognizer construction without changing the shape API.
+- [x] Test configurable window sizes, weighted bigram/trigram scores, and empty-context behavior.
+- [x] Implement normalized scoring with explicit context-window configuration.
+- [x] Integrate the scorer into recognizer construction without changing the shape API.
 
 ### Task 2: Bounded flow correction and session history
 
 **Files:** Create `FlowCorrectionEngine.kt` and tests.
 
-- [ ] Test margin gating, two-step cascade limit, original/current history, and undo.
-- [ ] Implement deterministic correction over the recent context window with configurable margin/depth.
-- [ ] Expose replacement and undo events for the app’s InputConnection adapter.
+- [x] Test margin gating, two-step cascade limit, original/current history, and undo.
+- [x] Implement deterministic correction over the recent context window with configurable margin/depth.
+- [x] Expose replacement and undo events for the app’s InputConnection adapter.
 
 ### Task 3: Suggestion/correction strip state and UI
 
 **Files:** Create `SuggestionStripState.kt` and tests; modify keyboard Compose/service.
 
-- [ ] Test centered reel selection, resume-at-last-pick, no-op plain taps, corrected highlighting, and RTL ordering.
-- [ ] Implement platform-neutral strip state and a Compose chip/reel view.
-- [ ] Wire replacement/undo callbacks and session cursor refresh.
+- [x] Test centered reel selection, resume-at-last-pick, no-op plain taps, corrected highlighting, and RTL ordering.
+- [x] Implement platform-neutral strip state and a Compose chip/reel view.
+- [x] Wire replacement/undo callbacks and session cursor refresh.
 
 ### Task 4: Stage gate
 
-- [ ] Run all core/app tests, debug assembly, and `git diff --check`.
-- [ ] Review the complete Stage 8 diff against the ticket before committing.
+- [x] Run all core/app tests, debug assembly, and `git diff --check`.
+- [x] Review the complete Stage 8 diff against the ticket before committing.

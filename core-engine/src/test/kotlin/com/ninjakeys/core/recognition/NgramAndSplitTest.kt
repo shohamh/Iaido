@@ -26,6 +26,19 @@ class NgramAndSplitTest {
     }
 
     @Test
+    fun `context weights and three-word window use the latest words`() {
+        val scorer = NgramContextScorer(
+            windowSize = 3,
+            bigramWeight = 0.5,
+            trigramWeight = 2.0,
+            bigrams = mapOf(("to" to "there") to 4.0),
+            trigrams = mapOf(Triple("go", "to", "there") to 3.0),
+        )
+
+        assertEquals(8.0, scorer.score(listOf("ignore", "go", "to"), "there"))
+    }
+
+    @Test
     fun `split candidates concatenate in touch down order within grace window`() {
         val merger = SplitWordMerger()
         val result = merger.merge(listOf("th"), listOf("ere"), listOf(WordEntry("there", 1.0)), 100, 350)
