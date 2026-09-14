@@ -90,7 +90,7 @@ class ImeScenario(
         val path = if (expectedLanguage == Language.ENGLISH) {
             SwipeFixtures.pathThroughQwerty(word, keySizePx)
         } else {
-            error("Hebrew swipe fixtures are added by the bilingual scenarios")
+            SwipeFixtures.pathThroughHebrew(word, keySizePx)
         }
         val transformedPoints = path.points.toMutableList().apply {
             val start = transform.reverseStart
@@ -119,7 +119,8 @@ class ImeScenario(
             checkpoint("cancelledSwipe($word)")
             return
         }
-        val committed = if (expectedText.isEmpty() || expectedText.last() in ".!?\n") {
+        val textBeforeCursor = expectedText.take(expectedSelection)
+        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.last() in ".!?\n") {
             word.replaceFirstChar { it.uppercase() }
         } else {
             word
@@ -146,8 +147,9 @@ class ImeScenario(
                 deleteExpectedOne()
             }
             else -> {
+                val textBeforeCursor = expectedText.take(expectedSelection)
                 val value = if (logicalKey.length == 1 && logicalKey.first().isLetter() &&
-                    (expectedText.isEmpty() || expectedText.last() in ".!?\n")
+                    (textBeforeCursor.isEmpty() || textBeforeCursor.last() in ".!?\n")
                 ) logicalKey.uppercase() else logicalKey
                 insertExpected(value)
             }
@@ -156,6 +158,28 @@ class ImeScenario(
     }
 
     fun tapSpace() = tapKey("space")
+
+    fun switchLanguage() = tapKey("globe")
+
+    fun twoFingerLanguageSwitch() {
+        val window = keyboard()
+        val center = window.keyCenter("space")
+        val localX = (center.x - window.surfaceBounds.left).toFloat()
+        val localY = (center.y - window.surfaceBounds.top).toFloat()
+        val paths = listOf(
+            listOf(
+                com.ninjakeys.core.gesture.GesturePoint(localX - 24f, localY, 0L),
+                com.ninjakeys.core.gesture.GesturePoint(localX + 80f, localY, 16L),
+            ),
+            listOf(
+                com.ninjakeys.core.gesture.GesturePoint(localX + 24f, localY, 0L),
+                com.ninjakeys.core.gesture.GesturePoint(localX + 128f, localY, 16L),
+            ),
+        )
+        pointer.injectMultiPointer(paths, window.surfaceBounds)
+        expectedLanguage = if (expectedLanguage == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
+        checkpoint("twoFingerLanguageSwitch")
+    }
 
     fun pressBackspace(count: Int = 1) {
         require(count >= 0) { "Backspace count cannot be negative" }
@@ -248,6 +272,7 @@ class ImeScenario(
     }
 
     fun assertLanguage(expected: Language) {
+        check(expectedIme == system.ninjaKeysImeId) { "Language markers are unavailable on the reference IME" }
         check(keyboard().language == expected) {
             "Expected language $expected, observed ${keyboard().language}"
         }
@@ -262,6 +287,23 @@ class ImeScenario(
         expectedLanguage = expectedLanguage,
         trace = trace.toList(),
     )
+
+    fun switchKeyboard(imeId: String) {
+        system.enableAndSelect(imeId)
+        expectedIme = imeId
+        checkpoint("switchKeyboard($imeId)")
+    }
+
+    fun switchToReferenceKeyboard() = switchKeyboard(system.referenceImeId)
+
+    fun switchBackToNinjaKeys() = switchKeyboard(system.ninjaKeysImeId)
+
+    fun tapReferenceCommit() {
+        check(expectedIme == system.referenceImeId) { "Reference keyboard is not selected" }
+        editor.tapMarkedKey("NinjaKeys reference commit")
+        insertExpected("reference")
+        checkpoint("tapReferenceCommit")
+    }
 
     private fun setup() {
         system.launchHost()
@@ -289,7 +331,7 @@ class ImeScenario(
         val observedText = editor.text()
         val observedSelection = editor.selection()
         val observedIme = system.selectedInputMethodId()
-        val observedLanguage = keyboard().language
+        val observedLanguage = if (expectedIme == system.ninjaKeysImeId) keyboard().language else expectedLanguage
         val event = ImeScenarioEvent(
             index = trace.size,
             action = action,
