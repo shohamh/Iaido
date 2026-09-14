@@ -1,6 +1,7 @@
 package com.ninjakeys.app
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -56,6 +57,8 @@ class SettingsActivity : ComponentActivity() {
         var addWord by remember { mutableStateOf("") }
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
+        var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
+        val appUpdateClient = remember { AppUpdateClient(this@SettingsActivity) }
 
         LaunchedEffect(Unit) {
             val preferences = settingsStore.data.first()
@@ -83,6 +86,48 @@ class SettingsActivity : ComponentActivity() {
             Button(onClick = { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }) {
                 Text("Open keyboard setup")
             }
+
+            HorizontalDivider()
+            Text("App updates", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Text("Download the newest signed NinjaKeys APK from GitHub Releases.")
+            Button(
+                enabled = appUpdateButtonEnabled(appUpdateState),
+                onClick = {
+                    val ready = appUpdateState as? AppUpdateUiState.ReadyToInstall
+                    if (ready != null) {
+                        startActivity(appUpdateClient.installIntent(ready.apk))
+                    } else {
+                        lifecycleScope.launch {
+                            appUpdateState = AppUpdateUiState.Checking
+                            val result = withContext(Dispatchers.IO) {
+                                appUpdateClient.update {
+                                    lifecycleScope.launch(Dispatchers.Main) {
+                                        appUpdateState = AppUpdateUiState.Downloading
+                                    }
+                                }
+                            }
+                            appUpdateState = when (result) {
+                                AppUpdateResult.UpToDate -> AppUpdateUiState.UpToDate
+                                is AppUpdateResult.ReadyToInstall -> AppUpdateUiState.ReadyToInstall(result.apk, result.versionCode)
+                                is AppUpdateResult.InstallPermissionRequired -> {
+                                    startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                            Uri.parse("package:$packageName"),
+                                        ),
+                                    )
+                                    AppUpdateUiState.PermissionRequired
+                                }
+                                is AppUpdateResult.Failed -> AppUpdateUiState.Failed(result.message)
+                            }
+                        }
+                    }
+                },
+            ) { Text(appUpdateButtonLabel(appUpdateState)) }
+            Text(
+                appUpdateStatusLabel(appUpdateState),
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+            )
 
             HorizontalDivider()
             Text("Gestures", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
