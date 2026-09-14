@@ -8,6 +8,7 @@ class PersonalDictionary(
     private val base: List<WordEntry>,
     private val maxBoost: Double = 32.0,
 ) {
+    private val baseByWord = base.associateBy { it.word }
     private data class OverrideState(var boost: Double = 1.0, var uses: Int = 0)
 
     private val wordOverrides = mutableMapOf<String, OverrideState>()
@@ -61,7 +62,7 @@ class PersonalDictionary(
 
     fun restore(entries: List<WordEntry>) {
         entries.forEach { entry ->
-            val baseFrequency = base.firstOrNull { it.word == entry.word }?.frequency
+            val baseFrequency = baseByWord[entry.word]?.frequency
             if (baseFrequency == null) customWords += entry.word
             val boost = if (baseFrequency == null) {
                 entry.frequency / ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
@@ -73,7 +74,7 @@ class PersonalDictionary(
     }
 
     fun entries(): List<WordEntry> = (base.map { it.word } + customWords).distinct().map { word ->
-        val baseFrequency = base.firstOrNull { it.word == word }?.frequency ?: ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
+        val baseFrequency = baseByWord[word]?.frequency ?: ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
         WordEntry(word, baseFrequency * (wordOverrides[word]?.boost ?: 1.0))
     }
 

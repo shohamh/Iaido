@@ -38,7 +38,6 @@ class ImeBilingualE2eTest {
             tapSpace()
             twoFingerLanguageSwitch()
             assertLanguage(Language.HEBREW)
-            tapSpace()
             swipeWord("\u05d0\u05e0\u05d9")
             assertText("Hello \u05d0\u05e0\u05d9")
         }

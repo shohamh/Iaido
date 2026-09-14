@@ -16,7 +16,7 @@ class ImeEditingE2eTest {
             swipeWord("hello")
             tapSpace()
             swipeWord("world")
-            pressBackspace(6)
+            pressBackspace(5)
             swipeWord("there")
             assertText("Hello there")
         }
@@ -30,7 +30,7 @@ class ImeEditingE2eTest {
             swipeWord("world")
             moveCursorLeft(5)
             tapKey("x")
-            assertText("Hello Xworld")
+            assertText("Hello xworld")
         }
     }
 

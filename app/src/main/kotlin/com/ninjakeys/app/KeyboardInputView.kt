@@ -131,15 +131,21 @@ fun KeyboardInputView(
                 onRelease = onSuggestionRelease,
                 onUndo = onSuggestionUndo,
             )
-            splitPreview?.takeIf { it.isNotBlank() }?.let { preview ->
-                Text(
-                    text = preview,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp),
+            ) {
+                splitPreview?.takeIf { it.isNotBlank() }?.let { preview ->
+                    Text(
+                        text = preview,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
             }
             manualEditCandidate?.let { candidate ->
                 Row(
@@ -259,10 +265,10 @@ fun KeyboardInputView(
                                     } else if (startKey != null) {
                                         val end = completed.lastOrNull()
                                         when {
-                                            completed.size < 2 -> onTap(startKey!!)
+                                            isTapGesture(completed, keySizePx) -> onTap(startKey!!)
                                             startKey in punctuationKeys && end != null && end.y >= keySizePx * 3 ->
                                                 onPunctuationToSpace(startKey!!)
-                                            end != null && end.y < completed.first().y - keySizePx / 2 ->
+                                            isUpwardFlickGesture(completed, keySizePx) ->
                                                 onFlick(startKey!!, FlickDirection.UP)
                                             else -> onSwipe(GesturePath(completed), layout)
                                         }
@@ -419,7 +425,7 @@ private fun DrawScope.drawSwipeTrail(points: List<GesturePoint>, color: androidx
 
 private fun numberFor(letter: Char): String? = "qwertyuiop".indexOf(letter).takeIf { it >= 0 }?.let { if (it == 9) "0" else (it + 1).toString() }
 
-private fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, language: Language): String? {
+internal fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, language: Language): String? {
     if (y >= size * 3) {
         val index = (x / size).toInt()
         val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
@@ -431,7 +437,7 @@ private fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, langu
             else -> null
         }
     }
-    return layout.keys.minByOrNull { (x - it.x * size) * (x - it.x * size) + (y - it.y * size) * (y - it.y * size) }?.letter?.toString()
+    return layout.keys.minByOrNull { (x - it.x) * (x - it.x) + (y - it.y) * (y - it.y) }?.letter?.toString()
 }
 
 private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {

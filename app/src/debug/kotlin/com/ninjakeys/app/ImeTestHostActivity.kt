@@ -1,7 +1,6 @@
 package com.ninjakeys.app
 
 import android.app.Activity
-import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -28,13 +27,18 @@ class ImeTestHostActivity : Activity() {
         }
         findViewById<Button>(R.id.ime_test_move_cursor_left).setOnClickListener {
             editor.setSelection((editor.selectionStart - 1).coerceAtLeast(0))
+            updateStatus()
         }
         editor.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = updateStatus()
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+                saveEditorState()
+                updateStatus()
+            }
             override fun afterTextChanged(text: Editable?) = updateStatus()
         })
         editor.setOnFocusChangeListener { _, _ -> updateStatus() }
+        restoreEditorState()
         updateStatus()
     }
 
@@ -50,16 +54,34 @@ class ImeTestHostActivity : Activity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        editor.setText("")
-        editor.setSelection(0)
-        editor.requestFocus()
-        updateStatus()
+    override fun onPause() {
+        saveEditorState()
+        super.onPause()
     }
 
     private fun updateStatus() {
         if (!::editor.isInitialized || !::status.isInitialized) return
         status.text = "length=${editor.text.length} selection=${editor.selectionStart}:${editor.selectionEnd}"
+    }
+
+    private fun saveEditorState() {
+        getPreferences(MODE_PRIVATE).edit()
+            .putString(EDITOR_TEXT, editor.text.toString())
+            .putInt(EDITOR_SELECTION, editor.selectionStart.coerceAtLeast(0))
+            .apply()
+    }
+
+    private fun restoreEditorState() {
+        val preferences = getPreferences(MODE_PRIVATE)
+        val text = preferences.getString(EDITOR_TEXT, "").orEmpty()
+        editor.setText(text)
+        val savedSelection = preferences.getInt(EDITOR_SELECTION, text.length)
+        val selection = if (text.isNotEmpty() && savedSelection == 0) text.length else savedSelection
+        editor.setSelection(selection.coerceIn(0, text.length))
+    }
+
+    private companion object {
+        const val EDITOR_TEXT = "editor_text"
+        const val EDITOR_SELECTION = "editor_selection"
     }
 }

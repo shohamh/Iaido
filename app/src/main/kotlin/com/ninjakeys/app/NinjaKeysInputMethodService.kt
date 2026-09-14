@@ -233,9 +233,18 @@ class NinjaKeysInputMethodService : InputMethodService() {
                 KeyboardInputView(
                     sessionId = currentSession,
                     onSwipe = { path, layout ->
-                        val dictionary = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
+                        val expectedSession = sessionId
+                        val language = activeLanguage
+                        val dictionary = if (language == Language.ENGLISH) learningDictionary.entries()
                         else hebrewDictionaryRepository.words()
-                        controller.commit(path, layout, dictionary)
+                        correctionExecutor.execute {
+                            val results = controller.recognize(path, layout, dictionary)
+                            mainHandler.post {
+                                if (sessionId != expectedSession || activeLanguage != language || results.isEmpty()) return@post
+                                rememberCandidates(results)
+                                typingController.commitWord(results.first().word.word)
+                            }
+                        }
                     },
                     onTap = { value ->
                         when (value) {

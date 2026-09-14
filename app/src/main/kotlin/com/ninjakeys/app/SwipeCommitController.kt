@@ -13,14 +13,21 @@ class SwipeCommitController(
     private val onRecognized: (List<ScoredCandidate>) -> Unit = {},
     private val runtimeRanker: ((List<ScoredCandidate>) -> List<ScoredCandidate>)? = null,
 ) {
-    fun commit(path: GesturePath, layout: KeyboardLayout, dictionaryOverride: List<WordEntry>? = null) {
-        if (path.points.size < 2) return
-
+    fun recognize(
+        path: GesturePath,
+        layout: KeyboardLayout,
+        dictionaryOverride: List<WordEntry>? = null,
+    ): List<ScoredCandidate> {
+        if (path.points.size < 2) return emptyList()
         val recognized = recognizer.recognize(path, layout, dictionaryOverride ?: dictionary)
-        val results = runtimeRanker?.invoke(recognized) ?: recognized
-        if (results.isEmpty()) return
-        onRecognized(results)
-        val result = results.first()
+        return runtimeRanker?.invoke(recognized) ?: recognized
+    }
+
+    fun commit(path: GesturePath, layout: KeyboardLayout, dictionaryOverride: List<WordEntry>? = null) {
+        val recognized = recognize(path, layout, dictionaryOverride)
+        if (recognized.isEmpty()) return
+        onRecognized(recognized)
+        val result = recognized.first()
         commitText(result.word.word)
     }
 }

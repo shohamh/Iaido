@@ -5,6 +5,7 @@
             android:name=".ImeTestHostActivity"
             android:exported="true"
             android:label="NinjaKeys IME Test Host"
+            android:theme="@style/ImeTestHostTheme"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize" />
         <service
             android:name=".ReferenceInputMethodService"

@@ -41,7 +41,8 @@ class SplitTypingController(
 
     fun poll(atMs: Long): String? {
         val parts = session.poll(atMs) ?: return null
-        val match = merger.mergeParts(parts.parts, dictionary()).maxByOrNull { it.frequency } ?: return null
+        val candidates = merger.mergeParts(parts.parts, dictionary())
+        val match = candidates.maxByOrNull { it.frequency } ?: return null
         commitText(match.word)
         return match.word
     }

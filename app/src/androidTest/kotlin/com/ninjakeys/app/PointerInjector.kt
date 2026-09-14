@@ -120,7 +120,7 @@ class PointerInjector(private val automation: UiAutomation) {
     }
 
     companion object {
-        private const val DEFAULT_STEP_MS = 16L
+        private const val DEFAULT_STEP_MS = 48L
 
         fun buildSwipeEvents(
             points: List<GesturePoint>,

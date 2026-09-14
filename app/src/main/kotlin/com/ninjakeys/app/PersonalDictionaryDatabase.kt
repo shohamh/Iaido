@@ -70,10 +70,12 @@ class RoomPersonalDictionaryRepository(
     private val dao: PersonalOverrideDao,
     private val base: List<WordEntry>,
 ) {
+    private val baseByWord = base.associateBy { it.word }
+
     fun entries(): List<WordEntry> {
         val boosts = dao.all().associate { it.word to it.boost }
         return (base.map { it.word } + boosts.keys).distinct().map { word ->
-            val baseEntry = base.firstOrNull { it.word == word }
+            val baseEntry = baseByWord[word]
             WordEntry(
                 word = word,
                 frequency = (baseEntry?.frequency ?: 0.01) * (boosts[word] ?: 1.0),

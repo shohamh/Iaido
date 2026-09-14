@@ -4,6 +4,7 @@ import com.ninjakeys.core.dictionary.WordEntry
 import com.ninjakeys.core.gesture.GesturePath
 import com.ninjakeys.core.gesture.GesturePoint
 import com.ninjakeys.core.layout.KeyboardLayout
+import com.ninjakeys.core.layout.KeyPosition
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -12,6 +13,15 @@ class GestureRecognizerTest {
 
     private val layout = KeyboardLayout.qwertyTestLayout()
     private val recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer())
+
+    private val appLayout = KeyboardLayout(
+        listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").flatMapIndexed { row, letters ->
+            val offset = (10 - letters.length).coerceAtLeast(0) / 2f
+            letters.mapIndexed { index, letter ->
+                KeyPosition(letter, index + 0.5f + offset, row + 0.5f)
+            }
+        },
+    )
 
     private fun pathThrough(vararg letters: Char): GesturePath {
         val points = letters.mapIndexed { i, c ->
@@ -57,6 +67,26 @@ class GestureRecognizerTest {
             layout,
             listOf(WordEntry("there", 1.0), WordEntry("three", 1.0)),
             previousWords = listOf("to"),
+        )
+
+        assertEquals("there", results.first().word.word)
+    }
+
+    private fun appPathThrough(vararg letters: Char): GesturePath {
+        val points = letters.mapIndexed { i, c ->
+            val key = appLayout.centerOf(c)
+            GesturePoint(key.x, key.y, i * 100L)
+        }
+        return GesturePath(points + points.last())
+    }
+
+    @Test
+    fun `an exact there path outranks a candidate that skips its leading t`() {
+        val path = appPathThrough('t', 'h', 'e', 'r', 'e')
+        val results = recognizer.recognize(
+            path,
+            appLayout,
+            listOf(WordEntry("there", 0.00204173794467), WordEntry("here", 0.000933254300797)),
         )
 
         assertEquals("there", results.first().word.word)

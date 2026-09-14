@@ -31,7 +31,8 @@ function Wait-ForBootCompleted([string]$serial) {
     & adb -s $serial wait-for-device
     if ($LASTEXITCODE -ne 0) { throw "adb did not reach device $serial" }
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
-        $boot = (& adb -s $serial shell getprop sys.boot_completed 2>$null).Trim()
+        $bootOutput = & adb -s $serial shell getprop sys.boot_completed 2>$null
+        $boot = if ($null -eq $bootOutput) { "" } else { ($bootOutput -join "").Trim() }
         if ($boot -eq "1") { return }
         Start-Sleep -Seconds 2
     }

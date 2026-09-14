@@ -1,5 +1,8 @@
 package com.ninjakeys.app
 
+import com.ninjakeys.core.language.Language
+import com.ninjakeys.core.layout.KeyPosition
+import com.ninjakeys.core.layout.KeyboardLayout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -18,5 +21,17 @@ class KeyboardGeometryTest {
 
         assertEquals(512f, keyboardSurfaceHeightPx(keySizePx), 0.001f)
         assertEquals(656f, imeContentHeightPx(keySizePx, navigationInsetPx), 0.001f)
+    }
+
+    @Test
+    fun `letter hit testing uses the pixel positioned layout`() {
+        val layout = KeyboardLayout(
+            listOf(
+                KeyPosition('q', 64f, 64f),
+                KeyPosition('a', 128f, 192f),
+            ),
+        )
+
+        assertEquals("a", keyAt(128f, 192f, 128f, layout, Language.ENGLISH))
     }
 }

@@ -3,6 +3,8 @@ package com.ninjakeys.app
 import android.view.KeyEvent
 import android.os.SystemClock
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -20,25 +22,26 @@ class ImeEditorDriver(
     }
 
     fun clear() {
-        markedView("ime_test_clear").click()
+        clickMarked("ime_test_clear")
         waitForText("")
     }
 
     fun text(): String {
         if (length() == 0) return ""
-        return editor().text.orEmpty()
+        return readMarked("ime_test_editor") { it.text.orEmpty() }
     }
 
     private fun length(): Int {
-        val status = markedView("ime_test_status").text.orEmpty()
+        val status = readMarked("ime_test_status") { it.text.orEmpty() }
         val match = LENGTH_REGEX.find(status)
             ?: error("Host status did not expose length: '$status'")
         return match.groupValues[1].toInt()
     }
 
     fun selection(): IntRange {
-        val status = markedView("ime_test_status").contentDescription.orEmpty() + " " +
-            markedView("ime_test_status").text.orEmpty()
+        val status = readMarked("ime_test_status") {
+            it.contentDescription.orEmpty() + " " + it.text.orEmpty()
+        }
         val match = SELECTION_REGEX.find(status)
             ?: error("Host status did not expose selection: '$status'")
         val start = match.groupValues[1].toInt()
@@ -51,12 +54,16 @@ class ImeEditorDriver(
         repeat(count) { pressKey(KeyEvent.KEYCODE_DEL) }
     }
 
+    fun moveCursorLeft() {
+        clickMarked("ime_test_move_cursor_left")
+    }
+
     fun pressKey(keyCode: Int) {
         check(device.pressKeyCode(keyCode)) { "UiDevice rejected key code $keyCode" }
     }
 
     fun tapMarkedKey(description: String): List<InjectedPointerEvent> {
-        val key = markedView(description)
+        val key = findView(By.desc(description), "keyboard key $description")
         val bounds = key.visibleBounds
         return pointerInjector.injectTap(
             centerX = ((bounds.left + bounds.right) / 2f),
@@ -78,10 +85,45 @@ class ImeEditorDriver(
 
     private fun editor(): UiObject2 = markedView("ime_test_editor")
 
-    private fun markedView(id: String): UiObject2 = device.wait(
-        Until.findObject(By.res(resourceId(id))),
-        ImeSystemController.DEFAULT_TIMEOUT_MS,
-    ) ?: error("Missing host view $id")
+    private fun markedView(id: String): UiObject2 = findView(By.res(resourceId(id)), "host view $id")
+
+    private fun clickMarked(id: String) {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        var lastFailure: Throwable? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
+                markedView(id).click()
+                return
+            } catch (failure: StaleObjectException) {
+                lastFailure = failure
+                SystemClock.sleep(50L)
+            }
+        }
+        throw IllegalStateException("Could not click host view $id", lastFailure)
+    }
+
+    private fun <T> readMarked(id: String, read: (UiObject2) -> T): T {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        var lastFailure: Throwable? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
+                return read(markedView(id))
+            } catch (failure: StaleObjectException) {
+                lastFailure = failure
+                SystemClock.sleep(50L)
+            }
+        }
+        throw IllegalStateException("Could not read host view $id", lastFailure)
+    }
+
+    private fun findView(selector: BySelector, description: String): UiObject2 {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            device.findObject(selector)?.let { return it }
+            SystemClock.sleep(50L)
+        }
+        error("Missing $description")
+    }
 
     private fun editorSelector() = By.res(resourceId("ime_test_editor"))
 

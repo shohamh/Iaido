@@ -16,7 +16,7 @@ class ImeGeometryE2eTest {
         artifacts.track(scenario)
         scenario.run {
             assertKeyboardGeometry()
-            swipePath("there", PathTransform(stepMs = 8L))
+            swipePath("there", PathTransform(stepMs = 32L))
             val screenshot = captureScreenshot("active-trail-fast")
             check(screenshot.isFile) { "Active-trail screenshot was not written: $screenshot" }
             assertText("There")

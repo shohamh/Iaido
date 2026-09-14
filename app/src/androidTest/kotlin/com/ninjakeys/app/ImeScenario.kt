@@ -35,7 +35,7 @@ data class ImeScenarioState(
 data class PathTransform(
     val jitterSeed: Long = 0L,
     val jitterPx: Float = 0f,
-    val stepMs: Long = 16L,
+    val stepMs: Long = 48L,
     val pauseAfterPoint: Int? = null,
     val pauseMs: Long = 0L,
     val reverseStart: Int? = null,
@@ -132,7 +132,7 @@ class ImeScenario(
             return
         }
         val textBeforeCursor = expectedText.take(expectedSelection)
-        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.last() in ".!?\n") {
+        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.matches(Regex(".*[.!?]\\s*$"))) {
             word.replaceFirstChar { it.uppercase() }
         } else {
             word
@@ -205,7 +205,7 @@ class ImeScenario(
     fun moveCursorLeft(count: Int = 1) {
         require(count >= 0) { "Cursor movement count cannot be negative" }
         repeat(count) {
-            editor.pressKey(KeyEvent.KEYCODE_DPAD_LEFT)
+            editor.moveCursorLeft()
             expectedSelection = (expectedSelection - 1).coerceAtLeast(0)
             checkpoint("moveCursorLeft")
         }
@@ -375,6 +375,7 @@ class ImeScenario(
         system.launchHost()
         editor.focus()
         system.waitForImeVisible(system.ninjaKeysImeId)
+        editor.clear()
         expectedText = ""
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH
@@ -393,6 +394,7 @@ class ImeScenario(
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
 
     private fun checkpoint(action: String) {
+        editor.waitForText(expectedText)
         val observedText = editor.text()
         val observedSelection = editor.selection()
         val observedIme = system.selectedInputMethodId()
