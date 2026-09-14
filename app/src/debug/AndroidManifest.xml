@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".ImeTestHostActivity"
+            android:exported="true"
+            android:label="NinjaKeys IME Test Host" />
+        <service
+            android:name=".ReferenceInputMethodService"
+            android:exported="true"
+            android:label="NinjaKeys Reference Keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/reference_input_method" />
+        </service>
+    </application>
+</manifest>

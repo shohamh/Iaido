@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/ime_test_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:contentDescription="NinjaKeys test host status"
+        android:text="length=0 selection=0:0" />
+
+    <EditText
+        android:id="@+id/ime_test_editor"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:contentDescription="NinjaKeys test host editor"
+        android:gravity="top|start"
+        android:hint="IME test text"
+        android:inputType="textCapSentences|textMultiLine"
+        android:minLines="5"
+        android:textIsSelectable="true" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/ime_test_clear"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:contentDescription="NinjaKeys test clear"
+            android:text="Clear" />
+
+        <Button
+            android:id="@+id/ime_test_move_cursor_left"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:contentDescription="NinjaKeys test move cursor left"
+            android:text="Cursor left" />
+    </LinearLayout>
+</LinearLayout>
