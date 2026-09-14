@@ -4,3 +4,7 @@ local.properties
 *.iml
 .idea/
 .kotlin/
+.gradle-home/
+.gradle-verify/
+bootstrap-gradle.java
+tools/__pycache__/

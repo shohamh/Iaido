@@ -33,4 +33,25 @@ class PersonalDictionaryTest {
 
         assertEquals(emptySet<String>(), dictionary.overrides())
     }
+
+    @Test
+    fun `explicitly added words are available even when absent from the base`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0)))
+
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "ninjacode")
+
+        assertEquals("ninjacode", dictionary.entries().single { it.word == "ninjacode" }.word)
+    }
+
+    @Test
+    fun `activity decay uses other typed words and never wall clock`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0), WordEntry("other", 1.0)))
+        dictionary.record(LearningSignal.MANUAL_EDIT, replacement = "hello")
+        val before = dictionary.entries().single { it.word == "hello" }.frequency
+
+        dictionary.record(LearningSignal.MANUAL_EDIT, replacement = "other")
+        val after = dictionary.entries().single { it.word == "hello" }.frequency
+
+        assertEquals(true, after < before)
+    }
 }
