@@ -14,7 +14,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - run: ./gradlew :core-engine:test :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - run: ./gradlew :core-engine:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon
 
   instrumented:
     runs-on: ubuntu-latest
@@ -30,4 +30,19 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: Pixel_2
-          script: ./gradlew connectedDebugAndroidTest --no-daemon
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain
+      - name: Collect IME E2E artifacts
+        if: always()
+        run: |
+          mkdir -p artifacts/ime-e2e
+          adb devices
+          adb pull /sdcard/Android/data/com.ninjakeys.app/files/ime-e2e artifacts/ime-e2e || true
+          cp -R app/build/outputs/androidTest-results artifacts/ime-e2e/connected-test-results || true
+          cp -R app/build/reports/androidTests artifacts/ime-e2e/connected-test-reports || true
+      - name: Upload IME E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ime-e2e-${{ github.run_id }}
+          path: artifacts/ime-e2e
+          if-no-files-found: warn
