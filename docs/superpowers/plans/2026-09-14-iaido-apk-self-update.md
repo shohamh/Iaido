@@ -49,7 +49,7 @@
 
 - [x] **Step 1: Write failing policy tests** for current-version rejection, newer-version acceptance, oversized download rejection, wrong package rejection, and invalid staging cleanup using injected release/download/package boundaries.
 - [x] **Step 2: Run the focused test and confirm failure.**
-- [x] **Step 3: Implement fixed API lookup at `https://api.github.com/repos/shohamh/NinjaKeys/releases/latest`, JSON parsing, bounded streaming download, archive package/version inspection, signing-certificate comparison, private temporary staging, and atomic replacement.**
+- [x] **Step 3: Implement fixed API lookup at `https://api.github.com/repos/shohamh/Iaido/releases/latest`, JSON parsing, bounded streaming download, archive package/version inspection, signing-certificate comparison, private temporary staging, and atomic replacement.**
 - [x] **Step 4: Add `REQUEST_INSTALL_PACKAGES`, a narrowly scoped `FileProvider`, and `app_update_paths.xml`; keep the provider non-exported with URI grants.**
 - [x] **Step 5: Run focused tests and confirm they pass.**
 - [x] **Step 6: Commit `Add validated APK updater`.**

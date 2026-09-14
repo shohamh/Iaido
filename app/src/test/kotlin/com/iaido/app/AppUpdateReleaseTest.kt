@@ -10,8 +10,8 @@ class AppUpdateReleaseTest {
         val release = AppRelease(
             tagName = "v0.1.4",
             assets = listOf(
-                AppReleaseAsset("checksums.txt", "https://github.com/shohamh/NinjaKeys/releases/download/v0.1.4/checksums.txt", 12),
-                AppReleaseAsset("app-release.apk", "https://github.com/shohamh/NinjaKeys/releases/download/v0.1.4/app-release.apk", 1234),
+                AppReleaseAsset("checksums.txt", "https://github.com/shohamh/Iaido/releases/download/v0.1.4/checksums.txt", 12),
+                AppReleaseAsset("app-release.apk", "https://github.com/shohamh/Iaido/releases/download/v0.1.4/app-release.apk", 1234),
             ),
         )
 
@@ -29,8 +29,8 @@ class AppUpdateReleaseTest {
     @Test
     fun `rejects multiple APK assets`() {
         val assets = listOf(
-            AppReleaseAsset("app-release.apk", "https://github.com/shohamh/NinjaKeys/releases/download/v0.1.4/a.apk", null),
-            AppReleaseAsset("app-debug.apk", "https://github.com/shohamh/NinjaKeys/releases/download/v0.1.4/b.apk", null),
+            AppReleaseAsset("app-release.apk", "https://github.com/shohamh/Iaido/releases/download/v0.1.4/a.apk", null),
+            AppReleaseAsset("app-debug.apk", "https://github.com/shohamh/Iaido/releases/download/v0.1.4/b.apk", null),
         )
 
         assertThrows(IllegalArgumentException::class.java) {

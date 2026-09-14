@@ -36,4 +36,4 @@ internal fun isTrustedAppReleaseUrl(value: String): Boolean = runCatching {
 }.getOrDefault(false)
 
 private const val GITHUB_HOST = "github.com"
-private const val RELEASE_DOWNLOAD_PREFIX = "/shohamh/NinjaKeys/releases/download/"
+private const val RELEASE_DOWNLOAD_PREFIX = "/shohamh/Iaido/releases/download/"

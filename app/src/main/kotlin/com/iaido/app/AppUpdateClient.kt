@@ -276,7 +276,7 @@ private fun java.io.InputStream.readBounded(maxBytes: Long): ByteArray {
     return output.toByteArray()
 }
 
-private const val APP_UPDATE_API_URL = "https://api.github.com/repos/shohamh/NinjaKeys/releases/latest"
+private const val APP_UPDATE_API_URL = "https://api.github.com/repos/shohamh/Iaido/releases/latest"
 
 object AppUpdateConfig {
     const val RELEASE_API_URL = APP_UPDATE_API_URL

@@ -91,7 +91,7 @@ class CoreEngineUpdateClient(
 
 object CoreEngineUpdateConfig {
     const val MANIFEST_URL =
-        "https://github.com/shohamh/NinjaKeys/releases/latest/download/core-engine-manifest.json"
+        "https://github.com/shohamh/Iaido/releases/latest/download/core-engine-manifest.json"
 }
 
 private const val PREFERENCES_NAME = "core-engine-updates"

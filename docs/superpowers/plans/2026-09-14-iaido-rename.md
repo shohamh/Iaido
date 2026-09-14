@@ -12,7 +12,7 @@
 
 - `com.iaido.app` is a new Android application identity; existing `com.ninjakeys.app` installs are intentionally not upgraded.
 - User-visible branding uses `Iaido`; technical packages/classes/scripts use `iaido`/`Iaido` consistently.
-- `https://github.com/shohamh/NinjaKeys` remains the release source until the GitHub repository is separately renamed.
+- `https://github.com/shohamh/Iaido` is the canonical release source after the GitHub repository rename.
 - Release APKs must be signed through the existing secret-backed workflow with a stable key; no private key enters Git.
 
 ---
