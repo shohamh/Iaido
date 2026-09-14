@@ -11,3 +11,8 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.withType<Jar>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}

@@ -25,4 +25,4 @@
 ### Stage 12
 
 - [x] Add reproducible core-engine JAR packaging script.
-- [ ] Add runtime DexClassLoader/update-check implementation after release endpoint policy is decided.
+- [ ] Add runtime DexClassLoader/update-check implementation after release endpoint, artifact trust, rollback, and fallback policy are decided; see `docs/superpowers/dilemmas.md`.

@@ -32,3 +32,9 @@ until answered or intentionally resolved by the implementation.
   controller and the keyboard keeps space-started multi-finger commands. If
   you want the grace duration or command/split boundary exposed in Settings,
   that should be added to the Stage 10 typing tunables.
+- Stage 12 runtime updates: the ticket selects GitHub Releases plus
+  `DexClassLoader`, but the repo does not yet define a signed release manifest,
+  public-key trust root, version/rollback rule, or behavior when an artifact is
+  unavailable or fails verification. I have completed the reproducible JAR
+  packaging and checksum contract; please approve those security and fallback
+  policies before a silent executable-code updater is added.

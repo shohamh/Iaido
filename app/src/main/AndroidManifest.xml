@@ -3,7 +3,9 @@
     <uses-permission android:name="android.permission.BIND_INPUT_METHOD" />
     <application
         android:label="NinjaKeys"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher">
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
