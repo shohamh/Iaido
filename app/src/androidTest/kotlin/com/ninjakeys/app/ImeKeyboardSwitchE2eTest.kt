@@ -1,14 +1,18 @@
 package com.ninjakeys.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ImeKeyboardSwitchE2eTest {
+    @get:Rule
+    val artifacts = FailureArtifactRule()
+
     @Test
     fun referenceKeyboardCanBeSelectedAndNinjaKeysRestored() {
-        ImeScenario().run {
+        scenario().run {
             swipeWord("hello")
             tapSpace()
             switchToReferenceKeyboard()
@@ -22,7 +26,7 @@ class ImeKeyboardSwitchE2eTest {
 
     @Test
     fun keyboardSwitchSurvivesDeletingReferenceToken() {
-        ImeScenario().run {
+        scenario().run {
             switchToReferenceKeyboard()
             tapReferenceCommit()
             switchBackToNinjaKeys()
@@ -31,4 +35,6 @@ class ImeKeyboardSwitchE2eTest {
             assertText("There")
         }
     }
+
+    private fun scenario() = ImeScenario().also(artifacts::track)
 }

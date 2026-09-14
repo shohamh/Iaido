@@ -1,14 +1,18 @@
 package com.ninjakeys.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ImeEditingE2eTest {
+    @get:Rule
+    val artifacts = FailureArtifactRule()
+
     @Test
     fun sentenceCanDeleteWordAndRetypeIt() {
-        ImeScenario().run {
+        scenario().run {
             swipeWord("hello")
             tapSpace()
             swipeWord("world")
@@ -20,7 +24,7 @@ class ImeEditingE2eTest {
 
     @Test
     fun middleCursorEditInsertsWithoutLosingSurroundingText() {
-        ImeScenario().run {
+        scenario().run {
             swipeWord("hello")
             tapSpace()
             swipeWord("world")
@@ -32,7 +36,7 @@ class ImeEditingE2eTest {
 
     @Test
     fun cancelledMistakePathDoesNotMutateText() {
-        ImeScenario().run {
+        scenario().run {
             swipeWord("hello")
             tapSpace()
             injectCancelledSwipe("world")
@@ -42,7 +46,7 @@ class ImeEditingE2eTest {
 
     @Test
     fun reversedAndJitteredPathRemainsObservableAsARealGesture() {
-        ImeScenario().run {
+        scenario().run {
             swipePath(
                 "there",
                 PathTransform(
@@ -56,7 +60,7 @@ class ImeEditingE2eTest {
 
     @Test
     fun typedMistakeCanBeDeletedAndCorrected() {
-        ImeScenario().run {
+        scenario().run {
             tapKey("t")
             tapKey("e")
             tapKey("h")
@@ -69,8 +73,10 @@ class ImeEditingE2eTest {
 
     @Test
     fun splitPointerGestureCanCommitACombinedWord() {
-        ImeScenario().run {
+        scenario().run {
             injectSplitWords(listOf("the", "re"), expected = "There")
         }
     }
+
+    private fun scenario() = ImeScenario().also(artifacts::track)
 }

@@ -56,10 +56,12 @@ class ImeScenario(
 
     fun run(block: ImeScenario.() -> Unit) {
         setup()
+        var succeeded = false
         try {
             block()
+            succeeded = true
         } finally {
-            system.hideKeyboard()
+            if (succeeded) system.hideKeyboard()
         }
     }
 
@@ -279,6 +281,57 @@ class ImeScenario(
         expectedLanguage = expected
         checkpoint("assertLanguage($expected)")
     }
+
+    fun assertKeyboardGeometry() {
+        val window = keyboard()
+        val display = android.graphics.Rect(0, 0, device.displayWidth, device.displayHeight)
+        val navigationInset = instrumentation.targetContext.resources.getIdentifier(
+            "navigation_bar_height",
+            "dimen",
+            "android",
+        ).takeIf { it != 0 }
+            ?.let(instrumentation.targetContext.resources::getDimensionPixelSize)
+            ?: 0
+        val safeBottom = navigationSafeBottom(display, navigationInset)
+        check(window.surfaceBounds.bottom <= safeBottom) {
+            "Keyboard surface reaches navigation area: surface=${window.surfaceBounds} safeBottom=$safeBottom"
+        }
+        check(window.rootBounds.bottom <= display.bottom) {
+            "Keyboard root is outside display: root=${window.rootBounds} display=$display"
+        }
+        check(window.keyBounds.values.all { it.bottom <= window.surfaceBounds.bottom }) {
+            "A key extends below the marked keyboard surface: keys=${window.keyBounds} surface=${window.surfaceBounds}"
+        }
+        checkpoint("assertKeyboardGeometry")
+    }
+
+    fun hideAndShowKeyboard() {
+        system.hideKeyboard()
+        editor.focus()
+        checkpoint("hideAndShowKeyboard")
+    }
+
+    fun relaunchHost() {
+        system.launchHost()
+        editor.focus()
+        checkpoint("relaunchHost")
+    }
+
+    fun backgroundAndForeground() {
+        device.pressHome()
+        system.launchHost()
+        editor.focus()
+        checkpoint("backgroundAndForeground")
+    }
+
+    fun recreateInputView() {
+        system.enableAndSelect(system.ninjaKeysImeId)
+        expectedIme = system.ninjaKeysImeId
+        checkpoint("recreateInputView")
+    }
+
+    fun captureScreenshot(name: String): java.io.File =
+        ArtifactWriter.captureScreenshot(name, device)
 
     fun state(): ImeScenarioState = ImeScenarioState(
         expectedText = expectedText,

@@ -2,14 +2,18 @@ package com.ninjakeys.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ninjakeys.core.language.Language
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ImeBilingualE2eTest {
+    @get:Rule
+    val artifacts = FailureArtifactRule()
+
     @Test
     fun hebrewSentenceUsesRtlLayoutAndCanReturnToEnglish() {
-        ImeScenario().run {
+        scenario().run {
             switchLanguage()
             assertLanguage(Language.HEBREW)
             swipeWord("\u05d0\u05e0\u05d9")
@@ -29,7 +33,7 @@ class ImeBilingualE2eTest {
 
     @Test
     fun twoFingerLanguageGesturePreservesExistingText() {
-        ImeScenario().run {
+        scenario().run {
             swipeWord("hello")
             tapSpace()
             twoFingerLanguageSwitch()
@@ -39,4 +43,6 @@ class ImeBilingualE2eTest {
             assertText("Hello \u05d0\u05e0\u05d9")
         }
     }
+
+    private fun scenario() = ImeScenario().also(artifacts::track)
 }
