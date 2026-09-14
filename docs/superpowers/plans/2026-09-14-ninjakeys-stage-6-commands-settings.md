@@ -24,7 +24,6 @@
 
 ### Task 2: Android command execution and settings model
 
-- [ ] Wire undo/redo/cut/copy/paste/select-all/dismiss to the current input connection/service.
-- [ ] Add a minimal settings activity/model exposing global gesture bindings.
-- [ ] Verify assembly and commit.
-
+- [x] Wire undo/redo/cut/copy/paste/select-all/dismiss to the current input connection/service.
+- [x] Add a minimal settings activity/model exposing global gesture bindings.
+- [x] Verify assembly and commit.

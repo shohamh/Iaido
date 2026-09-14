@@ -19,4 +19,12 @@ class MultiFingerGestureTest {
             MultiFingerGestureDetector(20f).detect(0f, 0f, 3f, 25f, 2),
         )
     }
+
+    @Test
+    fun `vertical upward movement is available for command mode cut`() {
+        assertEquals(
+            GestureTrigger.UP,
+            MultiFingerGestureDetector(20f).detect(0f, 0f, 3f, -25f, 2),
+        )
+    }
 }

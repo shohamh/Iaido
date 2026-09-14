@@ -1,8 +1,8 @@
 package com.ninjakeys.core.language
 
-enum class Language(val isRtl: Boolean) {
-    ENGLISH(false),
-    HEBREW(true),
+enum class Language(val isRtl: Boolean, val localeTag: String) {
+    ENGLISH(false, "en-US"),
+    HEBREW(true, "he-IL"),
 }
 
 class LanguageSwitcher(

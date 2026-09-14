@@ -3,7 +3,7 @@ package com.ninjakeys.core.commands
 enum class GestureAction { SWITCH_LANGUAGE, DISMISS, UNDO, REDO, CUT, COPY, PASTE, SELECT_ALL, ENTER_COMMAND_MODE }
 
 enum class GestureTrigger {
-    NONE, HORIZONTAL, DOWN, LEFT, RIGHT, LONG_PRESS_SPACE, COMMAND_CUT, COMMAND_COPY,
+    NONE, HORIZONTAL, UP, DOWN, LEFT, RIGHT, LONG_PRESS_SPACE, COMMAND_CUT, COMMAND_COPY,
     COMMAND_PASTE, COMMAND_SELECT_ALL,
 }
 
@@ -40,6 +40,7 @@ class MultiFingerGestureDetector(private val minimumMovement: Float) {
         val dy = endY - startY
         return when {
             kotlin.math.abs(dx) >= minimumMovement && kotlin.math.abs(dx) > kotlin.math.abs(dy) -> GestureTrigger.HORIZONTAL
+            dy <= -minimumMovement && kotlin.math.abs(dy) >= kotlin.math.abs(dx) -> GestureTrigger.UP
             dy >= minimumMovement && kotlin.math.abs(dy) >= kotlin.math.abs(dx) -> GestureTrigger.DOWN
             else -> GestureTrigger.NONE
         }

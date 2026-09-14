@@ -2,6 +2,7 @@ package com.ninjakeys.app
 
 import android.inputmethodservice.InputMethodService
 import android.view.View
+import android.os.LocaleList
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -62,6 +63,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
         composeInputView?.let(::renderInputView)
     }
@@ -114,6 +116,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
             val commandTrigger = when (trigger) {
                 GestureTrigger.LEFT -> GestureTrigger.COMMAND_COPY
                 GestureTrigger.RIGHT -> GestureTrigger.COMMAND_PASTE
+                GestureTrigger.UP -> GestureTrigger.COMMAND_CUT
                 GestureTrigger.DOWN -> GestureTrigger.COMMAND_SELECT_ALL
                 else -> GestureTrigger.NONE
             }
