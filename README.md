@@ -4,9 +4,9 @@ An Android keyboard combining the best of Swype and Nintype gesture-typing, reim
 
 ## Status
 
-Stages 1-11 are implemented on `dev`. Stage 12 packaging is available locally;
-runtime executable-code updates remain policy-gated in
-`docs/superpowers/dilemmas.md`.
+Stages 1-12 are implemented on `main`. Stage 12 provides signed GitHub
+Release packaging, verified core-engine updates, atomic current/previous
+rollback storage, and a compiled fallback when no update is available.
 
 ## Development commands
 

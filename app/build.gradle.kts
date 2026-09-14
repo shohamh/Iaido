@@ -13,8 +13,8 @@ android {
         applicationId = "com.ninjakeys.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 2
-        versionName = providers.gradleProperty("ninjaKeysVersion").getOrElse("0.1.1")
+        versionCode = 3
+        versionName = providers.gradleProperty("ninjaKeysVersion").getOrElse("0.1.2")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
