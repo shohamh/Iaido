@@ -46,7 +46,7 @@ class CoreEngineUpdateClient(
     }
 
     private fun parseManifest(json: String): CoreEngineReleaseManifest {
-        val objectValue = JSONObject(json)
+        val objectValue = JSONObject(json.trimStart('\uFEFF'))
         return CoreEngineReleaseManifest(
             version = objectValue.getString("version"),
             artifact = objectValue.getString("artifact"),

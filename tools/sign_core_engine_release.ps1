@@ -54,7 +54,11 @@ Files.writeString(Path.of(System.getenv("NINJAKEYS_SIGN_OUTPUT")), Base64.getEnc
 /exit
 '@ | jshell -q | Out-Null
     $manifest.signature = (Get-Content -LiteralPath $signaturePath -Raw).Trim()
-    $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    [IO.File]::WriteAllText(
+        $manifestPath,
+        ($manifest | ConvertTo-Json),
+        (New-Object Text.UTF8Encoding($false))
+    )
     Write-Output "Signed core-engine manifest for version $($manifest.version)"
 } finally {
     Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force
