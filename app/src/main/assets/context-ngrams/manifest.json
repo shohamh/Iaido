@@ -1,0 +1,78 @@
+{
+  "format": "NKG1",
+  "generator": "tools/generate_ngrams.py",
+  "wordfreq_version": "v3.0.2",
+  "sequence_source": "Leipzig Corpora Collection 2020 1M news",
+  "normalization": {
+    "en": "NFC, case-fold, ASCII letters only",
+    "he": "NFKC, case-fold, remove combining marks, Hebrew letters only"
+  },
+  "min_count": 2,
+  "top_k": 32,
+  "vocabulary_limit": 10000,
+  "context_vocabulary_limit": 2000,
+  "sources": {
+    "wordfreq_en": {
+      "url": "https://raw.githubusercontent.com/rspeer/wordfreq/v3.0.2/wordfreq/data/large_en.msgpack.gz",
+      "bytes": 1494836,
+      "sha256": "DFFAE8066B78DCE0A6667CF5F58E567054F902674667090A7AC8A8A44628B05C"
+    },
+    "wordfreq_he": {
+      "url": "https://raw.githubusercontent.com/rspeer/wordfreq/v3.0.2/wordfreq/data/large_he.msgpack.gz",
+      "bytes": 2891674,
+      "sha256": "4B35EF0A8E6226E4F062D3220C9B2982F4C70A5C90F60864E16E7ED98BBFB3D9"
+    },
+    "corpus_en": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2020_1M.tar.gz",
+      "bytes": 276283393,
+      "sha256": "BE782EB82690415241D623FD2448DFD3FC68102AC1CE971107CB130420ABBB41"
+    },
+    "corpus_he": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/heb_news_2020_1M.tar.gz",
+      "bytes": 238638097,
+      "sha256": "E81BB0B4F2F13BC343DA8B732768582075257634600C359E55283774690B3213"
+    },
+    "dictionary_en": {
+      "bytes": 751301,
+      "sha256": "BF6DF4A288BD775117E457F43374AAFEB1BEA5C6E4BF1763C64F960CFC605AB4"
+    },
+    "dictionary_he": {
+      "bytes": 1732203,
+      "sha256": "D450D8BE515B74F43BE4DFF5F992B5ADA742A12CFBE13C2F3700DB231CA9934E"
+    }
+  },
+  "results": {
+    "en": {
+      "sentences": 1000000,
+      "retained_tokens": 18112016,
+      "vocabulary": 28001,
+      "context_vocabulary": 2000,
+      "asset": {
+        "bytes": 6210719,
+        "sha256": "74EEFDC70A8428EB6748BDD3A81D11A4E678E10C4B811CDA2026AE5E3AD92E95",
+        "word_count": 28001,
+        "bigram_contexts": 2000,
+        "trigram_contexts": 177283,
+        "bigram_edges_bytes": 200220,
+        "trigram_edges_bytes": 2432803,
+        "max_log_count": 11.706516614022414
+      }
+    },
+    "he": {
+      "sentences": 1000000,
+      "retained_tokens": 11393695,
+      "vocabulary": 56469,
+      "context_vocabulary": 2000,
+      "asset": {
+        "bytes": 4023692,
+        "sha256": "EAD4D7F184818D416B83F22A94B8942038DB7BF366A16FC8A959BBA6132BA885",
+        "word_count": 56469,
+        "bigram_contexts": 2000,
+        "trigram_contexts": 126159,
+        "bigram_edges_bytes": 205134,
+        "trigram_edges_bytes": 1263342,
+        "max_log_count": 9.443434254143561
+      }
+    }
+  }
+}

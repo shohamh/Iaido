@@ -38,10 +38,12 @@ CORPORA = {
     "en": {
         "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2020_1M.tar.gz",
         "size": 276283393,
+        "sha256": "BE782EB82690415241D623FD2448DFD3FC68102AC1CE971107CB130420ABBB41",
     },
     "he": {
         "url": "https://downloads.wortschatz-leipzig.de/corpora/heb_news_2020_1M.tar.gz",
         "size": 238638097,
+        "sha256": "E81BB0B4F2F13BC343DA8B732768582075257634600C359E55283774690B3213",
     },
 }
 
@@ -52,6 +54,8 @@ MAGIC = b"NKG1"
 VERSION = 1
 MAX_SUCCESSORS = 32
 MIN_COUNT = 2
+MAX_VOCABULARY = 10_000
+MAX_CONTEXT_VOCABULARY = 2_000
 FLUSH_ROWS = 100_000
 TOKEN_RE = {
     "en": re.compile(r"[A-Za-z]+"),
@@ -142,7 +146,15 @@ def encode_varint(value: int) -> bytes:
     return bytes(encoded)
 
 
-def aggregate(path: Path, language: str, dictionary_words: list[str], allowed: set[str], db_path: Path) -> dict[str, int]:
+def aggregate(
+    path: Path,
+    language: str,
+    dictionary_words: list[str],
+    allowed: set[str],
+    db_path: Path,
+    context_allowed: set[str] | None = None,
+) -> dict[str, int]:
+    context_allowed = allowed if context_allowed is None else context_allowed
     word_ids = {word: index for index, word in enumerate(dictionary_words)}
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA journal_mode=OFF")
@@ -173,9 +185,12 @@ def aggregate(path: Path, language: str, dictionary_words: list[str], allowed: s
             sentence_count += 1
             token_count += len(tokens)
             for index in range(1, len(tokens)):
-                pending[(2, tokens[index - 1], -1, tokens[index])] += 1
+                if dictionary_words[tokens[index - 1]] in context_allowed:
+                    pending[(2, tokens[index - 1], -1, tokens[index])] += 1
             for index in range(2, len(tokens)):
-                pending[(3, tokens[index - 2], tokens[index - 1], tokens[index])] += 1
+                if (dictionary_words[tokens[index - 2]] in context_allowed and
+                        dictionary_words[tokens[index - 1]] in context_allowed):
+                    pending[(3, tokens[index - 2], tokens[index - 1], tokens[index])] += 1
             if len(pending) >= FLUSH_ROWS:
                 flush()
             if sentence_count % 100_000 == 0:
@@ -315,15 +330,19 @@ def build_language(
     output: Path,
     minimum: int,
     top_k: int,
+    vocabulary_limit: int,
+    context_vocabulary_limit: int,
 ) -> dict[str, object]:
     dictionary_words = list(dict.fromkeys(normalize(word, language) for word in read_dictionary(dictionary_path)))
     large_vocabulary = read_wordfreq_vocabulary(wordfreq_path, language)
-    allowed = set(dictionary_words) & large_vocabulary
+    allowed = set(dictionary_words[:vocabulary_limit]) & large_vocabulary
+    context_allowed = set(dictionary_words[:context_vocabulary_limit]) & allowed
     if not allowed:
         raise ValueError(f"No dictionary words survived {language} vocabulary filtering")
     with tempfile.TemporaryDirectory(prefix=f"ninjakeys-{language}-") as temporary:
         db_path = Path(temporary) / "ngrams.sqlite3"
-        counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path)
+        counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path, context_allowed)
+        counts["context_vocabulary"] = len(context_allowed)
         result = build_binary(db_path, output, language, len(dictionary_words), minimum, top_k)
     return {"language": language, "counts": counts, "asset": result}
 
@@ -339,13 +358,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dictionary-he", type=Path, default=ROOT / "app/src/main/assets/dictionary/he.csv")
     parser.add_argument("--min-count", type=int, default=MIN_COUNT)
     parser.add_argument("--top-k", type=int, default=MAX_SUCCESSORS)
+    parser.add_argument("--vocabulary-limit", type=int, default=MAX_VOCABULARY)
+    parser.add_argument("--context-vocabulary-limit", type=int, default=MAX_CONTEXT_VOCABULARY)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.min_count < 1 or args.top_k < 1 or args.top_k > 65535:
-        raise SystemExit("--min-count must be positive and --top-k must be in 1..65535")
+    if (args.min_count < 1 or args.top_k < 1 or args.top_k > 65535 or
+            args.vocabulary_limit < 1 or args.context_vocabulary_limit < 1):
+        raise SystemExit("count and vocabulary limits must be positive; --top-k must be in 1..65535")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ninjakeys-sources-") as temporary:
         temporary_path = Path(temporary)
@@ -367,6 +389,10 @@ def main() -> None:
             paths[language] = (wordfreq_path, corpus_path)
         results = {}
         for language, dictionary_path in (("en", args.dictionary_en), ("he", args.dictionary_he)):
+            source_manifest[f"dictionary_{language}"] = {
+                "bytes": dictionary_path.stat().st_size,
+                "sha256": sha256(dictionary_path),
+            }
             wordfreq_path, corpus_path = paths[language]
             results[language] = build_language(
                 language,
@@ -376,6 +402,8 @@ def main() -> None:
                 args.output_dir / f"{language}.ngram.bin",
                 args.min_count,
                 args.top_k,
+                args.vocabulary_limit,
+                args.context_vocabulary_limit,
             )
         manifest = {
             "format": "NKG1",
@@ -388,6 +416,8 @@ def main() -> None:
             },
             "min_count": args.min_count,
             "top_k": args.top_k,
+            "vocabulary_limit": args.vocabulary_limit,
+            "context_vocabulary_limit": args.context_vocabulary_limit,
             "sources": source_manifest,
             "results": results,
         }
