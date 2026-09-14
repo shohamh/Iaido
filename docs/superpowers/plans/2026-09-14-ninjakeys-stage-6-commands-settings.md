@@ -18,9 +18,9 @@
 
 ### Task 1: Binding model and dispatcher
 
-- [ ] Write failing tests for default bindings, duplicate-trigger rejection, and action dispatch.
-- [ ] Implement pure Kotlin bindings/dispatcher.
-- [ ] Run all JVM tests and commit.
+- [x] Write failing tests for default bindings, duplicate-trigger rejection, and action dispatch.
+- [x] Implement pure Kotlin bindings/dispatcher.
+- [x] Run all JVM tests and commit.
 
 ### Task 2: Android command execution and settings model
 

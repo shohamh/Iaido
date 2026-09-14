@@ -24,24 +24,24 @@
 
 **Files:** Create `app/src/main/kotlin/com/ninjakeys/app/TypingController.kt` and its JVM tests.
 
-- [ ] Write failing tests for tap insertion, number flick, punctuation-to-space, capitalization after sentence boundaries, double-space period, backspace, and accented long-press resolution.
-- [ ] Implement minimal event classification and callback-based text editing.
-- [ ] Run focused tests and the existing app/core suites.
-- [ ] Commit the controller.
+- [x] Write failing tests for tap insertion, number flick, punctuation-to-space, capitalization after sentence boundaries, double-space period, backspace, and accented long-press resolution.
+- [x] Implement minimal event classification and callback-based text editing.
+- [x] Run focused tests and the existing app/core suites.
+- [x] Commit the controller.
 
 ### Task 2: Full English keyboard surface and pointer routing
 
 **Files:** Modify `KeyboardInputView.kt` and `NinjaKeysInputMethodService.kt`.
 
-- [ ] Add punctuation, space, backspace, and visible corner number labels while retaining measured key centers.
-- [ ] Route one-point touches to tap events, upward letter gestures to number events, punctuation-to-space paths to punctuation-space events, and other multi-point paths to the recognizer.
-- [ ] Wire controller callbacks to the active `InputConnection`, including delete-surrounding-text.
-- [ ] Verify debug assembly and JVM tests.
-- [ ] Commit the integrated Stage 4 behavior.
+- [x] Add punctuation, space, backspace, and visible corner number labels while retaining measured key centers.
+- [x] Route one-point touches to tap events, upward letter gestures to number events, punctuation-to-space paths to punctuation-space events, and other multi-point paths to the recognizer.
+- [x] Wire controller callbacks to the active `InputConnection`, including delete-surrounding-text.
+- [x] Verify debug assembly and JVM tests.
+- [x] Commit the integrated Stage 4 behavior.
 
 ### Task 3: Stage gate
 
-- [ ] Run `git diff --check`, all JVM tests, and `:app:assembleDebug`.
-- [ ] Record any emulator-only behavior that remains unverified in `docs/superpowers/dilemmas.md`.
-- [ ] Commit the stage plan/status evidence.
+- [x] Run `git diff --check`, all JVM tests, and `:app:assembleDebug`.
+- [x] Record any emulator-only behavior that remains unverified in `docs/superpowers/dilemmas.md`.
+- [x] Commit the stage plan/status evidence.
 

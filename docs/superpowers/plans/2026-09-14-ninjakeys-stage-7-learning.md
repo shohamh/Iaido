@@ -20,6 +20,12 @@
 
 - [x] Add regression tests for reinforcement, forget, and reset.
 - [x] Implement capped boost overlay.
-- [ ] Add word and n-gram learning signals with diminishing returns and activity decay.
-- [ ] Add Room/DataStore persistence and settings UI.
-- [ ] Verify complete stage gate and commit.
+- [x] Add word and n-gram learning signals with diminishing returns and activity decay.
+- [x] Add Room/DataStore persistence and settings UI.
+- [x] Verify complete stage gate and commit.
+
+The core and Room boundaries accept all six learning signals. The IME emits
+suggestion-pick, flow-correction, flow-undo, and delete/retype events; Settings
+provides explicit add/forget/reset controls. Android does not expose a generic
+host-app text-change callback to an IME, so arbitrary edits made outside the
+keyboard remain an explicit follow-up boundary rather than being guessed.

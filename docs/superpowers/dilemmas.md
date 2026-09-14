@@ -38,3 +38,7 @@ until answered or intentionally resolved by the implementation.
   unavailable or fails verification. I have completed the reproducible JAR
   packaging and checksum contract; please approve those security and fallback
   policies before a silent executable-code updater is added.
+- Stage 7 manual-edit signal: the core and Room APIs accept `MANUAL_EDIT`, but
+  Android's IME contract does not provide a reliable generic callback for text
+  edits performed by the host app. I have left this signal available without
+  falsely classifying ordinary keyboard taps as manual edits.

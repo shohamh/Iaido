@@ -18,13 +18,13 @@
 
 ### Task 1: Core language model and layout
 
-- [ ] Add failing tests for Hebrew key ordering, language cycling, and RTL detection.
+- [x] Add failing tests for Hebrew key ordering, language cycling, and RTL detection.
 - [x] Implement `Language`, `LanguageSwitcher`, Hebrew layout, and language helpers.
-- [ ] Run all core tests and commit.
+- [x] Run all core tests and commit.
 
 ### Task 2: App language-aware keyboard
 
-- [ ] Add a small Hebrew frequency asset/repository fixture and active dictionary selection.
-- [ ] Render the same physical geometry with Hebrew labels and geresh/gershayim behavior.
+- [x] Add a small Hebrew frequency asset/repository fixture and active dictionary selection.
+- [x] Render the same physical geometry with Hebrew labels and geresh/gershayim behavior.
 - [x] Add globe tap and two-finger horizontal gesture routing; set `EditorInfo` language hints where supported.
-- [ ] Verify JVM tests and debug assembly, then commit.
+- [x] Verify JVM tests and debug assembly, then commit.

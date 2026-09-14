@@ -24,31 +24,31 @@
 
 **Files:** Create `tools/data/wordfreq-en-25000-log.json`, `tools/data/README.md`.
 
-- [ ] Check in the exact upstream export used to generate the asset.
-- [ ] Record upstream URL, license, retrieval date, and SHA-256 checksum.
-- [ ] Verify the source parses and contains at least 25,000 rows.
+- [x] Check in the exact upstream export used to generate the asset.
+- [x] Record upstream URL, license, retrieval date, and SHA-256 checksum.
+- [x] Verify the source parses and contains at least 25,000 rows.
 
 ### Task 2: Tested deterministic conversion
 
 **Files:** Modify `tools/build_dictionary.py`; create `tools/test_build_dictionary.py`.
 
-- [ ] Write failing Python tests for filtering, numeric conversion, sorting, duplicate handling, and the 24k minimum.
-- [ ] Run the tests and observe the expected failure before implementation changes.
-- [ ] Implement the converter and a `--verify` mode that checks generated output invariants.
-- [ ] Run the focused tests and regenerate `app/src/main/assets/dictionary/en.csv`.
+- [x] Write failing Python tests for filtering, numeric conversion, sorting, duplicate handling, and the 24k minimum.
+- [x] Run the tests and observe the expected failure before implementation changes.
+- [x] Implement the converter and a `--verify` mode that checks generated output invariants.
+- [x] Run the focused tests and regenerate `app/src/main/assets/dictionary/en.csv`.
 
 ### Task 3: Runtime repository contract
 
 **Files:** Modify `EnglishDictionaryRepository.kt` and its tests; modify service wiring.
 
-- [ ] Test malformed rows, invalid frequencies, immutable caching, and representative real words.
-- [ ] Implement the cached repository and wire the generated asset without a Stage 2 fallback.
-- [ ] Run app focused tests, core tests, and debug assembly.
+- [x] Test malformed rows, invalid frequencies, immutable caching, and representative real words.
+- [x] Implement the cached repository and wire the generated asset without a Stage 2 fallback.
+- [x] Run app focused tests, core tests, and debug assembly.
 
 ### Task 4: Scorer regression and stage gate
 
 **Files:** Modify `ShapePathScorerTest.kt`; create `tools/verify_dictionary.ps1`.
 
-- [ ] Verify the corner branch with a 3+ letter path.
-- [ ] Run converter tests, dictionary verification, all JVM tests, app unit tests, assembly, and `git diff --check`.
-- [ ] Commit only after every gate is green and record exact evidence.
+- [x] Verify the corner branch with a 3+ letter path.
+- [x] Run converter tests, dictionary verification, all JVM tests, app unit tests, assembly, and `git diff --check`.
+- [x] Commit only after every gate is green and record exact evidence.

@@ -66,7 +66,7 @@
 
   Expected: PASS, including equal hashes from independent package runs and a manifest hash matching `Get-FileHash`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
   Commit the reproducible packaging contract and metadata.
 
@@ -96,7 +96,7 @@
 
   Expected: exit 0 with the debug APK built and app tests passing.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
   Commit the wireless-ADB helper, semantic version wiring, and placeholder icon.
 
@@ -117,7 +117,7 @@
 
   Add the exact missing inputs to `dilemmas.md` and keep only the runtime-update checkbox open in the cross-stage infrastructure plan. The packaged JAR path remains complete and independently verifiable.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
   Commit the explicit Stage 12 boundary and user questions.
 
@@ -138,6 +138,6 @@
 
   Run: `git diff --check`, `git status --short`, and inspect generated-output tracking with `git status --ignored --short`.
 
-- [ ] **Step 4: Report verified, partial, and blocked items separately**
+- [x] **Step 4: Report verified, partial, and blocked items separately**
 
   Do not call runtime hot updates complete until the missing release policy is supplied and tested.

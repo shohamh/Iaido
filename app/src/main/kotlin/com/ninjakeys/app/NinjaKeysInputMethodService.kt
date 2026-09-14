@@ -6,6 +6,7 @@ import android.os.Looper
 import android.view.View
 import android.os.LocaleList
 import android.view.inputmethod.ExtractedTextRequest
+import androidx.room.Room
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -44,6 +45,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private var visibleWordIds: List<Int> = emptyList()
     private var cursorPosition = 0
     private var pendingCandidates: List<String>? = null
+    private var lastDeletedWord: String? = null
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
@@ -67,6 +69,14 @@ class NinjaKeysInputMethodService : InputMethodService() {
     )
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
     private val learningDictionary by lazy { PersonalDictionary(dictionaryRepository.words()) }
+    private val learningDatabase = lazy {
+        Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+            .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+            .build()
+    }
+    private val learningRepository by lazy {
+        RoomPersonalDictionaryRepository(learningDatabase.value.overrides(), dictionaryRepository.words())
+    }
 
     private val dictionaryRepository by lazy {
         EnglishDictionaryRepository {
@@ -100,6 +110,10 @@ class NinjaKeysInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         inputMethodLifecycleOwner.onCreate()
+        correctionExecutor.execute {
+            val persisted = learningRepository.entries()
+            mainHandler.post { learningDictionary.restore(persisted) }
+        }
         window.window?.decorView?.apply {
             setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
             setViewTreeSavedStateRegistryOwner(inputMethodLifecycleOwner)
@@ -124,6 +138,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionChips.clear()
         visibleWordIds = emptyList()
         pendingCandidates = null
+        lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
         cursorPosition = currentInputConnection
@@ -140,6 +155,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionChips.clear()
         visibleWordIds = emptyList()
         pendingCandidates = null
+        lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
     }
@@ -160,6 +176,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
     override fun onDestroy() {
         inputMethodLifecycleOwner.onDestroy()
         correctionExecutor.shutdownNow()
+        learningDatabase.value.close()
         splitGraceHandler.removeCallbacksAndMessages(null)
         composeInputView = null
         super.onDestroy()
@@ -172,7 +189,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
                 KeyboardInputView(
                     sessionId = currentSession,
                     onSwipe = { path, layout ->
-                        val dictionary = if (activeLanguage == Language.ENGLISH) dictionaryRepository.words()
+                        val dictionary = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
                         else hebrewDictionaryRepository.words()
                         controller.commit(path, layout, dictionary)
                     },
@@ -215,6 +232,15 @@ class NinjaKeysInputMethodService : InputMethodService() {
         val start = cursorPosition
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
+        val deletedWord = lastDeletedWord
+        lastDeletedWord = null
+        if (deletedWord != null && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
+            recordLearning(
+                signal = LearningSignal.DELETE_RETYPE,
+                original = deletedWord,
+                replacement = text,
+            )
+        }
         pendingCandidates?.let { candidates ->
             correctionHistory.record(start, cursorPosition, text, candidates)
             pendingCandidates = null
@@ -227,6 +253,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
         val inputConnection = currentInputConnection ?: return
         val oldCursor = cursorPosition
         if (!inputConnection.deleteSurroundingText(count, 0)) return
+        lastDeletedWord = correctionHistory.words().firstOrNull { it.end == oldCursor }?.current
         val start = (oldCursor - count).coerceAtLeast(0)
         correctionHistory.deleteRange(start, oldCursor)
         cursorPosition = start
@@ -250,7 +277,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
                     val current = correctionHistory.words().firstOrNull { it.id == source.id } ?: return@forEach
                     if (current.current != correction.before) return@forEach
                     if (replaceSessionWord(source.id, correction.after, preserveCursor = true)) {
-                        learningDictionary.record(
+                        recordLearning(
                             signal = LearningSignal.FLOW_CORRECTION,
                             original = correction.before,
                             replacement = correction.after,
@@ -279,14 +306,21 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
         val word = wordForDisplayIndex(displayIndex) ?: return
         val replacement = word.candidates.getOrNull(candidateIndex) ?: return
-        replaceSessionWord(word.id, replacement)
+        val changed = replaceSessionWord(word.id, replacement)
+        if (changed && candidateIndex > 0 && activeLanguage == Language.ENGLISH) {
+            recordLearning(
+                signal = LearningSignal.SUGGESTION_PICK,
+                original = word.current,
+                replacement = replacement,
+            )
+        }
     }
 
     private fun undoSuggestion(displayIndex: Int) {
         val word = wordForDisplayIndex(displayIndex) ?: return
         if (!word.corrected) return
         if (replaceSessionWord(word.id, word.original)) {
-            learningDictionary.record(
+            recordLearning(
                 signal = LearningSignal.FLOW_UNDO,
                 original = word.current,
                 replacement = word.original,
@@ -313,6 +347,17 @@ class NinjaKeysInputMethodService : InputMethodService() {
         inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips()
         return true
+    }
+
+    private fun recordLearning(
+        signal: LearningSignal,
+        original: String? = null,
+        replacement: String,
+    ) {
+        learningDictionary.record(signal, original, replacement)
+        correctionExecutor.execute {
+            learningRepository.record(signal, original, replacement)
+        }
     }
 
     private fun switchLanguage() {

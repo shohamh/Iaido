@@ -53,6 +53,7 @@ class SettingsActivity : ComponentActivity() {
         var preview by remember { mutableStateOf("") }
         var cascadeDepth by remember { mutableStateOf(SettingsDefaults.CASCADE_DEPTH) }
         var graceWindowMs by remember { mutableStateOf(SettingsDefaults.GRACE_WINDOW_MS) }
+        var addWord by remember { mutableStateOf("") }
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
 
@@ -119,6 +120,23 @@ class SettingsActivity : ComponentActivity() {
             HorizontalDivider()
             Text("Dictionary & Learning", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = addWord,
+                    onValueChange = { addWord = it },
+                    label = { Text("Word to add") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(onClick = {
+                    val word = addWord.trim()
+                    if (word.isNotEmpty()) {
+                        addLearning(word)
+                        addWord = ""
+                        status = "Added $word"
+                    }
+                }) { Text("Add") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     resetLearning()
                     status = "Learning reset"
@@ -153,15 +171,32 @@ class SettingsActivity : ComponentActivity() {
 
     private fun resetLearning() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db").build()
+            val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+                .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+                .build()
             database.overrides().reset()
+            database.close()
+        }
+    }
+
+    private fun addLearning(word: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+                .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+                .build()
+            RoomPersonalDictionaryRepository(database.overrides(), emptyList()).record(
+                signal = com.ninjakeys.core.dictionary.LearningSignal.EXPLICIT_ADD,
+                replacement = word,
+            )
             database.close()
         }
     }
 
     private fun forgetLearning(word: String) {
         lifecycleScope.launch(Dispatchers.IO) {
-            val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db").build()
+            val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+                .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+                .build()
             database.overrides().forget(word)
             database.close()
         }
