@@ -38,6 +38,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ninjakeys.core.commands.GestureTrigger
@@ -53,6 +55,8 @@ import kotlinx.coroutines.delay
 private const val GLOBE_KEY = "\uD83C\uDF10"
 private const val BACKSPACE_KEY = "\u232B"
 private const val MAX_TRAIL_POINTS = 80
+private const val KEYBOARD_ROOT_DESCRIPTION = "NinjaKeys keyboard root"
+private const val SWIPE_SURFACE_DESCRIPTION = "NinjaKeys swipe surface"
 private val punctuationKeys = setOf("'", "?", ",", ".", "\u00B3", "\u00B4")
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -113,8 +117,14 @@ fun KeyboardInputView(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION }
                 .background(MaterialTheme.colorScheme.background),
         ) {
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .semantics { contentDescription = "NinjaKeys language ${language.name}" },
+            )
             SuggestionStrip(
                 chips = suggestionChips,
                 rtl = language == Language.HEBREW,
@@ -149,6 +159,7 @@ fun KeyboardInputView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(keySize * KEYBOARD_ROW_COUNT)
+                    .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
@@ -321,6 +332,7 @@ private fun KeyboardRow(
                 height = keySize - gap,
                 pressed = pressedKey == letter.toString(),
                 number = numberFor(letter),
+                testKey = letter.toString(),
             )
         }
     }
@@ -341,6 +353,7 @@ private fun KeyboardBottomRow(keySize: Dp, language: Language, pressedKey: Strin
                 modifier = Modifier.weight(widthWeight),
                 height = keySize - gap,
                 pressed = pressedKey == label || (label == "space" && pressedKey == " "),
+                testKey = label,
             )
         }
     }
@@ -354,10 +367,14 @@ private fun KeyboardKey(
     height: Dp,
     pressed: Boolean,
     number: String? = null,
+    testKey: String? = null,
 ) {
     val keyModifier = if (width != null) modifier.size(width = width, height = height) else modifier
     Box(
         modifier = keyModifier
+            .semantics {
+                testKey?.let { contentDescription = "NinjaKeys key $it" }
+            }
             .background(
                 color = if (pressed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(6.dp),
