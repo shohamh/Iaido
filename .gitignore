@@ -11,3 +11,4 @@ tools/__pycache__/
 dist/
 artifacts/
 secrets/
+.worktrees/
