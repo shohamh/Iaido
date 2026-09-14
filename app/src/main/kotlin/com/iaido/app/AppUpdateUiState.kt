@@ -27,5 +27,9 @@ fun appUpdateStatusLabel(state: AppUpdateUiState): String = when (state) {
     AppUpdateUiState.UpToDate -> "Iaido is up to date."
     is AppUpdateUiState.ReadyToInstall -> "Update downloaded. Tap Install update to continue."
     AppUpdateUiState.PermissionRequired -> "Allow Iaido to install updates, then press Update app again."
-    is AppUpdateUiState.Failed -> "Update failed: ${state.message}"
+    is AppUpdateUiState.Failed -> when (state.message) {
+        APP_UPDATE_SIGNING_MISMATCH_REASON ->
+            "Update failed: This release is signed for the production app. Uninstall the debug Iaido app, then install this update."
+        else -> "Update failed: ${state.message}"
+    }
 }

@@ -90,6 +90,7 @@ class SettingsActivity : ComponentActivity() {
             HorizontalDivider()
             Text("App updates", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
             Text("Download the newest signed Iaido APK from GitHub Releases.")
+            Text("A release APK cannot update a debug build. If you installed Iaido from Android Studio, uninstall that build first; your settings and learned words will be removed.")
             Button(
                 enabled = appUpdateButtonEnabled(appUpdateState),
                 onClick = {

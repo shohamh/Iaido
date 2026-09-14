@@ -28,6 +28,10 @@ Releases API. The APK must be signed with the same application key as the
 installed build; Android then shows its normal install confirmation. The tag
 release workflow expects these repository secrets:
 
+If a debug build is installed on a device, uninstall it before installing the
+first production release. Android does not allow an update across signing keys;
+uninstalling removes app-local settings and learned words.
+
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`

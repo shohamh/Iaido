@@ -16,6 +16,8 @@ import java.security.MessageDigest
 import org.json.JSONObject
 
 internal const val MAX_APP_UPDATE_BYTES = 100L * 1024L * 1024L
+internal const val APP_UPDATE_SIGNING_MISMATCH_REASON =
+    "APK signing certificate does not match the installed app"
 
 data class AppArchiveInfo(
     val packageName: String,
@@ -40,7 +42,7 @@ fun validateAppArchive(
     archive.packageName != installedPackageName -> AppArchiveValidation.Invalid("APK package does not match Iaido")
     archive.versionCode <= installedVersionCode -> AppArchiveValidation.Invalid("APK is not newer than the installed version")
     archive.signingCertificates != installedCertificates ->
-        AppArchiveValidation.Invalid("APK signing certificate does not match the installed app")
+        AppArchiveValidation.Invalid(APP_UPDATE_SIGNING_MISMATCH_REASON)
     else -> AppArchiveValidation.Valid
 }
 

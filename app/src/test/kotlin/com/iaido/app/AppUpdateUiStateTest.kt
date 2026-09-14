@@ -35,4 +35,12 @@ class AppUpdateUiStateTest {
             appUpdateStatusLabel(AppUpdateUiState.Failed("network unavailable")),
         )
     }
+
+    @Test
+    fun `signing mismatch explains the debug build migration`() {
+        assertEquals(
+            "Update failed: This release is signed for the production app. Uninstall the debug Iaido app, then install this update.",
+            appUpdateStatusLabel(AppUpdateUiState.Failed(APP_UPDATE_SIGNING_MISMATCH_REASON)),
+        )
+    }
 }
