@@ -31,8 +31,10 @@ class PointerInjector(private val automation: UiAutomation) {
         jitterSeed: Long = 0L,
         jitterPx: Float = 0f,
         cancel: Boolean = false,
+        pauseAfterPoint: Int? = null,
+        pauseMs: Long = 0L,
     ): List<InjectedPointerEvent> {
-        return buildSwipeEvents(points, surfaceBounds, startTimeMs, stepMs, jitterSeed, jitterPx, cancel)
+        return buildSwipeEvents(points, surfaceBounds, startTimeMs, stepMs, jitterSeed, jitterPx, cancel, pauseAfterPoint, pauseMs)
             .also(::inject)
     }
 
@@ -128,24 +130,30 @@ class PointerInjector(private val automation: UiAutomation) {
             jitterSeed: Long = 0L,
             jitterPx: Float = 0f,
             cancel: Boolean = false,
+            pauseAfterPoint: Int? = null,
+            pauseMs: Long = 0L,
         ): List<InjectedPointerEvent> {
             require(points.isNotEmpty()) { "Swipe must contain at least one point" }
             require(stepMs > 0L) { "stepMs must be positive" }
             require(jitterPx >= 0f) { "jitterPx cannot be negative" }
+            require(pauseMs >= 0L) { "pauseMs cannot be negative" }
+            require(pauseAfterPoint == null || pauseAfterPoint in points.indices) {
+                "pauseAfterPoint must refer to a swipe point"
+            }
             val random = Random(jitterSeed)
             val screenPoints = points.map { toScreenPoint(it, surfaceBounds, random, jitterPx) }
             val events = screenPoints.mapIndexedTo(mutableListOf()) { index, point ->
                 InjectedPointerEvent(
                     action = if (index == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE,
                     actionIndex = 0,
-                    eventTimeMs = startTimeMs + index * stepMs,
+                    eventTimeMs = startTimeMs + index * stepMs + pauseOffset(index, pauseAfterPoint, pauseMs),
                     pointers = listOf(PointerSample(0, point.first, point.second)),
                 )
             }
             events += InjectedPointerEvent(
                 action = if (cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP,
                 actionIndex = 0,
-                eventTimeMs = startTimeMs + screenPoints.size * stepMs,
+                eventTimeMs = startTimeMs + screenPoints.size * stepMs + pauseOffset(screenPoints.size, pauseAfterPoint, pauseMs),
                 pointers = listOf(PointerSample(0, screenPoints.last().first, screenPoints.last().second)),
             )
             return events
@@ -249,5 +257,8 @@ class PointerInjector(private val automation: UiAutomation) {
             val y = (bounds.top + point.y + jitterY).coerceIn(bounds.top.toFloat(), (bounds.bottom - 1).toFloat())
             return x to y
         }
+
+        private fun pauseOffset(index: Int, pauseAfterPoint: Int?, pauseMs: Long): Long =
+            if (pauseAfterPoint != null && index > pauseAfterPoint) pauseMs else 0L
     }
 }

@@ -21,7 +21,10 @@ class ImeGeometryE2eTest {
             check(screenshot.isFile) { "Active-trail screenshot was not written: $screenshot" }
             assertText("There")
             clearText()
-            swipePath("there", PathTransform(stepMs = 32L, jitterSeed = 3L, jitterPx = 1f))
+            swipePath(
+                "there",
+                PathTransform(stepMs = 32L, jitterSeed = 3L, jitterPx = 1f, pauseAfterPoint = 2, pauseMs = 80L),
+            )
             assertText("There")
         }
     }

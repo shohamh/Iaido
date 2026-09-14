@@ -44,10 +44,10 @@ class ImeEditorDriver(
         check(device.pressKeyCode(keyCode)) { "UiDevice rejected key code $keyCode" }
     }
 
-    fun tapMarkedKey(description: String) {
+    fun tapMarkedKey(description: String): List<InjectedPointerEvent> {
         val key = markedView(description)
         val bounds = key.visibleBounds
-        pointerInjector.injectTap(
+        return pointerInjector.injectTap(
             centerX = ((bounds.left + bounds.right) / 2f),
             centerY = ((bounds.top + bounds.bottom) / 2f),
         )

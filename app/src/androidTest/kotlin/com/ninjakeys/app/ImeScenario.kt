@@ -20,6 +20,8 @@ data class ImeScenarioEvent(
     val observedIme: String,
     val expectedLanguage: Language,
     val observedLanguage: Language,
+    val gestureSeed: Long?,
+    val pointerEvents: List<InjectedPointerEvent>,
 )
 
 data class ImeScenarioState(
@@ -34,6 +36,8 @@ data class PathTransform(
     val jitterSeed: Long = 0L,
     val jitterPx: Float = 0f,
     val stepMs: Long = 16L,
+    val pauseAfterPoint: Int? = null,
+    val pauseMs: Long = 0L,
     val reverseStart: Int? = null,
     val reverseEndExclusive: Int? = null,
     val cancelAfterPoint: Int? = null,
@@ -48,6 +52,8 @@ class ImeScenario(
     private val pointer = PointerInjector(automation)
     private val editor = ImeEditorDriver(device, pointer, instrumentation.targetContext.packageName)
     private val trace = mutableListOf<ImeScenarioEvent>()
+    private var pendingGestureSeed: Long? = null
+    private var pendingPointerEvents: List<InjectedPointerEvent> = emptyList()
 
     private var expectedText = ""
     private var expectedSelection = 0
@@ -109,14 +115,18 @@ class ImeScenario(
             require(index in transformedPoints.indices) { "Invalid cancel point $index for '$word'" }
             transformedPoints.take(index + 1)
         } ?: transformedPoints
-        pointer.injectSwipe(
+        val injected = pointer.injectSwipe(
             points = injectedPoints,
             surfaceBounds = window.surfaceBounds,
             stepMs = transform.stepMs,
             jitterSeed = transform.jitterSeed,
             jitterPx = transform.jitterPx,
             cancel = cancelled,
+            pauseAfterPoint = transform.pauseAfterPoint,
+            pauseMs = transform.pauseMs,
         )
+        pendingPointerEvents = injected
+        pendingGestureSeed = transform.jitterSeed
         if (cancelled) {
             checkpoint("cancelledSwipe($word)")
             return
@@ -135,12 +145,12 @@ class ImeScenario(
         val logicalKey = key.lowercase()
         if (logicalKey == "globe") {
             val before = expectedLanguage
-            editor.tapMarkedKey(keyDescription(logicalKey))
+            pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
             expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
             checkpoint("switchLanguage")
             return
         }
-        editor.tapMarkedKey(keyDescription(logicalKey))
+        pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
         when (logicalKey) {
             "space" -> {
                 insertExpected(" ")
@@ -178,7 +188,7 @@ class ImeScenario(
                 com.ninjakeys.core.gesture.GesturePoint(localX + 128f, localY, 16L),
             ),
         )
-        pointer.injectMultiPointer(paths, window.surfaceBounds)
+        pendingPointerEvents = pointer.injectMultiPointer(paths, window.surfaceBounds)
         expectedLanguage = if (expectedLanguage == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
         checkpoint("twoFingerLanguageSwitch")
     }
@@ -213,7 +223,7 @@ class ImeScenario(
         val suggestion = device.findObject(By.desc("NinjaKeys suggestion $index"))
             ?: error("Missing suggestion $index")
         val bounds = suggestion.visibleBounds
-        pointer.injectScreenSwipe(
+        pendingPointerEvents = pointer.injectScreenSwipe(
             listOf(
                 PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
                 PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 64f),
@@ -253,7 +263,7 @@ class ImeScenario(
         val marked = device.findObject(By.desc(keyDescription(key.lowercase())))
             ?: error("Missing key '$key'")
         val bounds = marked.visibleBounds
-        pointer.injectLongPress(
+        pendingPointerEvents = pointer.injectLongPress(
             centerX = (bounds.left + bounds.right) / 2f,
             centerY = (bounds.top + bounds.bottom) / 2f,
         )
@@ -353,7 +363,7 @@ class ImeScenario(
 
     fun tapReferenceCommit() {
         check(expectedIme == system.referenceImeId) { "Reference keyboard is not selected" }
-        editor.tapMarkedKey("NinjaKeys reference commit")
+        pendingPointerEvents = editor.tapMarkedKey("NinjaKeys reference commit")
         insertExpected("reference")
         checkpoint("tapReferenceCommit")
     }
@@ -396,8 +406,12 @@ class ImeScenario(
             observedIme = observedIme,
             expectedLanguage = expectedLanguage,
             observedLanguage = observedLanguage,
+            gestureSeed = pendingGestureSeed,
+            pointerEvents = pendingPointerEvents,
         )
         trace += event
+        pendingGestureSeed = null
+        pendingPointerEvents = emptyList()
         check(observedText == expectedText && observedSelection.first == expectedSelection &&
             observedSelection.last == expectedSelection && observedIme == expectedIme &&
             observedLanguage == expectedLanguage) {

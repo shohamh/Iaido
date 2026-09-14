@@ -54,6 +54,29 @@ object ArtifactWriter {
         "observedIme" to event.observedIme,
         "expectedLanguage" to event.expectedLanguage.name,
         "observedLanguage" to event.observedLanguage.name,
+        "gestureSeed" to (event.gestureSeed?.toString() ?: ""),
+        "pointerEvents" to event.pointerEvents.joinToString(
+            prefix = "[",
+            postfix = "]",
+            separator = ",",
+            transform = ::pointerEventJson,
+        ),
+    )
+
+    private fun pointerEventJson(event: InjectedPointerEvent): String = jsonObject(
+        "action" to event.action.toString(),
+        "actionIndex" to event.actionIndex.toString(),
+        "eventTimeMs" to event.eventTimeMs.toString(),
+        "pointers" to event.pointers.joinToString(
+            prefix = "[",
+            postfix = "]",
+            separator = ",",
+            transform = { pointer -> jsonObject(
+                "id" to pointer.id.toString(),
+                "x" to pointer.x.toString(),
+                "y" to pointer.y.toString(),
+            ) },
+        ),
     )
 
     private fun jsonObject(vararg fields: Pair<String, String>): String = fields.joinToString(
