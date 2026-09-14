@@ -353,7 +353,11 @@ private fun KeyboardBottomRow(keySize: Dp, language: Language, pressedKey: Strin
                 modifier = Modifier.weight(widthWeight),
                 height = keySize - gap,
                 pressed = pressedKey == label || (label == "space" && pressedKey == " "),
-                testKey = label,
+                testKey = when (label) {
+                    GLOBE_KEY -> "globe"
+                    BACKSPACE_KEY -> "backspace"
+                    else -> label
+                },
             )
         }
     }
