@@ -20,10 +20,8 @@ internal class InputMethodLifecycleOwner(
         get() = registry
 
     fun onCreate(restoredState: android.os.Bundle? = null) {
-        if (restoredState != null) {
-            savedStateController.performAttach()
-            savedStateController.performRestore(restoredState)
-        }
+        savedStateController.performAttach()
+        savedStateController.performRestore(restoredState)
         registry.currentState = Lifecycle.State.CREATED
     }
 

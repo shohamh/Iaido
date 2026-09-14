@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
     alias(libs.plugins.compose.compiler)
 }
 
@@ -12,8 +13,8 @@ android {
         applicationId = "com.ninjakeys.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = providers.gradleProperty("ninjaKeysVersion").getOrElse("0.1.0")
+        versionCode = 2
+        versionName = providers.gradleProperty("ninjaKeysVersion").getOrElse("0.1.1")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -42,7 +43,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.datastore.preferences)
-    annotationProcessor(libs.androidx.room.compiler)
+    ksp(libs.androidx.room.compiler)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.foundation)
