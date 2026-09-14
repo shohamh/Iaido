@@ -6,7 +6,6 @@ import android.os.Looper
 import android.view.View
 import android.os.LocaleList
 import android.view.inputmethod.ExtractedTextRequest
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -169,7 +168,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private fun renderInputView(view: ComposeView) {
         val currentSession = sessionId
         view.setContent {
-            MaterialTheme {
+            NinjaKeysTheme {
                 KeyboardInputView(
                     sessionId = currentSession,
                     onSwipe = { path, layout ->
