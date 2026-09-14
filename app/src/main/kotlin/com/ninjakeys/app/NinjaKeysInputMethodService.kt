@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.ninjakeys.core.recognition.GestureRecognizer
 import com.ninjakeys.core.recognition.ShapePathScorer
 import com.ninjakeys.core.recognition.TrieCandidateGenerator
@@ -46,6 +47,16 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private var pendingCandidates: List<String>? = null
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val splitGraceHandler = Handler(Looper.getMainLooper())
+    private val splitController by lazy {
+        SplitTypingController(
+            dictionary = {
+                if (activeLanguage == Language.ENGLISH) dictionaryRepository.words()
+                else hebrewDictionaryRepository.words()
+            },
+            commitText = typingController::commitWord,
+        )
+    }
     private val contextScorer = NgramContextScorer(
         windowSize = 3,
         bigrams = mapOf(
@@ -90,7 +101,10 @@ class NinjaKeysInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         inputMethodLifecycleOwner.onCreate()
-        window.window?.decorView?.setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
+        window.window?.decorView?.apply {
+            setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
+            setViewTreeSavedStateRegistryOwner(inputMethodLifecycleOwner)
+        }
     }
 
     override fun onCreateInputView(): View {
@@ -111,6 +125,8 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionChips.clear()
         visibleWordIds = emptyList()
         pendingCandidates = null
+        splitController.cancel()
+        splitGraceHandler.removeCallbacksAndMessages(null)
         cursorPosition = currentInputConnection
             ?.getExtractedText(ExtractedTextRequest(), 0)
             ?.selectionStart ?: 0
@@ -125,6 +141,8 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionChips.clear()
         visibleWordIds = emptyList()
         pendingCandidates = null
+        splitController.cancel()
+        splitGraceHandler.removeCallbacksAndMessages(null)
     }
 
     override fun onUpdateSelection(
@@ -143,6 +161,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
     override fun onDestroy() {
         inputMethodLifecycleOwner.onDestroy()
         correctionExecutor.shutdownNow()
+        splitGraceHandler.removeCallbacksAndMessages(null)
         composeInputView = null
         super.onDestroy()
     }
@@ -173,6 +192,16 @@ class NinjaKeysInputMethodService : InputMethodService() {
                     suggestionChips = sessionChips,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
+                    onSplitBegin = splitController::begin,
+                    onSplitMove = splitController::move,
+                    onSplitEnd = { pointerId, path, layout, atMs ->
+                        splitController.finish(pointerId, path, layout, atMs)
+                        val expectedSession = sessionId
+                        splitGraceHandler.postDelayed({
+                            if (sessionId == expectedSession) splitController.poll(System.currentTimeMillis())
+                        }, 351L)
+                    },
+                    onSplitCancel = splitController::cancel,
                 )
             }
         }

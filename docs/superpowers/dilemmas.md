@@ -28,3 +28,7 @@ until answered or intentionally resolved by the implementation.
   production n-gram asset still needs an approved source/license and size
   budget. Please choose the approved corpus and whether Hebrew ships with the
   first production model.
+- Stage 9 split typing: the grace window is currently a fixed 350ms in the
+  controller and the keyboard keeps space-started multi-finger commands. If
+  you want the grace duration or command/split boundary exposed in Settings,
+  that should be added to the Stage 10 typing tunables.

@@ -49,6 +49,10 @@ fun KeyboardInputView(
     suggestionChips: List<SuggestionChip> = emptyList(),
     onSuggestionRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onSuggestionUndo: (chipIndex: Int) -> Unit = {},
+    onSplitBegin: (pointerId: Int, point: GesturePoint, atMs: Long) -> Unit = { _, _, _ -> },
+    onSplitMove: (pointerId: Int, point: GesturePoint) -> Unit = { _, _ -> },
+    onSplitEnd: (pointerId: Int, path: GesturePath, layout: KeyboardLayout, atMs: Long) -> Unit = { _, _, _, _ -> },
+    onSplitCancel: () -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
@@ -63,6 +67,8 @@ fun KeyboardInputView(
         var multiStartX by remember(sessionId) { mutableStateOf(0f) }
         var multiStartY by remember(sessionId) { mutableStateOf(0f) }
         var startTime by remember(sessionId) { mutableStateOf(0L) }
+        var splitMode by remember(sessionId) { mutableStateOf(false) }
+        val splitPoints = remember(sessionId) { mutableMapOf<Int, MutableList<GesturePoint>>() }
         val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
 
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -83,16 +89,38 @@ fun KeyboardInputView(
                             points = listOf(event.toGesturePoint(0))
                             startKey = keyAt(event.x, event.y, keySizePx, layout, language)
                             multiFingerHandled = false
+                            splitMode = false
+                            splitPoints.clear()
                             startTime = event.eventTime
                             true
                         }
                         MotionEvent.ACTION_POINTER_DOWN -> {
-                            multiStartX = (0 until event.pointerCount).map { event.getX(it) }.average().toFloat()
-                            multiStartY = (0 until event.pointerCount).map { event.getY(it) }.average().toFloat()
+                            if (startKey != " ") {
+                                splitMode = true
+                                if (splitPoints.isEmpty()) {
+                                    splitPoints[pointerId] = points.toMutableList()
+                                    onSplitBegin(pointerId, points.first(), startTime)
+                                }
+                                val newIndex = event.actionIndex
+                                val newId = event.getPointerId(newIndex)
+                                val newPoint = event.toGesturePoint(newIndex)
+                                splitPoints[newId] = mutableListOf(newPoint)
+                                onSplitBegin(newId, newPoint, event.eventTime)
+                            } else {
+                                multiStartX = (0 until event.pointerCount).map { event.getX(it) }.average().toFloat()
+                                multiStartY = (0 until event.pointerCount).map { event.getY(it) }.average().toFloat()
+                            }
                             true
                         }
                         MotionEvent.ACTION_MOVE -> {
-                            if (event.pointerCount >= 2 && !multiFingerHandled) {
+                            if (splitMode) {
+                                for (index in 0 until event.pointerCount) {
+                                    val id = event.getPointerId(index)
+                                    val point = event.toGesturePoint(index)
+                                    splitPoints[id]?.add(point)
+                                    onSplitMove(id, point)
+                                }
+                            } else if (event.pointerCount >= 2 && !multiFingerHandled) {
                                 val x = (0 until event.pointerCount).map { event.getX(it) }.average().toFloat()
                                 val y = (0 until event.pointerCount).map { event.getY(it) }.average().toFloat()
                                 val trigger = multiFingerDetector.detect(multiStartX, multiStartY, x, y, event.pointerCount)
@@ -102,10 +130,31 @@ fun KeyboardInputView(
                                 }
                             }
                             val index = event.findPointerIndex(pointerId)
-                            if (index >= 0) points += event.toGesturePoint(index)
+                            if (!splitMode && index >= 0) points += event.toGesturePoint(index)
                             true
                         }
+                        MotionEvent.ACTION_POINTER_UP -> {
+                            if (splitMode) {
+                                val index = event.actionIndex
+                                val id = event.getPointerId(index)
+                                val path = splitPoints.remove(id)?.toList().orEmpty()
+                                if (path.isNotEmpty()) onSplitEnd(id, GesturePath(path), layout, event.eventTime)
+                                true
+                            } else {
+                                true
+                            }
+                        }
                         MotionEvent.ACTION_UP -> {
+                            if (splitMode) {
+                                val path = splitPoints.remove(pointerId)?.toList().orEmpty()
+                                if (path.isNotEmpty()) onSplitEnd(pointerId, GesturePath(path), layout, event.eventTime)
+                                splitMode = false
+                                splitPoints.clear()
+                                points = emptyList()
+                                pointerId = MotionEvent.INVALID_POINTER_ID
+                                startKey = null
+                                true
+                            } else {
                             val index = event.findPointerIndex(pointerId)
                             val completed = if (index >= 0) points + event.toGesturePoint(index) else points
                             if (multiFingerHandled) {
@@ -127,8 +176,12 @@ fun KeyboardInputView(
                             pointerId = MotionEvent.INVALID_POINTER_ID
                             startKey = null
                             true
+                            }
                         }
                         MotionEvent.ACTION_CANCEL -> {
+                            if (splitMode) onSplitCancel()
+                            splitMode = false
+                            splitPoints.clear()
                             points = emptyList()
                             pointerId = MotionEvent.INVALID_POINTER_ID
                             startKey = null

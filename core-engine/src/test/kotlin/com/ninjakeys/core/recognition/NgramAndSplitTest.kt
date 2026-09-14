@@ -50,4 +50,14 @@ class NgramAndSplitTest {
         val result = SplitWordMerger().merge(listOf("th"), listOf("ere"), listOf(WordEntry("there", 1.0)), 100, 451)
         assertEquals(emptyList<WordEntry>(), result)
     }
+
+    @Test
+    fun `split merger supports more than two touch ordered parts`() {
+        val result = SplitWordMerger().mergeParts(
+            listOf("t", "he", "re"),
+            listOf(WordEntry("there", 2.0), WordEntry("three", 1.0)),
+        )
+
+        assertEquals(listOf("there"), result.map { it.word })
+    }
 }

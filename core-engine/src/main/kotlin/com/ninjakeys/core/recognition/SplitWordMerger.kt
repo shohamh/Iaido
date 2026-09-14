@@ -3,6 +3,12 @@ package com.ninjakeys.core.recognition
 import com.ninjakeys.core.dictionary.WordEntry
 
 class SplitWordMerger(private val graceWindowMs: Long = 350L) {
+    fun mergeParts(parts: List<String>, dictionary: List<WordEntry>): List<WordEntry> {
+        if (parts.isEmpty() || parts.any { it.isEmpty() }) return emptyList()
+        val merged = parts.joinToString(separator = "")
+        return dictionary.filter { it.word == merged }
+    }
+
     fun merge(
         first: List<String>,
         second: List<String>,
