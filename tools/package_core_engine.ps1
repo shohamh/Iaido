@@ -1,4 +1,8 @@
-param([string]$OutputDirectory)
+param(
+    [string]$OutputDirectory,
+    [string]$MinAppVersion,
+    [string]$DownloadUrl
+)
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -46,6 +50,9 @@ try {
         artifact = $jarName
         version = $version
         sha256 = $sha256
+        minAppVersion = if ([string]::IsNullOrWhiteSpace($MinAppVersion)) { $version } else { $MinAppVersion }
+        downloadUrl = if ($null -eq $DownloadUrl) { "" } else { $DownloadUrl }
+        signature = ""
     } | ConvertTo-Json | Set-Content -LiteralPath $manifestTarget -Encoding utf8
     Write-Output "Packaged $jarName version $version in $resolvedOutput"
 }

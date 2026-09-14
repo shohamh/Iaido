@@ -79,4 +79,19 @@ class SwipeCommitControllerTest {
         assertEquals(listOf("hi", "no"), candidates)
         assertEquals(listOf("hi"), committed)
     }
+
+    @Test
+    fun `applies the runtime ranker before committing`() {
+        val committed = mutableListOf<String>()
+        val controller = SwipeCommitController(
+            recognizer = recognizer,
+            dictionary = listOf(WordEntry("hi", 1.0), WordEntry("no", 1.0)),
+            commitText = committed::add,
+            runtimeRanker = { candidates -> candidates.asReversed() },
+        )
+
+        controller.commit(pathThrough('h', 'i'), layout)
+
+        assertEquals(listOf("no"), committed)
+    }
 }

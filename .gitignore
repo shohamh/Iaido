@@ -10,3 +10,4 @@ bootstrap-gradle.java
 tools/__pycache__/
 dist/
 artifacts/
+secrets/

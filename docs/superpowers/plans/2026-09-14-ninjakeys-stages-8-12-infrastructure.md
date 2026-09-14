@@ -9,10 +9,12 @@
 ### Stage 8
 
 - [x] Integrate optional n-gram evidence into `GestureRecognizer`.
+- [x] Bundle pinned English and Hebrew `wordfreq` small vocabulary assets.
 
 ### Stage 9
 
 - [x] Add touch-order split-word merge with a bounded grace window.
+- [x] Show a live best-effort split-word preview during the gesture and grace window.
 
 ### Stage 10
 
@@ -25,4 +27,5 @@
 ### Stage 12
 
 - [x] Add reproducible core-engine JAR packaging script.
-- [ ] Add runtime DexClassLoader/update-check implementation after release endpoint, artifact trust, rollback, and fallback policy are decided; see `docs/superpowers/dilemmas.md`.
+- [x] Add signed-manifest verification, semver/minimum-version gates, HTTPS update fetching, ignored local signing key, atomic current/previous storage, and rollback-on-load-failure `DexClassLoader` support.
+- [x] Activate a loaded primitive-only ranking entrypoint behind a stable runtime facade; the compile-time engine remains the fallback when no verified update is available.

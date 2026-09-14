@@ -4,7 +4,7 @@
 
 **Goal:** Make Stage 12's locally verifiable distribution path reproducible and explicit: package `core-engine` with a checksum, support wireless-ADB APK iteration, expose semantic version metadata, and provide placeholder branding without inventing an unsafe hot-update protocol.
 
-**Architecture:** Gradle owns the reproducible JAR configuration. A repository-root PowerShell packager produces an ignored distribution directory containing the JAR and its SHA-256 manifest. A separate ADB helper handles APK deployment to an explicitly selected device. Runtime `DexClassLoader` updates remain a policy-gated follow-up because the repository has no signed release-manifest schema, trust key, rollback rule, or endpoint contract yet.
+**Architecture:** Gradle owns the reproducible JAR configuration. A repository-root PowerShell packager produces an ignored distribution directory containing the JAR and its SHA-256 manifest. A separate ADB helper handles APK deployment to an explicitly selected device. Signed GitHub-Release artifacts are verified and staged through current/previous rollback slots; the existing compile-time engine remains the safe fallback until a stable runtime facade activates a loaded implementation.
 
 **Tech Stack:** Kotlin/JVM, Android/Compose, Gradle, PowerShell, GitHub Releases, ADB.
 
@@ -17,6 +17,7 @@
 - GitHub Releases is the near-term distribution channel; Play Store compatibility is explicitly deferred.
 - Generated outputs must remain untracked and must never be used as source fixtures.
 - Every behavior change is test-first and must have fresh verification evidence before completion claims.
+- The update private key is never bundled or committed; only the APK-embedded public key is tracked.
 
 ---
 
@@ -100,22 +101,22 @@
 
   Commit the wireless-ADB helper, semantic version wiring, and placeholder icon.
 
-### Task 4: Review the dynamic-update boundary and document the blocker
+### Task 4: Implement the signed update boundary
 
 **Files:**
 - Modify: `docs/superpowers/dilemmas.md`
 - Modify: `docs/superpowers/plans/2026-09-14-ninjakeys-stages-8-12-infrastructure.md`
 
 **Interfaces:**
-- No runtime loader is added until the release endpoint, artifact signature/key trust, version comparison, rollback, and failure fallback rules are specified.
+- The update client accepts only HTTPS manifests/artifacts, verifies the pinned Ed25519 public key and SHA-256, installs only newer compatible versions, and rolls back once if a loaded class fails.
 
 - [x] **Step 1: Verify the missing policy inputs**
 
-  Confirm the repository has no signed manifest schema, public key, or updater API that can be safely consumed by a `DexClassLoader` implementation.
+  Confirm the repository contains the signed manifest schema, pinned public key, ignored private signing key, verifier, store, and loader tests.
 
 - [x] **Step 2: Record the decision boundary**
 
-  Add the exact missing inputs to `dilemmas.md` and keep only the runtime-update checkbox open in the cross-stage infrastructure plan. The packaged JAR path remains complete and independently verifiable.
+  Record the selected 24-hour check cadence in `dilemmas.md`; the packaged and verified staging path remains independently verifiable.
 
 - [x] **Step 3: Commit**
 

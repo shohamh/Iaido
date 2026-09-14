@@ -1,13 +1,17 @@
 package com.ninjakeys.app
 
 import android.inputmethodservice.InputMethodService
+import android.text.InputType
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.os.LocaleList
+import android.view.inputmethod.ExtractedText
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.ExtractedTextRequest
 import androidx.room.Room
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -27,6 +31,7 @@ import com.ninjakeys.core.dictionary.PersonalDictionary
 import com.ninjakeys.core.recognition.FlowCorrectionEngine
 import com.ninjakeys.core.recognition.FlowWord
 import com.ninjakeys.core.recognition.NgramContextScorer
+import com.ninjakeys.core.recognition.NgramScoreStore
 import com.ninjakeys.core.recognition.ScoredCandidate
 import com.ninjakeys.core.recognition.SessionCorrectionHistory
 import com.ninjakeys.core.recognition.SuggestionChip
@@ -42,6 +47,10 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateListOf<SuggestionChip>()
+    private val splitPreview = mutableStateOf<String?>(null)
+    private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
+    private val editorTextChangeDetector = EditorTextChangeDetector()
+    private var textObservationEnabled = false
     private var visibleWordIds: List<Int> = emptyList()
     private var cursorPosition = 0
     private var pendingCandidates: List<String>? = null
@@ -49,6 +58,14 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
+    private val runtimeCandidateRanker by lazy {
+        RuntimeCandidateRanker(
+            CoreEngineDexLoader(
+                applicationContext,
+                CoreEngineUpdateStore(java.io.File(applicationContext.filesDir, "core-engine-updates")),
+            ),
+        )
+    }
     private val splitController by lazy {
         SplitTypingController(
             dictionary = {
@@ -60,12 +77,13 @@ class NinjaKeysInputMethodService : InputMethodService() {
     }
     private val contextScorer = NgramContextScorer(
         windowSize = 3,
-        bigrams = mapOf(
-            ("in" to "the") to 2.0,
-            ("on" to "the") to 2.0,
-            ("to" to "the") to 2.0,
-            ("of" to "the") to 2.0,
-        ),
+        scoreStore = object : NgramScoreStore {
+            override fun bigram(previous: String, next: String): Double =
+                ngramStores.store(activeLanguage).bigram(previous, next)
+
+            override fun trigram(first: String, second: String, next: String): Double =
+                ngramStores.store(activeLanguage).trigram(first, second, next)
+        },
     )
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
     private val learningDictionary by lazy { PersonalDictionary(dictionaryRepository.words()) }
@@ -90,12 +108,23 @@ class NinjaKeysInputMethodService : InputMethodService() {
         }
     }
 
+    private val ngramStores by lazy {
+        AssetNgramScoreStoreRepository(
+            loadAsset = { name -> assets.open(name).use { it.readBytes() } },
+            dictionary = { language ->
+                if (language == Language.ENGLISH) dictionaryRepository.words()
+                else hebrewDictionaryRepository.words()
+            },
+        )
+    }
+
     private val controller by lazy {
         SwipeCommitController(
-            recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer()),
+            recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer(), contextScorer),
             dictionary = dictionaryRepository.words(),
             commitText = typingController::commitWord,
             onRecognized = ::rememberCandidates,
+            runtimeRanker = runtimeCandidateRanker::rank,
         )
     }
 
@@ -114,6 +143,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
             val persisted = learningRepository.entries()
             mainHandler.post { learningDictionary.restore(persisted) }
         }
+        correctionExecutor.execute { CoreEngineUpdateClient(applicationContext).checkAndInstall() }
         window.window?.decorView?.apply {
             setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
             setViewTreeSavedStateRegistryOwner(inputMethodLifecycleOwner)
@@ -136,14 +166,19 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionId += 1
         correctionHistory.clear()
         sessionChips.clear()
+        splitPreview.value = null
+        pendingManualEdit.value = null
         visibleWordIds = emptyList()
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
+        textObservationEnabled = info?.let(::supportsTextObservation) == true
         cursorPosition = currentInputConnection
-            ?.getExtractedText(ExtractedTextRequest(), 0)
-            ?.selectionStart ?: 0
+            ?.getExtractedText(extractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR)
+            ?.also(::resetEditorSnapshot)
+            ?.let { it.startOffset + it.selectionStart } ?: 0
+        if (!textObservationEnabled) editorTextChangeDetector.reset(EditorSnapshot("", 0, 0))
         composeInputView?.let(::renderInputView)
     }
 
@@ -153,11 +188,14 @@ class NinjaKeysInputMethodService : InputMethodService() {
         sessionId += 1
         correctionHistory.clear()
         sessionChips.clear()
+        splitPreview.value = null
+        pendingManualEdit.value = null
         visibleWordIds = emptyList()
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
+        textObservationEnabled = false
     }
 
     override fun onUpdateSelection(
@@ -170,7 +208,13 @@ class NinjaKeysInputMethodService : InputMethodService() {
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         cursorPosition = newSelStart
+        observeCurrentEditorText()
         refreshSuggestionChips()
+    }
+
+    override fun onUpdateExtractedText(token: Int, text: ExtractedText) {
+        super.onUpdateExtractedText(token, text)
+        if (textObservationEnabled) observeExtractedText(text)
     }
 
     override fun onDestroy() {
@@ -214,10 +258,21 @@ class NinjaKeysInputMethodService : InputMethodService() {
                         splitController.finish(pointerId, path, layout, atMs)
                         val expectedSession = sessionId
                         splitGraceHandler.postDelayed({
-                            if (sessionId == expectedSession) splitController.poll(System.currentTimeMillis())
+                            if (sessionId == expectedSession) {
+                                splitController.poll(System.currentTimeMillis())
+                                splitPreview.value = null
+                            }
                         }, 351L)
                     },
-                    onSplitCancel = splitController::cancel,
+                    onSplitCancel = {
+                        splitController.cancel()
+                        splitPreview.value = null
+                    },
+                    splitPreview = splitPreview.value,
+                    onSplitPreview = { preview -> splitPreview.value = preview },
+                    manualEditCandidate = pendingManualEdit.value,
+                    onConfirmManualEdit = ::confirmManualEdit,
+                    onDismissManualEdit = { pendingManualEdit.value = null },
                 )
             }
         }
@@ -230,6 +285,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private fun commitText(text: String) {
         val inputConnection = currentInputConnection ?: return
         val start = cursorPosition
+        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, start, text)
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
         val deletedWord = lastDeletedWord
@@ -252,6 +308,13 @@ class NinjaKeysInputMethodService : InputMethodService() {
     private fun deleteSurroundingText(count: Int) {
         val inputConnection = currentInputConnection ?: return
         val oldCursor = cursorPosition
+        if (textObservationEnabled) {
+            editorTextChangeDetector.expectOwnEdit(
+                start = (oldCursor - count).coerceAtLeast(0),
+                end = oldCursor,
+                replacement = "",
+            )
+        }
         if (!inputConnection.deleteSurroundingText(count, 0)) return
         lastDeletedWord = correctionHistory.words().firstOrNull { it.end == oldCursor }?.current
         val start = (oldCursor - count).coerceAtLeast(0)
@@ -339,6 +402,7 @@ class NinjaKeysInputMethodService : InputMethodService() {
         if (word.current == replacement) return false
         val oldCursor = cursorPosition
         if (!inputConnection.setSelection(word.start, word.end)) return false
+        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(word.start, word.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
         correctionHistory.replace(id, replacement)
         val delta = replacement.length - word.current.length
@@ -358,6 +422,75 @@ class NinjaKeysInputMethodService : InputMethodService() {
         correctionExecutor.execute {
             learningRepository.record(signal, original, replacement)
         }
+    }
+
+    private fun confirmManualEdit() {
+        val candidate = pendingManualEdit.value ?: return
+        if (candidate.original != candidate.replacement) {
+            recordLearning(
+                signal = LearningSignal.MANUAL_EDIT,
+                original = candidate.original,
+                replacement = candidate.replacement,
+            )
+        }
+        pendingManualEdit.value = null
+    }
+
+    private fun observeCurrentEditorText() {
+        if (!textObservationEnabled) return
+        currentInputConnection
+            ?.getExtractedText(extractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR)
+            ?.let(::observeExtractedText)
+    }
+
+    private fun observeExtractedText(text: ExtractedText) {
+        observeEditorSnapshot(
+            EditorSnapshot(
+                text = text.text?.toString().orEmpty(),
+                selectionStart = text.startOffset + text.selectionStart,
+                selectionEnd = text.startOffset + text.selectionEnd,
+                offset = text.startOffset,
+            ),
+        )
+    }
+
+    private fun resetEditorSnapshot(text: ExtractedText) {
+        editorTextChangeDetector.reset(
+            EditorSnapshot(
+                text = text.text?.toString().orEmpty(),
+                selectionStart = text.startOffset + text.selectionStart,
+                selectionEnd = text.startOffset + text.selectionEnd,
+                offset = text.startOffset,
+            ),
+        )
+    }
+
+    private fun observeEditorSnapshot(snapshot: EditorSnapshot) {
+        editorTextChangeDetector.observe(snapshot)?.let { candidate ->
+            if (pendingManualEdit.value == null) pendingManualEdit.value = candidate
+        }
+        cursorPosition = snapshot.selectionStart
+    }
+
+    private fun extractedTextRequest() = ExtractedTextRequest().apply {
+        token = TEXT_MONITOR_TOKEN
+        flags = 0
+        hintMaxChars = 10_000
+    }
+
+    private fun supportsTextObservation(info: android.view.inputmethod.EditorInfo): Boolean {
+        val inputType = info.inputType
+        if (inputType == InputType.TYPE_NULL) return false
+        if (inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) return false
+        return inputType and InputType.TYPE_MASK_VARIATION !in setOf(
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        )
+    }
+
+    private companion object {
+        const val TEXT_MONITOR_TOKEN = 0x4E4B
     }
 
     private fun switchLanguage() {
