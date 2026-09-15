@@ -160,7 +160,25 @@ class SwipeTypingCoordinatorTest {
             pollSplitParts = { atMs -> if (atMs == 350L) expected else null },
         )
 
-        assertEquals(expected, coordinator.poll(350L))
+        assertEquals(SplitPollOutcome.Resolved(expected), coordinator.poll(350L))
+    }
+
+    @Test
+    fun `poll reports pending split input without invalidating inference`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("in"),
+            pollSplitParts = { null },
+            isSplitPending = { true },
+        )
+
+        coordinator.onSingleSwipe(path(1), layout)
+
+        assertEquals(SplitPollOutcome.Pending, coordinator.poll(350L))
+        coordinator.onNonSwipeInput()
+        assertEquals("in", editor.text)
     }
 
     private fun coordinator(
@@ -170,6 +188,7 @@ class SwipeTypingCoordinatorTest {
         onFinalized: (List<String>) -> Unit = {},
         hasFollowingWhitespace: () -> Boolean = { false },
         pollSplitParts: (Long) -> SplitWordParts? = { null },
+        isSplitPending: () -> Boolean = { false },
     ) = SwipeTypingCoordinator(
         spacingMode = { mode },
         recognize = { path, _ -> candidatesFor(path) },
@@ -177,9 +196,10 @@ class SwipeTypingCoordinatorTest {
         previousWords = { emptyList() },
         cursorPosition = editor::cursor,
         replaceHostSpan = editor::replace,
-        onFinalizedWords = { _, words -> onFinalized(words) },
+        onFinalizedWords = { _, words, _ -> onFinalized(words) },
         hasFollowingWhitespace = hasFollowingWhitespace,
         pollSplitParts = pollSplitParts,
+        isSplitPending = isSplitPending,
     )
 
     private fun candidatesFor(path: GesturePath): List<ScoredCandidate> = when (path.points.firstOrNull()?.x?.toInt()) {

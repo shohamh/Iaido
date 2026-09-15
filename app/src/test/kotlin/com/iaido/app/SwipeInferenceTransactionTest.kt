@@ -49,7 +49,7 @@ class SwipeInferenceTransactionTest {
         val transaction = SwipeInferenceTransaction(
             cursorPosition = editor::cursor,
             replaceHostSpan = editor::replace,
-            onFinalized = { _, words -> finalized += words },
+            onFinalized = { _, words, _ -> finalized += words },
         )
         transaction.append(unit("first", "some"))
         assertTrue(transaction.replaceCurrent(listOf("some"), listOf(option(listOf("some")))))
@@ -83,6 +83,21 @@ class SwipeInferenceTransactionTest {
         assertEquals(previousSpan, transaction.sourceSpan)
         assertEquals(previousWords, transaction.currentWords)
         assertEquals(previousAlternatives, transaction.alternatives)
+    }
+
+    @Test
+    fun `finalization retains only same-shaped ranked candidates for each inferred word`() {
+        val editor = FakeEditor()
+        val alternatives = listOf(
+            option(listOf("in", "the")),
+            option(listOf("on", "the")),
+            option(listOf("into")),
+        )
+
+        assertEquals(
+            listOf(listOf("in", "on"), listOf("the")),
+            inferenceWordCandidates(listOf("in", "the"), alternatives),
+        )
     }
 
     private fun unit(id: String, word: String): GestureUnit = GestureUnit(

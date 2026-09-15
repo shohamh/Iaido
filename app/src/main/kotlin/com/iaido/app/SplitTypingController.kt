@@ -49,5 +49,7 @@ class SplitTypingController(
 
     fun pollParts(atMs: Long) = session.poll(atMs)
 
+    fun isPending() = session.isPending()
+
     fun cancel() = session.cancel()
 }

@@ -32,6 +32,7 @@ import com.iaido.core.recognition.FlowWord
 import com.iaido.core.recognition.NgramContextScorer
 import com.iaido.core.recognition.NgramScoreStore
 import com.iaido.core.recognition.ScoredCandidate
+import com.iaido.core.recognition.SegmentationOption
 import com.iaido.core.recognition.SessionCorrectionHistory
 import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.typing.SpacingMode
@@ -150,6 +151,7 @@ class IaidoInputMethodService : InputMethodService() {
                 currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.isWhitespace() == true
             },
             pollSplitParts = splitController::pollParts,
+            isSplitPending = splitController::isPending,
         )
     }
 
@@ -277,7 +279,7 @@ class IaidoInputMethodService : InputMethodService() {
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     return@post
                                 }
-                                rememberCandidates(results)
+                                rememberCandidatesForCommittedSwipe(results)
                                 swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
                             }
                         }
@@ -332,10 +334,14 @@ class IaidoInputMethodService : InputMethodService() {
                         val expectedLanguage = activeLanguage
                         splitGraceHandler.postDelayed({
                             if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@postDelayed
-                            val parts = swipeTypingCoordinator.poll(System.currentTimeMillis()) ?: run {
-                                swipeTypingCoordinator.onRecognitionFailed()
-                                splitPreview.value = null
-                                return@postDelayed
+                            val parts = when (val result = swipeTypingCoordinator.poll(System.currentTimeMillis())) {
+                                is SplitPollOutcome.Resolved -> result.parts
+                                SplitPollOutcome.Pending -> return@postDelayed
+                                SplitPollOutcome.Cancelled -> {
+                                    swipeTypingCoordinator.onRecognitionFailed()
+                                    splitPreview.value = null
+                                    return@postDelayed
+                                }
                             }
                             val dictionary = activeDictionary()
                             correctionExecutor.execute {
@@ -347,7 +353,7 @@ class IaidoInputMethodService : InputMethodService() {
                                         splitPreview.value = null
                                         return@post
                                     }
-                                    rememberCandidates(candidates.flatten())
+                                    rememberCandidatesForCommittedSwipe(candidates.flatten())
                                     if (parts.paths.size == 1) {
                                         swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
                                     } else {
@@ -385,6 +391,14 @@ class IaidoInputMethodService : InputMethodService() {
         pendingCandidates = results.take(5).map { it.word.word }
     }
 
+    private fun rememberCandidatesForCommittedSwipe(results: List<ScoredCandidate>) {
+        if (spacingModeForTypingCoordinator == SpacingMode.INFER_SPACES) {
+            pendingCandidates = null
+        } else {
+            rememberCandidates(results)
+        }
+    }
+
     private fun activeDictionary() = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
     else hebrewDictionaryRepository.words()
 
@@ -403,11 +417,17 @@ class IaidoInputMethodService : InputMethodService() {
         }
     }
 
-    private fun recordFinalizedInferenceWords(span: HostTextSpan, words: List<String>) {
+    private fun recordFinalizedInferenceWords(
+        span: HostTextSpan,
+        words: List<String>,
+        alternatives: List<SegmentationOption>,
+    ) {
+        pendingCandidates = null
         correctionHistory.deleteRange(span.start, span.end)
+        val candidatesByWord = inferenceWordCandidates(words, alternatives)
         var start = span.start
-        words.forEach { word ->
-            correctionHistory.record(start, start + word.length, word, listOf(word))
+        words.forEachIndexed { index, word ->
+            correctionHistory.record(start, start + word.length, word, candidatesByWord[index])
             start += word.length + 1
         }
         refreshSuggestionChips()

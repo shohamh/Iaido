@@ -6,8 +6,15 @@ import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureUnit
 import com.iaido.core.recognition.InferenceSegmenter
 import com.iaido.core.recognition.ScoredCandidate
+import com.iaido.core.recognition.SegmentationOption
 import com.iaido.core.recognition.SplitWordParts
 import com.iaido.core.typing.SpacingMode
+
+sealed interface SplitPollOutcome {
+    data class Resolved(val parts: SplitWordParts) : SplitPollOutcome
+    data object Pending : SplitPollOutcome
+    data object Cancelled : SplitPollOutcome
+}
 
 /** Coordinates completed recognition units with one editable host-text span. */
 class SwipeTypingCoordinator(
@@ -21,9 +28,10 @@ class SwipeTypingCoordinator(
         val cursor = cursorPosition()
         replaceHostSpan(HostTextSpan(cursor, cursor), text)
     },
-    onFinalizedWords: (HostTextSpan, List<String>) -> Unit = { _, _ -> },
+    onFinalizedWords: (HostTextSpan, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
     private val hasFollowingWhitespace: () -> Boolean = { false },
     private val pollSplitParts: (Long) -> SplitWordParts? = { null },
+    private val isSplitPending: () -> Boolean = { false },
     private val segmenter: InferenceSegmenter = InferenceSegmenter(),
 ) {
     private val transaction = SwipeInferenceTransaction(
@@ -64,7 +72,8 @@ class SwipeTypingCoordinator(
     fun onRecognitionFailed() = finalizeAndClear()
 
     /** Resolves delayed split-session output through the coordinator seam. */
-    fun poll(atMs: Long): SplitWordParts? = pollSplitParts(atMs)
+    fun poll(atMs: Long): SplitPollOutcome = pollSplitParts(atMs)?.let(SplitPollOutcome::Resolved)
+        ?: if (isSplitPending()) SplitPollOutcome.Pending else SplitPollOutcome.Cancelled
 
     private fun accept(unit: GestureUnit) {
         when (spacingMode()) {
@@ -87,12 +96,19 @@ class SwipeTypingCoordinator(
 
     private fun slideInferenceWindow(nextUnit: GestureUnit) {
         val oldestUnit = transaction.units.first()
-        val finalizedWords = segmenter.rank(listOf(oldestUnit), previousWords(), dictionary())
-            .firstOrNull()?.words ?: oldestUnit.topWords()
+        val finalizedAlternatives = segmenter.rank(listOf(oldestUnit), previousWords(), dictionary())
+        val finalizedWords = finalizedAlternatives.firstOrNull()?.words ?: oldestUnit.topWords()
         val retainedUnits = transaction.units.drop(1) + nextUnit
         val alternatives = segmenter.rank(retainedUnits, previousWords() + finalizedWords, dictionary())
         val retainedWords = alternatives.firstOrNull()?.words ?: nextUnit.topWords()
-        if (!transaction.slideWindow(finalizedWords, retainedUnits, retainedWords, alternatives)) {
+        if (!transaction.slideWindow(
+                finalizedWords,
+                finalizedAlternatives,
+                retainedUnits,
+                retainedWords,
+                alternatives,
+            )
+        ) {
             finalizeAndClear()
         }
     }

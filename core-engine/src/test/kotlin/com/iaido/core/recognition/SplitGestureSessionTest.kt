@@ -32,6 +32,21 @@ class SplitGestureSessionTest {
     }
 
     @Test
+    fun `poll remains pending while another pointer is still active`() {
+        val session = SplitGestureSession()
+        session.begin(1, point(1f, 0), 0)
+        session.begin(2, point(2f, 10), 10)
+        session.end(1, 20, "th")
+
+        assertEquals(null, session.poll(400))
+        assertTrue(session.isPending())
+
+        session.end(2, 450, "ere")
+        assertEquals(listOf("th", "ere"), session.poll(800)?.parts)
+        assertFalse(session.isPending())
+    }
+
+    @Test
     fun `tap during grace extends the latest part but outside it is rejected`() {
         val session = SplitGestureSession()
         session.begin(1, point(1f, 0), 0)

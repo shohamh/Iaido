@@ -17,7 +17,7 @@ data class HostTextSpan(val start: Int, val end: Int) {
 class SwipeInferenceTransaction(
     private val cursorPosition: () -> Int,
     private val replaceHostSpan: (HostTextSpan, String) -> Boolean,
-    private val onFinalized: (HostTextSpan, List<String>) -> Unit = { _, _ -> },
+    private val onFinalized: (HostTextSpan, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
 ) {
     private val mutableUnits = mutableListOf<GestureUnit>()
 
@@ -53,6 +53,7 @@ class SwipeInferenceTransaction(
      */
     fun slideWindow(
         finalizedWords: List<String>,
+        finalizedAlternatives: List<SegmentationOption>,
         retainedUnits: List<GestureUnit>,
         retainedWords: List<String>,
         retainedAlternatives: List<SegmentationOption>,
@@ -72,13 +73,13 @@ class SwipeInferenceTransaction(
         sourceSpan = HostTextSpan(finalizedSpan.end + 1, replacedSpan.start + replacement.length)
         currentWords = retainedWords
         alternatives = retainedAlternatives
-        onFinalized(finalizedSpan, finalizedWords)
+        onFinalized(finalizedSpan, finalizedWords, finalizedAlternatives)
         return true
     }
 
     fun finalize() {
         val span = sourceSpan ?: return
-        if (currentWords.isNotEmpty()) onFinalized(span, currentWords)
+        if (currentWords.isNotEmpty()) onFinalized(span, currentWords, alternatives)
     }
 
     fun clear() {
@@ -91,4 +92,17 @@ class SwipeInferenceTransaction(
     companion object {
         const val MAX_GESTURE_UNITS = 6
     }
+}
+
+/** Candidate rows that preserve word positions across equally shaped inferences. */
+internal fun inferenceWordCandidates(
+    words: List<String>,
+    alternatives: List<SegmentationOption>,
+): List<List<String>> = words.indices.map { index ->
+    alternatives.asSequence()
+        .filter { it.words.size == words.size }
+        .map { it.words[index] }
+        .distinct()
+        .toList()
+        .ifEmpty { listOf(words[index]) }
 }
