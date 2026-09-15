@@ -62,6 +62,7 @@ class IaidoInputMethodService : InputMethodService() {
     private var backspaceSwipeText = ""
     private var backspaceSwipeCursor = 0
     private var backspaceSwipeDeletedCount = 0
+    private var inferenceReplacementInProgress = false
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
@@ -135,6 +136,19 @@ class IaidoInputMethodService : InputMethodService() {
         )
     }
 
+    private val swipeTypingCoordinator by lazy {
+        SwipeTypingCoordinator(
+            spacingMode = { spacingModeForTypingCoordinator },
+            recognize = { path, layout -> controller.recognize(path, layout, activeDictionary()) },
+            dictionary = ::activeDictionary,
+            previousWords = { correctionHistory.words().takeLast(3).map { it.current } },
+            cursorPosition = { cursorPosition },
+            replaceHostSpan = ::replaceInferenceHostSpan,
+            commitCompletedText = typingController::commitWord,
+            onFinalizedWords = ::recordFinalizedInferenceWords,
+        )
+    }
+
     private val typingController by lazy {
         TypingController(
             commitText = ::commitText,
@@ -193,6 +207,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        swipeTypingCoordinator.onNonSwipeInput()
         super.onFinishInputView(finishingInput)
         inputMethodLifecycleOwner.onFinishInputView()
         sessionId += 1
@@ -217,6 +232,9 @@ class IaidoInputMethodService : InputMethodService() {
         candidatesEnd: Int,
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (!inferenceReplacementInProgress && (newSelStart != cursorPosition || newSelEnd != newSelStart)) {
+            swipeTypingCoordinator.onCursorMoved()
+        }
         cursorPosition = newSelStart
         observeCurrentEditorText()
         refreshSuggestionChips()
@@ -245,35 +263,52 @@ class IaidoInputMethodService : InputMethodService() {
                     onSwipe = { path, layout ->
                         val expectedSession = sessionId
                         val language = activeLanguage
-                        val dictionary = if (language == Language.ENGLISH) learningDictionary.entries()
-                        else hebrewDictionaryRepository.words()
+                        val dictionary = activeDictionary()
                         correctionExecutor.execute {
                             val results = controller.recognize(path, layout, dictionary)
                             mainHandler.post {
                                 if (sessionId != expectedSession || activeLanguage != language || results.isEmpty()) return@post
-                                rememberCandidates(results)
-                                typingController.commitWord(results.first().word.word)
+                                swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
                             }
                         }
                     },
                     onTap = { value ->
+                        swipeTypingCoordinator.onNonSwipeInput()
                         when (value) {
                             "⌫" -> typingController.backspace()
                             "🌐" -> switchLanguage()
                             else -> typingController.tap(value)
                         }
                     },
-                    onFlick = { letter, direction -> typingController.flick(letter, direction) },
-                    onPunctuationToSpace = typingController::punctuationToSpace,
+                    onFlick = { letter, direction ->
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        typingController.flick(letter, direction)
+                    },
+                    onPunctuationToSpace = { punctuation ->
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        typingController.punctuationToSpace(punctuation)
+                    },
                     language = activeLanguage,
                     onLanguageSwitch = ::switchLanguage,
-                    onCommand = ::handleCommand,
+                    onCommand = { trigger ->
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        handleCommand(trigger)
+                    },
                     suggestionChips = sessionChips.value,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
-                    onBackspaceRepeat = typingController::backspace,
-                    onBackspacePressStart = ::beginBackspaceSwipe,
-                    onBackspaceSwipeStart = ::beginBackspaceSwipe,
+                    onBackspaceRepeat = {
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        typingController.backspace()
+                    },
+                    onBackspacePressStart = {
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        beginBackspaceSwipe()
+                    },
+                    onBackspaceSwipeStart = {
+                        swipeTypingCoordinator.onNonSwipeInput()
+                        beginBackspaceSwipe()
+                    },
                     onBackspaceSwipeDistance = ::updateBackspaceSwipe,
                     onBackspaceSwipeEnd = ::finishBackspaceSwipe,
                     onBackspaceSwipeCancel = ::cancelBackspaceSwipe,
@@ -284,10 +319,22 @@ class IaidoInputMethodService : InputMethodService() {
                     onSplitEnd = { pointerId, path, layout, atMs ->
                         splitController.finish(pointerId, path, layout, atMs)
                         val expectedSession = sessionId
+                        val expectedLanguage = activeLanguage
                         splitGraceHandler.postDelayed({
-                            if (sessionId == expectedSession) {
-                                splitController.poll(System.currentTimeMillis())
-                                splitPreview.value = null
+                            if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@postDelayed
+                            val parts = splitController.pollParts(System.currentTimeMillis()) ?: return@postDelayed
+                            val dictionary = activeDictionary()
+                            correctionExecutor.execute {
+                                val candidates = parts.paths.map { part -> controller.recognize(part, layout, dictionary) }
+                                mainHandler.post {
+                                    if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@post
+                                    if (parts.paths.size == 1) {
+                                        swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
+                                    } else {
+                                        swipeTypingCoordinator.onRecognizedTwoFingerResult(parts.paths, candidates)
+                                    }
+                                    splitPreview.value = null
+                                }
                             }
                         }, 351L)
                     },
@@ -315,6 +362,33 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun rememberCandidates(results: List<ScoredCandidate>) {
         pendingCandidates = results.take(5).map { it.word.word }
+    }
+
+    private fun activeDictionary() = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
+    else hebrewDictionaryRepository.words()
+
+    private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String) {
+        val inputConnection = currentInputConnection ?: return
+        inferenceReplacementInProgress = true
+        try {
+            if (!inputConnection.setSelection(span.start, span.end)) return
+            if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(span.start, span.end, replacement)
+            if (!inputConnection.commitText(replacement, 1)) return
+            cursorPosition = span.start + replacement.length
+            inputConnection.setSelection(cursorPosition, cursorPosition)
+        } finally {
+            inferenceReplacementInProgress = false
+        }
+    }
+
+    private fun recordFinalizedInferenceWords(span: HostTextSpan, words: List<String>) {
+        correctionHistory.deleteRange(span.start, span.end)
+        var start = span.start
+        words.forEach { word ->
+            correctionHistory.record(start, start + word.length, word, listOf(word))
+            start += word.length + 1
+        }
+        refreshSuggestionChips()
     }
 
     private fun commitText(text: String) {
@@ -581,6 +655,7 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun observeEditorSnapshot(snapshot: EditorSnapshot) {
         editorTextChangeDetector.observe(snapshot)?.let { candidate ->
+            swipeTypingCoordinator.onExternalEdit()
             if (pendingManualEdit.value == null) pendingManualEdit.value = candidate
         }
         cursorPosition = snapshot.selectionStart
@@ -609,6 +684,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun switchLanguage() {
+        swipeTypingCoordinator.onNonSwipeInput()
         activeLanguage = languageSwitcher.next()
         composeInputView?.let(::renderInputView)
     }
