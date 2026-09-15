@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.iaido.core.recognition.GestureRecognizer
+import com.iaido.core.recognition.InferenceSegmenter
 import com.iaido.core.recognition.ShapePathScorer
 import com.iaido.core.recognition.TrieCandidateGenerator
 import com.iaido.core.language.Language
@@ -140,6 +141,7 @@ class IaidoInputMethodService : InputMethodService() {
 
     private val swipeTypingCoordinator by lazy {
         SwipeTypingCoordinator(
+            segmenter = InferenceSegmenter(contextScorer = contextScorer),
             spacingMode = { spacingModeForTypingCoordinator },
             recognize = { path, layout -> controller.recognize(path, layout, activeDictionary()) },
             dictionary = ::activeDictionary,

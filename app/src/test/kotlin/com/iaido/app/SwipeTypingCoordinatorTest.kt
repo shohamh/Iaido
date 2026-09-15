@@ -4,6 +4,8 @@ import com.iaido.core.dictionary.WordEntry
 import com.iaido.core.gesture.GesturePath
 import com.iaido.core.gesture.GesturePoint
 import com.iaido.core.layout.KeyboardLayout
+import com.iaido.core.recognition.InferenceSegmenter
+import com.iaido.core.recognition.NgramContextScorer
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SplitWordParts
 import com.iaido.core.typing.SpacingMode
@@ -111,6 +113,48 @@ class SwipeTypingCoordinatorTest {
             ),
             editor.replacements,
         )
+    }
+
+    @Test
+    fun `context aware segmenter revises an earlier boundary once later context arrives`() {
+        // Regression coverage for the production wiring gap: IaidoInputMethodService must
+        // supply its real, fixture/dictionary-aware contextScorer to the InferenceSegmenter
+        // it hands to SwipeTypingCoordinator. This test proves the coordinator's own logic
+        // does the right thing whenever it *is* given a context-aware segmenter (mirroring
+        // InferenceSegmenterTest's "context can change a sequential boundary", but driven
+        // through the coordinator across multiple onSingleSwipe calls, since that's the
+        // layer where the real wiring gap lived).
+        val editor = FakeEditor()
+        val dictionary = listOf(
+            WordEntry("in", 100.0),
+            WordEntry("to", 100.0),
+            WordEntry("into", 1.0),
+            WordEntry("the", 100.0),
+        )
+        val segmenter = InferenceSegmenter(
+            contextScorer = NgramContextScorer(
+                bigrams = mapOf(
+                    ("in" to "to") to 10.0,
+                    ("into" to "the") to 30.0,
+                ),
+            ),
+        )
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary,
+            segmenter = segmenter,
+            recognize = { path, _ -> contextRevisionCandidatesFor(path) },
+        )
+
+        coordinator.onSingleSwipe(path(21), layout)
+        coordinator.onSingleSwipe(path(22), layout)
+
+        assertEquals("in to", editor.text)
+
+        coordinator.onSingleSwipe(path(23), layout)
+
+        assertEquals("into the", editor.text)
     }
 
     @Test
@@ -333,9 +377,12 @@ class SwipeTypingCoordinatorTest {
         // scenarios that aren't about capitalization stay unaffected by it; tests that
         // care about capitalization pass their own textBeforeCursor explicitly.
         textBeforeCursor: () -> String = { "mid-sentence " },
+        segmenter: InferenceSegmenter = InferenceSegmenter(),
+        recognize: (GesturePath, KeyboardLayout) -> List<ScoredCandidate> = { path, _ -> candidatesFor(path) },
     ) = SwipeTypingCoordinator(
+        segmenter = segmenter,
         spacingMode = { mode },
-        recognize = { path, _ -> candidatesFor(path) },
+        recognize = recognize,
         dictionary = { dictionary },
         previousWords = { emptyList() },
         cursorPosition = editor::cursor,
@@ -361,6 +408,14 @@ class SwipeTypingCoordinatorTest {
     }
 
     private fun candidate(word: String) = ScoredCandidate(WordEntry(word, 1.0), 1.0)
+
+    private fun contextRevisionCandidatesFor(path: GesturePath): List<ScoredCandidate> =
+        when (path.points.firstOrNull()?.x?.toInt()) {
+            21 -> listOf(candidate("in"))
+            22 -> listOf(candidate("to"))
+            23 -> listOf(candidate("the"))
+            else -> emptyList()
+        }
 
     private fun dictionary(vararg words: String) = words.map { WordEntry(it, 1.0) }
 
