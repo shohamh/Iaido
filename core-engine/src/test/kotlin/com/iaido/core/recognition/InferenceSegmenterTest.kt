@@ -140,6 +140,28 @@ class InferenceSegmenterTest {
         assertEquals(listOf("a"), options.first().words)
     }
 
+    @Test
+    fun `dictionary frequency decides otherwise equal candidate ranking`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(scoredUnit("frequency", "apple" to 1.0, "zebra" to 1.0)),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("apple", 1.0), WordEntry("zebra", 100.0)),
+        )
+
+        assertEquals(listOf("zebra"), options.first().words)
+    }
+
+    @Test
+    fun `path fit decides otherwise equal candidate ranking`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(scoredUnit("path", "apple" to 1.0, "zebra" to 2.0)),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("apple", 1.0), WordEntry("zebra", 1.0)),
+        )
+
+        assertEquals(listOf("zebra"), options.first().words)
+    }
+
     private fun dictionary(vararg words: String): List<WordEntry> =
         words.map { WordEntry(it, 1.0) }
 
@@ -147,6 +169,13 @@ class InferenceSegmenterTest {
         id = id,
         paths = listOf(path),
         candidates = listOf(words.map { ScoredCandidate(WordEntry(it, 1.0), 1.0) }),
+        concurrent = false,
+    )
+
+    private fun scoredUnit(id: String, vararg candidates: Pair<String, Double>): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path),
+        candidates = listOf(candidates.map { (word, score) -> ScoredCandidate(WordEntry(word, 1.0), score) }),
         concurrent = false,
     )
 
