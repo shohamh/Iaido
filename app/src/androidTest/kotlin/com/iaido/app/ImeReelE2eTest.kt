@@ -1,6 +1,9 @@
 package com.iaido.app
 
+import androidx.test.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,6 +34,19 @@ class ImeReelE2eTest {
             val before = state().expectedText
             val after = swipeSuggestionImmediately(index = 0, verticalDistancePx = -96f)
             check(after != before) { "Reel did not respond to an immediate (no long-press) swipe: '$before'" }
+        }
+    }
+
+    @Test
+    fun previouslyTypedCorrectionChipsStayVisibleWhileTheNextWordIsMidSwipe() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("there")
+            swipeSuggestion(index = 0, verticalDistancePx = -96f)
+            device.waitForIdle()
+            check(device.findObject(By.desc("Iaido suggestion 0")) != null) {
+                "First word's correction chip disappeared while a later word's swipe reel is active"
+            }
         }
     }
 }

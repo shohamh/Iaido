@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -64,19 +63,11 @@ fun SuggestionStrip(
     onReplacementRelease: (ReplacementOption) -> Unit = {},
     onReplacementCancel: () -> Unit = {},
 ) {
-    if (replacementOptions.isNotEmpty()) {
-        ReplacementSuggestionStrip(
-            options = replacementOptions,
-            rtl = rtl,
-            onPreview = onReplacementPreview,
-            onRelease = onReplacementRelease,
-            onCancel = onReplacementCancel,
-        )
-        return
-    }
     val ordered = if (rtl) chips.asReversed() else chips
-    val visibleSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
+    val chipSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
         ?: reelVisibleSlotCount(0)
+    val replacementSlotCount = if (replacementOptions.isEmpty()) 0 else reelVisibleSlotCount(replacementOptions.size)
+    val visibleSlotCount = maxOf(chipSlotCount, replacementSlotCount)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     Row(
         modifier = Modifier
@@ -87,6 +78,16 @@ fun SuggestionStrip(
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (replacementOptions.isNotEmpty() && rtl) {
+            ReplacementReelSlot(
+                options = replacementOptions,
+                rtl = rtl,
+                viewportHeight = viewportHeight,
+                onPreview = onReplacementPreview,
+                onRelease = onReplacementRelease,
+                onCancel = onReplacementCancel,
+            )
+        }
         ordered.forEachIndexed { index, chip ->
             SuggestionChipView(
                 chip = chip,
@@ -97,51 +98,14 @@ fun SuggestionStrip(
                 onUndo = { onUndo(index) },
             )
         }
-    }
-}
-
-@Composable
-private fun ReplacementSuggestionStrip(
-    options: List<ReplacementOption>,
-    rtl: Boolean,
-    onPreview: (ReplacementOption) -> Unit,
-    onRelease: (ReplacementOption) -> Unit,
-    onCancel: () -> Unit,
-) {
-    val visibleSlotCount = reelVisibleSlotCount(options.size)
-    val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
-    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
-        ReplacementReelSelection()
-    }
-    selection.updateOptions(options)
-    val selectedIndex = selection.selectedIndex()
-
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(viewportHeight + 8.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item(key = options.joinToString { it.id }) {
-            ReplacementReelGroup(
-                options = options,
-                selectedIndex = selectedIndex,
+        if (replacementOptions.isNotEmpty() && !rtl) {
+            ReplacementReelSlot(
+                options = replacementOptions,
                 rtl = rtl,
                 viewportHeight = viewportHeight,
-                onPreview = { option ->
-                    selection.preview(option)
-                    onPreview(option)
-                },
-                onRelease = { option ->
-                    selection.release(option)
-                    onRelease(option)
-                },
-                onCancel = {
-                    selection.cancel()
-                    onCancel()
-                },
+                onPreview = onReplacementPreview,
+                onRelease = onReplacementRelease,
+                onCancel = onReplacementCancel,
             )
         }
     }
@@ -153,6 +117,40 @@ private val ReplacementReelSelectionSaver = Saver<ReplacementReelSelection, Stri
         ReplacementReelSelection(initialSelectedOptionId = selectedOptionId.ifEmpty { null })
     },
 )
+
+@Composable
+private fun ReplacementReelSlot(
+    options: List<ReplacementOption>,
+    rtl: Boolean,
+    viewportHeight: androidx.compose.ui.unit.Dp,
+    onPreview: (ReplacementOption) -> Unit,
+    onRelease: (ReplacementOption) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
+        ReplacementReelSelection()
+    }
+    selection.updateOptions(options)
+    val selectedIndex = selection.selectedIndex()
+    ReplacementReelGroup(
+        options = options,
+        selectedIndex = selectedIndex,
+        rtl = rtl,
+        viewportHeight = viewportHeight,
+        onPreview = { option ->
+            selection.preview(option)
+            onPreview(option)
+        },
+        onRelease = { option ->
+            selection.release(option)
+            onRelease(option)
+        },
+        onCancel = {
+            selection.cancel()
+            onCancel()
+        },
+    )
+}
 
 @Composable
 private fun ReplacementReelGroup(
