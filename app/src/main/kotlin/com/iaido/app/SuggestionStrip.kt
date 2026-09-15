@@ -352,12 +352,13 @@ private fun SuggestionChipView(
                 .clipToBounds()
                 .padding(horizontal = 14.dp),
         ) {
+            val centerSlotOffset = reelCenterSlotOffset(visibleSlotCount)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
                         translationY = with(density) {
-                            ((renderedOffset - chip.selectedIndex) * REEL_STEP_DP).dp.toPx()
+                            ((renderedOffset - chip.selectedIndex + centerSlotOffset) * REEL_STEP_DP).dp.toPx()
                         }
                     },
             ) {

@@ -11,9 +11,23 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `reel viewport always shows one candidate`() {
-        assertEquals(1, reelVisibleSlotCount(candidateCount = 5))
+    fun `reel viewport shows up to three candidates so alternatives are visible at rest`() {
         assertEquals(1, reelVisibleSlotCount(candidateCount = 1))
+        assertEquals(2, reelVisibleSlotCount(candidateCount = 2))
+        assertEquals(3, reelVisibleSlotCount(candidateCount = 3))
+        assertEquals(3, reelVisibleSlotCount(candidateCount = 5))
+    }
+
+    @Test
+    fun `reel viewport never shrinks below one slot even with no candidates`() {
+        assertEquals(1, reelVisibleSlotCount(candidateCount = 0))
+    }
+
+    @Test
+    fun `selected candidate centers within a multi-slot viewport`() {
+        assertEquals(0f, reelCenterSlotOffset(visibleSlotCount = 1))
+        assertEquals(0.5f, reelCenterSlotOffset(visibleSlotCount = 2))
+        assertEquals(1f, reelCenterSlotOffset(visibleSlotCount = 3))
     }
 
     @Test
