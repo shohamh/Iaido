@@ -34,6 +34,9 @@ import com.iaido.core.recognition.NgramScoreStore
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SessionCorrectionHistory
 import com.iaido.core.recognition.SuggestionChip
+import com.iaido.core.typing.SpacingMode
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
 
 class IaidoInputMethodService : InputMethodService() {
@@ -42,6 +45,8 @@ class IaidoInputMethodService : InputMethodService() {
     private var sessionId = 0
     private val languageSwitcher = LanguageSwitcher()
     private var activeLanguage = Language.ENGLISH
+    internal var spacingModeForTypingCoordinator = SpacingMode.INFER_SPACES
+        private set
     private val commandMode = CommandModeController(::executeCommand)
     private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
@@ -141,6 +146,7 @@ class IaidoInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         inputMethodLifecycleOwner.onCreate()
+        loadSpacingMode()
         correctionExecutor.execute {
             val persisted = learningRepository.entries()
             mainHandler.post { learningDictionary.restore(persisted) }
@@ -153,6 +159,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
+        loadSpacingMode()
         return ComposeView(this).also { view ->
             inputMethodLifecycleOwner.onStartInputView()
             view.setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
@@ -164,6 +171,7 @@ class IaidoInputMethodService : InputMethodService() {
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        loadSpacingMode()
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
         correctionHistory.clear()
@@ -294,6 +302,14 @@ class IaidoInputMethodService : InputMethodService() {
                     onDismissManualEdit = { pendingManualEdit.value = null },
                 )
             }
+        }
+    }
+
+    private fun loadSpacingMode() {
+        correctionExecutor.execute {
+            val storedValue = runBlocking { applicationContext.settingsStore.data.first()[spacingModeKey] }
+            val resolvedMode = spacingModeFromStoredValue(storedValue)
+            mainHandler.post { spacingModeForTypingCoordinator = resolvedMode }
         }
     }
 

@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -12,10 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,23 +29,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
+import com.iaido.core.typing.SpacingMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class SettingsActivity : ComponentActivity() {
-    private val settingsStore by lazy {
-        PreferenceDataStoreFactory.create { applicationContext.preferencesDataStoreFile("settings") }
-    }
+    private val settingsStore get() = applicationContext.settingsStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,6 +56,7 @@ class SettingsActivity : ComponentActivity() {
         var preview by remember { mutableStateOf("") }
         var cascadeDepth by remember { mutableStateOf(SettingsDefaults.CASCADE_DEPTH) }
         var graceWindowMs by remember { mutableStateOf(SettingsDefaults.GRACE_WINDOW_MS) }
+        var spacingMode by remember { mutableStateOf(SpacingMode.INFER_SPACES) }
         var addWord by remember { mutableStateOf("") }
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
@@ -64,6 +67,7 @@ class SettingsActivity : ComponentActivity() {
             val preferences = settingsStore.data.first()
             cascadeDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH
             graceWindowMs = preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS
+            spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey])
         }
 
         Column(
@@ -142,6 +146,13 @@ class SettingsActivity : ComponentActivity() {
 
             HorizontalDivider()
             Text("Typing", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            SpacingModeSelector(
+                selectedMode = spacingMode,
+                onModeSelected = { mode ->
+                    spacingMode = mode
+                    saveString(spacingModeKey, spacingModeStoredValue(mode))
+                },
+            )
             Text("Flow correction depth: $cascadeDepth")
             Slider(
                 value = cascadeDepth.toFloat(),
@@ -215,6 +226,10 @@ class SettingsActivity : ComponentActivity() {
         lifecycleScope.launch { settingsStore.edit { it[key] = value } }
     }
 
+    private fun saveString(key: androidx.datastore.preferences.core.Preferences.Key<String>, value: String) {
+        lifecycleScope.launch { settingsStore.edit { it[key] = value } }
+    }
+
     private fun resetLearning() {
         lifecycleScope.launch(Dispatchers.IO) {
             val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
@@ -259,3 +274,54 @@ internal object SettingsDefaults {
 private val commandBindingKey = stringPreferencesKey("command_binding_language")
 private val cascadeDepthKey = intPreferencesKey("flow_correction_depth")
 private val graceWindowKey = intPreferencesKey("split_grace_window_ms")
+internal val spacingModeKey = stringPreferencesKey("spacing_mode")
+
+internal val Context.settingsStore by preferencesDataStore(name = "settings")
+
+internal fun spacingModeFromStoredValue(value: String?): SpacingMode = when (value) {
+    "manual" -> SpacingMode.MANUAL
+    "after_swipe" -> SpacingMode.AFTER_SWIPE
+    "infer_spaces" -> SpacingMode.INFER_SPACES
+    else -> SpacingMode.INFER_SPACES
+}
+
+internal fun spacingModeStoredValue(mode: SpacingMode): String = when (mode) {
+    SpacingMode.MANUAL -> "manual"
+    SpacingMode.AFTER_SWIPE -> "after_swipe"
+    SpacingMode.INFER_SPACES -> "infer_spaces"
+}
+
+internal data class SpacingModeOption(
+    val mode: SpacingMode,
+    val label: String,
+    val selected: Boolean,
+)
+
+internal fun spacingModeOptions(selectedMode: SpacingMode): List<SpacingModeOption> = listOf(
+    SpacingModeOption(SpacingMode.MANUAL, "Manual spacing", SpacingMode.MANUAL == selectedMode),
+    SpacingModeOption(SpacingMode.AFTER_SWIPE, "Space after swipe", SpacingMode.AFTER_SWIPE == selectedMode),
+    SpacingModeOption(SpacingMode.INFER_SPACES, "Infer spaces", SpacingMode.INFER_SPACES == selectedMode),
+)
+
+@Composable
+internal fun SpacingModeSelector(
+    selectedMode: SpacingMode,
+    onModeSelected: (SpacingMode) -> Unit,
+) {
+    Column {
+        spacingModeOptions(selectedMode).forEach { option ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = option.selected,
+                        onClick = { onModeSelected(option.mode) },
+                        role = Role.RadioButton,
+                    ),
+            ) {
+                RadioButton(selected = option.selected, onClick = null)
+                Text(option.label, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
