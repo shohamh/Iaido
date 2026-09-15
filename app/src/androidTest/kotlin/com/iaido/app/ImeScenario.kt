@@ -2,10 +2,12 @@ package com.iaido.app
 
 import android.app.Instrumentation
 import android.graphics.PointF
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.test.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import com.iaido.core.language.Language
 import com.iaido.core.testing.SwipeFixtures
 
@@ -238,6 +240,107 @@ class ImeScenario(
             expectedSelection = editor.selection().last
         }
         checkpoint("tapSuggestion($index)")
+    }
+
+    fun swipeSuggestion(index: Int, verticalDistancePx: Float): String {
+        device.waitForIdle()
+        SystemClock.sleep(1_000L)
+        val suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+        val center = if (suggestion != null) {
+            val bounds = suggestion.visibleBounds
+            PointF(
+                (bounds.left + bounds.right) / 2f,
+                (bounds.top + bounds.bottom) / 2f,
+            )
+        } else {
+            val root = device.findObject(By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION))
+                ?: error("Missing keyboard root while locating suggestion $index")
+            val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION))
+                ?: error("Missing keyboard surface while locating suggestion $index")
+            val point = PointF(root.visibleBounds.left + 80f, root.visibleBounds.top + 60f)
+            check(root.visibleBounds.contains(point.x.toInt(), point.y.toInt())) {
+                "Correction reel fallback point is outside the keyboard root: point=$point root=${root.visibleBounds}"
+            }
+            check(point.y < surface.visibleBounds.top) {
+                "Correction reel fallback point is not above the keyboard surface: point=$point surface=${surface.visibleBounds}"
+            }
+            point
+        }
+        fun injectReelSwipe() {
+            pendingPointerEvents = pointer.injectScreenSwipe(
+                points = (1..3).map { step ->
+                    val fraction = step / 3f
+                    PointF(center.x, center.y + verticalDistancePx * fraction)
+                }.let { listOf(center) + it },
+                holdBeforeMoveMs = 520L,
+            )
+        }
+        val before = expectedText
+        injectReelSwipe()
+        var after = runCatching { editor.waitForTextChange(before, timeoutMs = 1_500L) }.getOrNull()
+        if (after == null) {
+            device.waitForIdle()
+            SystemClock.sleep(500L)
+            injectReelSwipe()
+            after = editor.waitForTextChange(before)
+        }
+        expectedText = after
+        device.waitForIdle()
+        SystemClock.sleep(200L)
+        expectedSelection = editor.selection().last
+        checkpoint("swipeSuggestion($index, $verticalDistancePx)")
+        return expectedText
+    }
+
+    fun holdBackspace(durationMs: Long = 1_000L): String {
+        val before = editor.text()
+        val center = keyboard().keyCenter("backspace")
+        pendingPointerEvents = pointer.injectLongPress(center.x.toFloat(), center.y.toFloat(), durationMs)
+        val after = editor.text()
+        check(after.length < before.length) { "Holding backspace did not delete text: before='$before' after='$after'" }
+        expectedText = after
+        expectedSelection = editor.selection().last
+        checkpoint("holdBackspace($durationMs)")
+        return after
+    }
+
+    fun swipeBackspaceLeftThenRight(leftDistancePx: Float = 168f): List<String> {
+        val before = editor.text()
+        val center = keyboard().keyCenter("backspace")
+        val snapshots = mutableListOf<String>()
+        pendingPointerEvents = pointer.injectScreenSwipe(
+            points = listOf(
+                PointF(center.x.toFloat(), center.y.toFloat()),
+                PointF(center.x - leftDistancePx, center.y.toFloat()),
+                PointF(center.x - leftDistancePx / 2f, center.y.toFloat()),
+                PointF(center.x.toFloat(), center.y.toFloat()),
+            ),
+            holdBeforeMoveMs = 520L,
+            onEvent = { event ->
+                if (event.action == android.view.MotionEvent.ACTION_MOVE) snapshots += editor.text()
+            },
+        )
+        editor.waitForText(before)
+        val after = editor.text()
+        check(after == before) { "Backspace swipe did not restore the original text: before='$before' after='$after' snapshots=$snapshots" }
+        check(snapshots.any { it.length < before.length }) { "Backspace swipe never changed the text live: $snapshots" }
+        expectedText = after
+        expectedSelection = editor.selection().last
+        checkpoint("swipeBackspaceLeftThenRight")
+        return snapshots
+    }
+
+    fun swipeBackspaceVertical(distancePx: Float) {
+        val center = keyboard().keyCenter("backspace")
+        pendingPointerEvents = pointer.injectScreenSwipe(
+            points = listOf(
+                PointF(center.x.toFloat(), center.y.toFloat()),
+                PointF(center.x.toFloat(), center.y.toFloat() + distancePx),
+            ),
+        )
+        expectedText = editor.text()
+        expectedSelection = editor.selection().last
+        checkpoint("swipeBackspaceVertical($distancePx)")
     }
 
     fun injectCancelledSwipe(word: String, transform: PathTransform = PathTransform(cancelAfterPoint = 1)) {

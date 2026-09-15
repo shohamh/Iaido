@@ -5,19 +5,19 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.iaido.core.recognition.SuggestionChip
@@ -56,14 +58,15 @@ fun SuggestionStrip(
     val visibleSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
         ?: reelVisibleSlotCount(0)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
-    LazyRow(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(viewportHeight + 16.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            .height(viewportHeight + 8.dp)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        itemsIndexed(ordered, key = { index, chip -> "${chip.id ?: index}" }) { index, chip ->
+        ordered.forEachIndexed { index, chip ->
             SuggestionChipView(
                 chip = chip,
                 index = index,
@@ -88,18 +91,22 @@ private fun SuggestionChipView(
     val alternatives = chip.alternatives.ifEmpty { listOf(chip.word) }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val reelOffset = remember(chip.id, chip.word) { Animatable(0f) }
-    var dragX by remember(chip.id, chip.word) { mutableFloatStateOf(0f) }
-    var dragY by remember(chip.id, chip.word) { mutableFloatStateOf(0f) }
-    var isDragging by remember(chip.id, chip.word) { mutableStateOf(false) }
+    val stateKey = chip.id ?: index
+    val reelOffset = remember(stateKey) { Animatable(0f) }
+    var dragX by remember(stateKey) { mutableFloatStateOf(0f) }
+    var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
+    var isDragging by remember(stateKey) { mutableStateOf(false) }
     val reelStepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val dragThresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
     val undoThresholdPx = with(density) { UNDO_THRESHOLD_DP.dp.toPx() }
     val maxIndex = alternatives.lastIndex
-    val maxUpwardOffset = -chip.selectedIndex.toFloat()
-    val maxDownwardOffset = (maxIndex - chip.selectedIndex).toFloat()
+    val minOffset = (chip.selectedIndex - maxIndex).toFloat()
+    val maxOffset = chip.selectedIndex.toFloat()
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
-    val dragOffset = (dragY / reelStepPx).coerceIn(maxUpwardOffset, maxDownwardOffset)
+    val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
+    val latestDragOffset = rememberUpdatedState(dragOffset)
+    val latestDragX = rememberUpdatedState(dragX)
+    val latestDragY = rememberUpdatedState(dragY)
     val renderedOffset = if (isDragging) dragOffset else reelOffset.value
     val displayedIndex = displayedReelIndex(chip.selectedIndex, renderedOffset, maxIndex)
     val currentWord = alternatives.getOrNull(displayedIndex).orEmpty()
@@ -121,10 +128,12 @@ private fun SuggestionChipView(
     Row(
         modifier = modifier
             .widthIn(min = 104.dp, max = 184.dp)
+            .width(160.dp)
             .height(viewportHeight)
-            .semantics {
-                contentDescription = buildString {
-                    append("Iaido suggestion $index: $currentWord")
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Iaido suggestion $index"
+                stateDescription = buildString {
+                    append(currentWord)
                     if (alternatives.size > 1) append("; option ${displayedIndex + 1} of ${alternatives.size}; swipe vertically to change")
                 }
             }
@@ -137,7 +146,7 @@ private fun SuggestionChipView(
                 shape = shape,
             )
             .pointerInput(chip.id, chip.word, chip.selectedIndex) {
-                detectDragGestures(
+                detectDragGesturesAfterLongPress(
                     onDragStart = {
                         scope.launch { reelOffset.stop() }
                         dragX = 0f
@@ -145,8 +154,8 @@ private fun SuggestionChipView(
                         isDragging = true
                     },
                     onDragEnd = {
-                        val releaseOffset = dragOffset
-                        val shouldUndo = dragX <= -undoThresholdPx && dragY <= -undoThresholdPx
+                        val releaseOffset = latestDragOffset.value
+                        val shouldUndo = latestDragX.value <= -undoThresholdPx && latestDragY.value <= -undoThresholdPx
                         val shouldSelect = !shouldUndo && abs(dragY) >= dragThresholdPx && alternatives.size > 1
                         val targetIndex = displayedReelIndex(chip.selectedIndex, releaseOffset, maxIndex)
                         val targetOffset = if (shouldSelect) {
@@ -165,7 +174,9 @@ private fun SuggestionChipView(
                                 ),
                             )
                             if (shouldUndo) onUndo()
-                            if (shouldSelect) onRelease(targetIndex)
+                            if (shouldSelect) {
+                                onRelease(targetIndex)
+                            }
                             reelOffset.snapTo(0f)
                         }
                         dragX = 0f
@@ -201,7 +212,7 @@ private fun SuggestionChipView(
                     .fillMaxWidth()
                     .graphicsLayer {
                         translationY = with(density) {
-                            (renderedOffset * REEL_STEP_DP).dp.toPx()
+                            ((renderedOffset - chip.selectedIndex) * REEL_STEP_DP).dp.toPx()
                         }
                     },
             ) {
@@ -256,6 +267,6 @@ private fun SuggestionChipView(
     }
 }
 
-private const val REEL_STEP_DP = 24f
+private const val REEL_STEP_DP = 36f
 private const val DRAG_THRESHOLD_DP = 12f
 private const val UNDO_THRESHOLD_DP = 24f

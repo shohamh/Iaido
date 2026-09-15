@@ -67,7 +67,10 @@ class PointerInjector(private val automation: UiAutomation) {
         startTimeMs: Long = SystemClock.uptimeMillis(),
         stepMs: Long = DEFAULT_STEP_MS,
         cancel: Boolean = false,
-    ): List<InjectedPointerEvent> = buildScreenSwipeEvents(points, startTimeMs, stepMs, cancel).also(::inject)
+        holdBeforeMoveMs: Long = 0L,
+        onEvent: (InjectedPointerEvent) -> Unit = {},
+    ): List<InjectedPointerEvent> = buildScreenSwipeEvents(points, startTimeMs, stepMs, cancel)
+        .also { inject(it, holdBeforeMoveMs, onEvent) }
 
     fun injectLongPress(
         centerX: Float,
@@ -78,12 +81,19 @@ class PointerInjector(private val automation: UiAutomation) {
         points = listOf(PointF(centerX, centerY), PointF(centerX, centerY)),
         startTimeMs = startTimeMs,
         stepMs = durationMs,
+        holdBeforeMoveMs = durationMs,
     )
 
-    private fun inject(events: List<InjectedPointerEvent>) {
+    private fun inject(
+        events: List<InjectedPointerEvent>,
+        holdBeforeMoveMs: Long = 0L,
+        onEvent: (InjectedPointerEvent) -> Unit = {},
+    ) {
         require(events.isNotEmpty()) { "Cannot inject an empty pointer sequence" }
         val downTime = events.first().eventTimeMs
-        events.forEach { event ->
+        events.forEachIndexed { index, event ->
+            if (index == 1 && holdBeforeMoveMs > 0L) SystemClock.sleep(holdBeforeMoveMs)
+            val eventTimeMs = event.eventTimeMs + if (index >= 1) holdBeforeMoveMs else 0L
             val coordinates = Array(event.pointers.size) { index ->
                 MotionEvent.PointerCoords().apply {
                     x = event.pointers[index].x
@@ -96,7 +106,7 @@ class PointerInjector(private val automation: UiAutomation) {
                 (event.actionIndex shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
             val motionEvent = MotionEvent.obtain(
                 downTime,
-                event.eventTimeMs,
+                eventTimeMs,
                 encodedAction,
                 event.pointers.size,
                 event.pointers.map { it.id }.toIntArray(),
@@ -116,6 +126,7 @@ class PointerInjector(private val automation: UiAutomation) {
             } finally {
                 motionEvent.recycle()
             }
+            onEvent(event)
         }
     }
 

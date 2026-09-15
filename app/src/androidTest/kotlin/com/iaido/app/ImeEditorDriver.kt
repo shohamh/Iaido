@@ -83,6 +83,17 @@ class ImeEditorDriver(
         }
     }
 
+    fun waitForTextChange(previous: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): String {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        do {
+            val current = text()
+            if (current != previous) return current
+            device.waitForIdle()
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        error("Editor text did not change from '$previous'")
+    }
+
     private fun editor(): UiObject2 = markedView("ime_test_editor")
 
     private fun markedView(id: String): UiObject2 = findView(By.res(resourceId(id)), "host view $id")

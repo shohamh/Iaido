@@ -24,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,6 +52,7 @@ import com.iaido.core.layout.KeyPosition
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.SuggestionChip
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 private const val GLOBE_KEY = "\uD83C\uDF10"
 private const val BACKSPACE_KEY = "\u232B"
@@ -73,6 +75,14 @@ fun KeyboardInputView(
     suggestionChips: List<SuggestionChip> = emptyList(),
     onSuggestionRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onSuggestionUndo: (chipIndex: Int) -> Unit = {},
+    onBackspaceRepeat: () -> Unit = {},
+    onBackspacePressStart: () -> Unit = {},
+    onBackspaceSwipeStart: () -> Unit = {},
+    onBackspaceSwipeDistance: (requestedCharacters: Int) -> Unit = {},
+    onBackspaceSwipeEnd: () -> Unit = {},
+    onBackspaceSwipeCancel: () -> Unit = {},
+    onBackspaceUndo: () -> Unit = {},
+    onBackspaceRedo: () -> Unit = {},
     onSplitBegin: (pointerId: Int, point: GesturePoint, atMs: Long) -> Unit = { _, _, _ -> },
     onSplitMove: (pointerId: Int, point: GesturePoint) -> Unit = { _, _ -> },
     onSplitEnd: (pointerId: Int, path: GesturePath, layout: KeyboardLayout, atMs: Long) -> Unit = { _, _, _, _ -> },
@@ -92,7 +102,11 @@ fun KeyboardInputView(
         val bottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
         val surfaceHeightPx = keyboardSurfaceHeightPx(keySizePx)
         val contentHeightPx = imeContentHeightPx(keySizePx, bottomInsetPx)
-        val bottomInset = with(density) { (contentHeightPx - surfaceHeightPx).toDp() }
+        val bottomInset = with(density) {
+            (contentHeightPx - surfaceHeightPx).toDp() + BOTTOM_KEYBOARD_CLEARANCE_DP
+        }
+        val backspaceSwipeStepPx = with(density) { BACKSPACE_SWIPE_STEP_DP.dp.toPx() }
+        val backspaceGestureThresholdPx = with(density) { BACKSPACE_GESTURE_THRESHOLD_DP.dp.toPx() }
         val layout = remember(widthPx, language) { keyboardLayoutFor(keySizePx, language) }
         var points by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var trailPoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
@@ -103,6 +117,11 @@ fun KeyboardInputView(
         var multiStartY by remember(sessionId) { mutableStateOf(0f) }
         var startTime by remember(sessionId) { mutableStateOf(0L) }
         var splitMode by remember(sessionId) { mutableStateOf(false) }
+        var backspaceMode by remember(sessionId) { mutableStateOf(BackspaceMode.NONE) }
+        var backspaceStartX by remember(sessionId) { mutableFloatStateOf(0f) }
+        var backspaceStartY by remember(sessionId) { mutableFloatStateOf(0f) }
+        var backspaceDx by remember(sessionId) { mutableFloatStateOf(0f) }
+        var backspaceDy by remember(sessionId) { mutableFloatStateOf(0f) }
         val splitPoints = remember(sessionId) { mutableMapOf<Int, MutableList<GesturePoint>>() }
         val splitEnded = remember(sessionId) { mutableSetOf<Int>() }
         val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
@@ -111,6 +130,22 @@ fun KeyboardInputView(
             if (trailPoints.isNotEmpty()) {
                 delay(2000L)
                 trailPoints = emptyList()
+            }
+        }
+
+        LaunchedEffect(backspaceMode) {
+            if (backspaceMode != BackspaceMode.PRESS) return@LaunchedEffect
+            delay(BACKSPACE_HOLD_DELAY_MS)
+            if (backspaceMode == BackspaceMode.PRESS) backspaceMode = BackspaceMode.HOLD
+        }
+
+        LaunchedEffect(backspaceMode) {
+            if (backspaceMode != BackspaceMode.HOLD) return@LaunchedEffect
+            var repeats = 0
+            while (backspaceMode == BackspaceMode.HOLD) {
+                onBackspaceRepeat()
+                repeats += 1
+                delay(backspaceRepeatIntervalMs(repeats))
             }
         }
 
@@ -179,6 +214,12 @@ fun KeyboardInputView(
                                 splitPoints.clear()
                                 splitEnded.clear()
                                 startTime = event.eventTime
+                                backspaceMode = if (startKey == BACKSPACE_KEY) BackspaceMode.PRESS else BackspaceMode.NONE
+                                backspaceStartX = event.x
+                                backspaceStartY = event.y
+                                backspaceDx = 0f
+                                backspaceDy = 0f
+                                if (startKey == BACKSPACE_KEY) onBackspacePressStart()
                                 true
                             }
                             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -206,6 +247,40 @@ fun KeyboardInputView(
                                 if (primaryIndex >= 0) {
                                     val point = event.toGesturePoint(primaryIndex)
                                     trailPoints = (trailPoints + point).takeLast(MAX_TRAIL_POINTS)
+                                }
+                                if (!splitMode && startKey == BACKSPACE_KEY && primaryIndex >= 0) {
+                                    backspaceDx = event.getX(primaryIndex) - backspaceStartX
+                                    backspaceDy = event.getY(primaryIndex) - backspaceStartY
+                                    val action = classifyBackspaceGesture(
+                                        backspaceDx,
+                                        backspaceDy,
+                                        backspaceGestureThresholdPx,
+                                    )
+                                    when (backspaceMode) {
+                                        BackspaceMode.PRESS,
+                                        BackspaceMode.HOLD -> when (action) {
+                                            BackspaceGestureAction.DELETE -> {
+                                                backspaceMode = BackspaceMode.DELETE
+                                                onBackspaceSwipeStart()
+                                                onBackspaceSwipeDistance(
+                                                    (-backspaceDx / backspaceSwipeStepPx).roundToInt(),
+                                                )
+                                            }
+                                            BackspaceGestureAction.UNDO -> {
+                                                backspaceMode = BackspaceMode.UNDO
+                                                onBackspaceUndo()
+                                            }
+                                            BackspaceGestureAction.REDO -> {
+                                                backspaceMode = BackspaceMode.REDO
+                                                onBackspaceRedo()
+                                            }
+                                            else -> Unit
+                                        }
+                                        BackspaceMode.DELETE -> onBackspaceSwipeDistance(
+                                            (-backspaceDx / backspaceSwipeStepPx).roundToInt(),
+                                        )
+                                        else -> Unit
+                                    }
                                 }
                                 if (splitMode) {
                                     for (index in 0 until event.pointerCount) {
@@ -255,6 +330,29 @@ fun KeyboardInputView(
                                     pointerId = MotionEvent.INVALID_POINTER_ID
                                     startKey = null
                                     true
+                                } else if (startKey == BACKSPACE_KEY) {
+                                    when (backspaceMode) {
+                                        BackspaceMode.PRESS -> {
+                                            onTap(BACKSPACE_KEY)
+                                            onBackspaceSwipeCancel()
+                                        }
+                                        BackspaceMode.DELETE -> {
+                                            val releaseIndex = event.findPointerIndex(pointerId)
+                                            if (releaseIndex >= 0) {
+                                                val releaseDx = event.getX(releaseIndex) - backspaceStartX
+                                                onBackspaceSwipeDistance(
+                                                    (-releaseDx / backspaceSwipeStepPx).roundToInt(),
+                                                )
+                                            }
+                                            onBackspaceSwipeEnd()
+                                        }
+                                        else -> onBackspaceSwipeCancel()
+                                    }
+                                    backspaceMode = BackspaceMode.NONE
+                                    points = emptyList()
+                                    pointerId = MotionEvent.INVALID_POINTER_ID
+                                    startKey = null
+                                    true
                                 } else {
                                     val index = event.findPointerIndex(pointerId)
                                     val completed = if (index >= 0) points + event.toGesturePoint(index) else points
@@ -281,6 +379,8 @@ fun KeyboardInputView(
                             }
                             MotionEvent.ACTION_CANCEL -> {
                                 if (splitMode) onSplitCancel()
+                                if (backspaceMode != BackspaceMode.NONE) onBackspaceSwipeCancel()
+                                backspaceMode = BackspaceMode.NONE
                                 splitMode = false
                                 splitPoints.clear()
                                 splitEnded.clear()
@@ -357,7 +457,7 @@ private fun KeyboardBottomRow(keySize: Dp, language: Language, pressedKey: Strin
             KeyboardKey(
                 label = if (label == "space") language.localeTag.replace('-', ' ').uppercase() else label,
                 modifier = Modifier.weight(widthWeight),
-                height = keySize - gap,
+                height = keySize,
                 pressed = pressedKey == label || (label == "space" && pressedKey == " "),
                 testKey = when (label) {
                     GLOBE_KEY -> "globe"
@@ -460,3 +560,17 @@ private fun MutableList<KeyPosition>.addRow(letters: String, offset: Float, row:
 }
 
 private fun MotionEvent.toGesturePoint(index: Int) = GesturePoint(getX(index), getY(index), eventTime)
+
+private enum class BackspaceMode {
+    NONE,
+    PRESS,
+    HOLD,
+    DELETE,
+    UNDO,
+    REDO,
+}
+
+private const val BACKSPACE_HOLD_DELAY_MS = 350L
+private const val BACKSPACE_SWIPE_STEP_DP = 14f
+private const val BACKSPACE_GESTURE_THRESHOLD_DP = 18f
+private val BOTTOM_KEYBOARD_CLEARANCE_DP = 12.dp

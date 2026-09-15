@@ -24,6 +24,11 @@ class KeyboardGeometryTest {
     }
 
     @Test
+    fun `bottom row matches the height of the letter rows`() {
+        assertEquals(128f, keyboardRowHeightPx(128f), 0.001f)
+    }
+
+    @Test
     fun `letter hit testing uses the pixel positioned layout`() {
         val layout = KeyboardLayout(
             listOf(

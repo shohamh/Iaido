@@ -10,7 +10,6 @@ import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.ExtractedTextRequest
 import androidx.room.Room
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -46,7 +45,7 @@ class IaidoInputMethodService : InputMethodService() {
     private val commandMode = CommandModeController(::executeCommand)
     private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
-    private val sessionChips = mutableStateListOf<SuggestionChip>()
+    private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val splitPreview = mutableStateOf<String?>(null)
     private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
     private val editorTextChangeDetector = EditorTextChangeDetector()
@@ -55,6 +54,9 @@ class IaidoInputMethodService : InputMethodService() {
     private var cursorPosition = 0
     private var pendingCandidates: List<String>? = null
     private var lastDeletedWord: String? = null
+    private var backspaceSwipeText = ""
+    private var backspaceSwipeCursor = 0
+    private var backspaceSwipeDeletedCount = 0
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
@@ -165,7 +167,7 @@ class IaidoInputMethodService : InputMethodService() {
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
         correctionHistory.clear()
-        sessionChips.clear()
+        sessionChips.value = emptyList()
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
@@ -187,7 +189,7 @@ class IaidoInputMethodService : InputMethodService() {
         inputMethodLifecycleOwner.onFinishInputView()
         sessionId += 1
         correctionHistory.clear()
-        sessionChips.clear()
+        sessionChips.value = emptyList()
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
@@ -258,9 +260,17 @@ class IaidoInputMethodService : InputMethodService() {
                     language = activeLanguage,
                     onLanguageSwitch = ::switchLanguage,
                     onCommand = ::handleCommand,
-                    suggestionChips = sessionChips,
+                    suggestionChips = sessionChips.value,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
+                    onBackspaceRepeat = typingController::backspace,
+                    onBackspacePressStart = ::beginBackspaceSwipe,
+                    onBackspaceSwipeStart = ::beginBackspaceSwipe,
+                    onBackspaceSwipeDistance = ::updateBackspaceSwipe,
+                    onBackspaceSwipeEnd = ::finishBackspaceSwipe,
+                    onBackspaceSwipeCancel = ::cancelBackspaceSwipe,
+                    onBackspaceUndo = ::undoBackspace,
+                    onBackspaceRedo = ::redoBackspace,
                     onSplitBegin = splitController::begin,
                     onSplitMove = splitController::move,
                     onSplitEnd = { pointerId, path, layout, atMs ->
@@ -332,6 +342,86 @@ class IaidoInputMethodService : InputMethodService() {
         refreshSuggestionChips()
     }
 
+    private fun beginBackspaceSwipe() {
+        if (backspaceSwipeText.isNotEmpty() || backspaceSwipeCursor > 0) {
+            val currentBeforeCursor = currentInputConnection
+                ?.getTextBeforeCursor(MAX_BACKSPACE_SWIPE_CHARS, 0)
+                ?.toString()
+                .orEmpty()
+            backspaceSwipeDeletedCount = (backspaceSwipeText.length - currentBeforeCursor.length)
+                .coerceIn(0, backspaceSwipeText.length)
+            return
+        }
+        val inputConnection = currentInputConnection ?: return
+        backspaceSwipeText = inputConnection
+            .getTextBeforeCursor(MAX_BACKSPACE_SWIPE_CHARS, 0)
+            ?.toString()
+            .orEmpty()
+        backspaceSwipeCursor = cursorPosition
+        backspaceSwipeDeletedCount = 0
+    }
+
+    private fun updateBackspaceSwipe(requestedCharacters: Int) {
+        val inputConnection = currentInputConnection ?: return
+        val target = deletionCountForSwipe(
+            requestedCount = requestedCharacters,
+            textBeforeCursor = backspaceSwipeText,
+            maxCharacters = MAX_BACKSPACE_SWIPE_CHARS,
+        )
+        val delta = target - backspaceSwipeDeletedCount
+        if (delta == 0) return
+
+        val currentCursor = backspaceSwipeCursor - backspaceSwipeDeletedCount
+        if (!inputConnection.setSelection(currentCursor, currentCursor)) return
+        if (delta > 0) {
+            if (textObservationEnabled) {
+                editorTextChangeDetector.expectOwnEdit(currentCursor - delta, currentCursor, "")
+            }
+            if (!inputConnection.deleteSurroundingText(delta, 0)) return
+        } else {
+            val restoreStart = backspaceSwipeText.length - backspaceSwipeDeletedCount
+            val restoreEnd = backspaceSwipeText.length - target
+            val restored = backspaceSwipeText.substring(restoreStart, restoreEnd)
+            if (textObservationEnabled) {
+                editorTextChangeDetector.expectOwnEdit(currentCursor, currentCursor, restored)
+            }
+            if (!inputConnection.commitText(restored, 1)) return
+        }
+        backspaceSwipeDeletedCount = target
+        cursorPosition = backspaceSwipeCursor - target
+    }
+
+    private fun finishBackspaceSwipe() {
+        if (backspaceSwipeDeletedCount > 0) {
+            correctionHistory.deleteRange(
+                backspaceSwipeCursor - backspaceSwipeDeletedCount,
+                backspaceSwipeCursor,
+            )
+            refreshSuggestionChips()
+        }
+        clearBackspaceSwipe()
+    }
+
+    private fun cancelBackspaceSwipe() {
+        updateBackspaceSwipe(0)
+        clearBackspaceSwipe()
+        refreshSuggestionChips()
+    }
+
+    private fun clearBackspaceSwipe() {
+        backspaceSwipeText = ""
+        backspaceSwipeCursor = 0
+        backspaceSwipeDeletedCount = 0
+    }
+
+    private fun undoBackspace() {
+        currentInputConnection?.performContextMenuAction(android.R.id.undo)
+    }
+
+    private fun redoBackspace() {
+        currentInputConnection?.performContextMenuAction(android.R.id.redo)
+    }
+
     private fun scheduleFlowCorrection() {
         val scheduledSession = sessionId
         val snapshot = correctionHistory.words()
@@ -363,8 +453,7 @@ class IaidoInputMethodService : InputMethodService() {
     private fun refreshSuggestionChips() {
         val words = correctionHistory.aroundCursor(cursorPosition)
         visibleWordIds = words.map { it.id }
-        sessionChips.clear()
-        sessionChips.addAll(words.map { word ->
+        sessionChips.value = words.map { word ->
             SuggestionChip(
                 word = word.current,
                 alternatives = word.candidates,
@@ -372,7 +461,7 @@ class IaidoInputMethodService : InputMethodService() {
                 corrected = word.corrected,
                 id = word.id,
             )
-        })
+        }
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
@@ -500,6 +589,7 @@ class IaidoInputMethodService : InputMethodService() {
 
     private companion object {
         const val TEXT_MONITOR_TOKEN = 0x4E4B
+        const val MAX_BACKSPACE_SWIPE_CHARS = 60
     }
 
     private fun switchLanguage() {

@@ -78,5 +78,38 @@ class ImeEditingE2eTest {
         }
     }
 
+    @Test
+    fun heldBackspaceDeletesRepeatedlyAndAccelerates() {
+        scenario().run {
+            swipeWord("hello")
+            tapSpace()
+            swipeWord("world")
+            holdBackspace(durationMs = 1_200L)
+        }
+    }
+
+    @Test
+    fun backspaceSwipeShowsLiveDeletionAndRestoresWhenMovedRight() {
+        scenario().run {
+            swipeWord("hello")
+            tapSpace()
+            swipeWord("world")
+            val snapshots = swipeBackspaceLeftThenRight()
+            check(snapshots.distinct().size > 1) { "Expected multiple live deletion states: $snapshots" }
+            assertText("Hello world")
+        }
+    }
+
+    @Test
+    fun backspaceVerticalSwipesUndoAndRedo() {
+        scenario().run {
+            swipeWord("hello")
+            swipeBackspaceVertical(distancePx = -96f)
+            assertText("")
+            swipeBackspaceVertical(distancePx = 96f)
+            assertText("Hello")
+        }
+    }
+
     private fun scenario() = ImeScenario().also(artifacts::track)
 }

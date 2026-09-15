@@ -11,9 +11,9 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `reel viewport grows to show every candidate`() {
-        assertEquals(5, reelVisibleSlotCount(candidateCount = 5))
-        assertEquals(3, reelVisibleSlotCount(candidateCount = 1))
+    fun `reel viewport always shows one candidate`() {
+        assertEquals(1, reelVisibleSlotCount(candidateCount = 5))
+        assertEquals(1, reelVisibleSlotCount(candidateCount = 1))
     }
 
     @Test
