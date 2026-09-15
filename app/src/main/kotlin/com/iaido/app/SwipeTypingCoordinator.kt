@@ -30,6 +30,7 @@ class SwipeTypingCoordinator(
         replaceHostSpan(HostTextSpan(cursor, cursor), text)
     },
     onFinalizedWords: (HostTextSpan, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
+    private val textBeforeCursor: () -> String = { "" },
     private val hasFollowingWhitespace: () -> Boolean = { false },
     private val pollSplitParts: (Long) -> SplitWordParts? = { null },
     private val isSplitPending: () -> Boolean = { false },
@@ -43,6 +44,16 @@ class SwipeTypingCoordinator(
     )
     private var nextUnitId = 0L
     private var replacementSelection: ReplacementSelection? = null
+
+    /**
+     * Whether the transaction currently in progress still owes a
+     * sentence-start capitalization to its (original) first word. Captured
+     * once when a fresh transaction starts (`transaction.sourceSpan == null`)
+     * from [textBeforeCursor] at that moment, and consumed (reset to false)
+     * once that first word is finalized — via a window slide or clear — so a
+     * later, now mid-sentence, word is never capitalized.
+     */
+    private var capitalizeFirstWord = false
 
     fun onSingleSwipe(path: GesturePath, layout: KeyboardLayout) {
         onRecognizedSingleSwipe(path, recognize(path, layout))
@@ -129,9 +140,12 @@ class SwipeTypingCoordinator(
             slideInferenceWindow(unit)
             return
         }
+        if (transaction.sourceSpan == null) {
+            capitalizeFirstWord = SentenceCapitalization.needsCapitalization(textBeforeCursor())
+        }
         check(transaction.append(unit))
         val alternatives = segmenter.rank(transaction.units, previousWords(), dictionary())
-        val words = alternatives.firstOrNull()?.words ?: unit.topWords()
+        val words = applyPendingCapitalization(alternatives.firstOrNull()?.words ?: unit.topWords())
         replacementSelection = null
         if (!transaction.replaceCurrent(words, alternatives)) finalizeAndClear()
         else notifyReplacementOptionsChanged()
@@ -140,9 +154,14 @@ class SwipeTypingCoordinator(
     private fun slideInferenceWindow(nextUnit: GestureUnit) {
         val oldestUnit = transaction.units.first()
         val finalizedAlternatives = segmenter.rank(listOf(oldestUnit), previousWords(), dictionary())
-        val finalizedWords = finalizedAlternatives.firstOrNull()?.words ?: oldestUnit.topWords()
+        val rawFinalizedWords = finalizedAlternatives.firstOrNull()?.words ?: oldestUnit.topWords()
+        // The transaction's original leading word (if any) is finalized here — apply and
+        // consume the capitalization decision now so the retained window's new leading
+        // word (mid-sentence from here on) is never capitalized.
+        val finalizedWords = applyPendingCapitalization(rawFinalizedWords)
+        capitalizeFirstWord = false
         val retainedUnits = transaction.units.drop(1) + nextUnit
-        val alternatives = segmenter.rank(retainedUnits, previousWords() + finalizedWords, dictionary())
+        val alternatives = segmenter.rank(retainedUnits, previousWords() + rawFinalizedWords, dictionary())
         val retainedWords = alternatives.firstOrNull()?.words ?: nextUnit.topWords()
         replacementSelection = null
         if (!transaction.slideWindow(
@@ -159,9 +178,17 @@ class SwipeTypingCoordinator(
 
     private fun finalizeAndClear() {
         replacementSelection = null
+        capitalizeFirstWord = false
         transaction.finalize()
         transaction.clear()
         notifyReplacementOptionsChanged()
+    }
+
+    /** Applies the pending sentence-start capitalization to [words]' first entry, if owed. */
+    private fun applyPendingCapitalization(words: List<String>): List<String> {
+        if (!capitalizeFirstWord || words.isEmpty()) return words
+        val capitalized = SentenceCapitalization.capitalizeFirstLetter(words.first())
+        return if (capitalized == words.first()) words else listOf(capitalized) + words.drop(1)
     }
 
     private fun activeReplacementSelection(): ReplacementSelection? =

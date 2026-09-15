@@ -55,15 +55,8 @@ class TypingController(
         deleteSurroundingText(1)
     }
 
-    private fun capitalizeIfNeeded(value: String): String {
-        if (value.isEmpty() || !value.first().isLetter() || !textBeforeCursor().let(::needsCapitalization)) {
-            return value
-        }
-        return value.replaceFirstChar { it.uppercase() }
-    }
-
-    private fun needsCapitalization(before: String): Boolean =
-        before.isEmpty() || before.matches(Regex(".*[.!?]\\s*$"))
+    private fun capitalizeIfNeeded(value: String): String =
+        SentenceCapitalization.capitalizeIfNeeded(value, textBeforeCursor())
 
     private fun numberFor(letter: String): String? =
         "qwertyuiop".indexOf(letter.lowercase()).takeIf { it >= 0 }?.let { index ->

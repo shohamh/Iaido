@@ -148,6 +148,7 @@ class IaidoInputMethodService : InputMethodService() {
             replaceHostSpan = ::replaceInferenceHostSpan,
             commitCompletedText = typingController::commitWord,
             onFinalizedWords = ::recordFinalizedInferenceWords,
+            textBeforeCursor = { currentInputConnection?.getTextBeforeCursor(100, 0)?.toString().orEmpty() },
             hasFollowingWhitespace = {
                 currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.isWhitespace() == true
             },

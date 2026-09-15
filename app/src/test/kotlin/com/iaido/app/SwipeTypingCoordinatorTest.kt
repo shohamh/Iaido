@@ -142,6 +142,113 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
+    fun `infer spaces capitalizes the first swiped word of a fresh sentence`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("hello"),
+            textBeforeCursor = { "" },
+        )
+
+        coordinator.onSingleSwipe(path(9), layout)
+
+        assertEquals("Hello", editor.text)
+    }
+
+    @Test
+    fun `infer spaces capitalizes the first swiped word after terminal punctuation`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("hello"),
+            textBeforeCursor = { "Done. " },
+        )
+
+        coordinator.onSingleSwipe(path(9), layout)
+
+        assertEquals("Hello", editor.text)
+    }
+
+    @Test
+    fun `infer spaces does not capitalize a swipe in the middle of a sentence`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("hello"),
+            textBeforeCursor = { "hi " },
+        )
+
+        coordinator.onSingleSwipe(path(9), layout)
+
+        assertEquals("hello", editor.text)
+    }
+
+    @Test
+    fun `infer spaces capitalizes a two finger gesture unit at the start of a sentence`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("there"),
+            textBeforeCursor = { "" },
+        )
+
+        coordinator.onTwoFingerResult(listOf(path(3), path(4)), layout)
+
+        assertEquals("There", editor.text)
+    }
+
+    @Test
+    fun `re ranking the same inference transaction keeps the leading word capitalized`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("some", "thing", "something"),
+            textBeforeCursor = { "" },
+        )
+
+        coordinator.onSingleSwipe(path(6), layout)
+        assertEquals("Some", editor.text)
+
+        coordinator.onSingleSwipe(path(7), layout)
+
+        assertEquals("Something", editor.text)
+    }
+
+    @Test
+    fun `sliding the inference window capitalizes only the original finalized leading word`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.INFER_SPACES,
+            dictionary = dictionary("a"),
+            onFinalized = finalized::add,
+            textBeforeCursor = { "" },
+        )
+
+        repeat(6) { coordinator.onSingleSwipe(path(8), layout) }
+        coordinator.onSingleSwipe(path(8), layout)
+
+        assertEquals(listOf(listOf("A")), finalized)
+        assertEquals("A a a a a a a", editor.text)
+
+        coordinator.onNonSwipeInput()
+
+        assertEquals(
+            listOf(
+                listOf("A"),
+                listOf("a", "a", "a", "a", "a", "a"),
+            ),
+            finalized,
+        )
+    }
+
+    @Test
     fun `non swipe cursor and external edits finalize and invalidate inference`() {
         val editor = FakeEditor()
         val finalized = mutableListOf<List<String>>()
@@ -222,6 +329,10 @@ class SwipeTypingCoordinatorTest {
         hasFollowingWhitespace: () -> Boolean = { false },
         pollSplitParts: (Long) -> SplitWordParts? = { null },
         isSplitPending: () -> Boolean = { false },
+        // Mid-sentence by default (non-empty, no terminal punctuation) so existing
+        // scenarios that aren't about capitalization stay unaffected by it; tests that
+        // care about capitalization pass their own textBeforeCursor explicitly.
+        textBeforeCursor: () -> String = { "mid-sentence " },
     ) = SwipeTypingCoordinator(
         spacingMode = { mode },
         recognize = { path, _ -> candidatesFor(path) },
@@ -230,6 +341,7 @@ class SwipeTypingCoordinatorTest {
         cursorPosition = editor::cursor,
         replaceHostSpan = editor::replace,
         onFinalizedWords = { _, words, _ -> onFinalized(words) },
+        textBeforeCursor = textBeforeCursor,
         hasFollowingWhitespace = hasFollowingWhitespace,
         pollSplitParts = pollSplitParts,
         isSplitPending = isSplitPending,
@@ -244,6 +356,7 @@ class SwipeTypingCoordinatorTest {
         6 -> listOf(candidate("some"))
         7 -> listOf(candidate("thing"))
         8 -> listOf(candidate("a"))
+        9 -> listOf(candidate("hello"))
         else -> emptyList()
     }
 
