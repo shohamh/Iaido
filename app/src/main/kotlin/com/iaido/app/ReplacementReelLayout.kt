@@ -23,6 +23,14 @@ internal fun replacementReelLayout(option: ReplacementOption, rtl: Boolean): Rep
     )
 }
 
+/** Resolves the prior selection against refreshed candidates by stable replacement ID. */
+internal fun replacementSelectedIndex(
+    options: List<ReplacementOption>,
+    selectedOptionId: String?,
+): Int = options.indexOfFirst { it.id == selectedOptionId }
+    .takeIf { it >= 0 }
+    ?: 0
+
 internal class ReplacementReelSelection(private val options: List<ReplacementOption>) {
     var committed: ReplacementOption? = null
         private set

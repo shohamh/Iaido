@@ -22,6 +22,7 @@ Result: exit 0.
 - Refreshed replacement options now retain the selected replacement when the refreshed candidate has the same stable ID, rebinding to the refreshed value so its latest score is retained.
 - Added a deterministic regression that selects a split replacement, refreshes it with the same structured words and a new score, and verifies the refreshed candidate remains selected and displayed.
 - The regression was observed failing before the state fix, then the complete focused Task 5 command passed with `--rerun-tasks` (exit 0, 44.4 seconds).
+- Production replacement reels now retain a saveable selected stable ID and resolve it against refreshed candidates instead of always starting at index zero. A JVM state regression verifies the refreshed option remains at its selected index; the complete focused Task 5 command passed again with `--rerun-tasks` (exit 0, 54 seconds).
 
 ## Caveat
 

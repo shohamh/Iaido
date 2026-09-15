@@ -81,6 +81,21 @@ class ReplacementReelLayoutTest {
     }
 
     @Test
+    fun `refreshed reel keeps the option selected by stable id instead of resetting to first`() {
+        val selected = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.8)
+        val refreshedOriginal = ReplacementOption(listOf("inthe"), listOf("inthe"), 1.1)
+        val refreshedSelected = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.9)
+
+        val selectedIndex = replacementSelectedIndex(
+            options = listOf(refreshedOriginal, refreshedSelected),
+            selectedOptionId = selected.id,
+        )
+
+        assertEquals(1, selectedIndex)
+        assertEquals(refreshedSelected, listOf(refreshedOriginal, refreshedSelected)[selectedIndex])
+    }
+
+    @Test
     fun `accessibility description exposes cardinality words and candidate position`() {
         val description = replacementReelDescription(
             option = ReplacementOption(listOf("in", "the"), listOf("inthe"), 0.8),

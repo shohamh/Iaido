@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -108,6 +109,13 @@ private fun ReplacementSuggestionStrip(
 ) {
     val visibleSlotCount = reelVisibleSlotCount(options.size)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
+    var selectedOptionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedIndex = replacementSelectedIndex(options, selectedOptionId)
+
+    LaunchedEffect(options, selectedIndex) {
+        selectedOptionId = options[selectedIndex].id
+    }
+
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -119,11 +127,14 @@ private fun ReplacementSuggestionStrip(
         item(key = options.joinToString { it.id }) {
             ReplacementReelGroup(
                 options = options,
-                selectedIndex = 0,
+                selectedIndex = selectedIndex,
                 rtl = rtl,
                 viewportHeight = viewportHeight,
                 onPreview = onPreview,
-                onRelease = onRelease,
+                onRelease = { option ->
+                    selectedOptionId = option.id
+                    onRelease(option)
+                },
                 onCancel = onCancel,
             )
         }
