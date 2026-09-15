@@ -27,7 +27,9 @@ class SuggestionStripState(private val rtl: Boolean) {
     fun updateReplacementOptions(options: List<ReplacementOption>) {
         replacementCandidates = options.distinctBy(ReplacementOption::id)
         replacementPreview = null
-        selectedReplacementOption = null
+        selectedReplacementOption = selectedReplacementOption?.let { selectedOption ->
+            replacementCandidates.firstOrNull { it.id == selectedOption.id }
+        }
     }
 
     /** Returns each complete candidate group in logical word order, even for RTL UI. */

@@ -27,6 +27,22 @@ class SuggestionStripStateTest {
     }
 
     @Test
+    fun `replacement refresh preserves the selected option when its stable id remains available`() {
+        val strip = SuggestionStripState(rtl = false)
+        val original = ReplacementOption(listOf("inthe"), listOf("inthe"), 1.0)
+        val selected = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.8)
+        val refreshedSelected = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.9)
+
+        strip.updateReplacementOptions(listOf(original, selected))
+        assertEquals(selected, strip.releaseReplacement(1))
+
+        strip.updateReplacementOptions(listOf(original, refreshedSelected))
+
+        assertEquals(refreshedSelected, strip.selectedReplacement())
+        assertEquals(refreshedSelected, strip.displayedReplacement())
+    }
+
+    @Test
     fun `replacement cancellation discards preview without changing selected replacement`() {
         val strip = SuggestionStripState(rtl = false)
         val original = ReplacementOption(listOf("inthe"), listOf("inthe"), 1.0)
