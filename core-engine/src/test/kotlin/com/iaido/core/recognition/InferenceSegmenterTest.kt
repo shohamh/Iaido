@@ -1,0 +1,162 @@
+package com.iaido.core.recognition
+
+import com.iaido.core.dictionary.WordEntry
+import com.iaido.core.gesture.GesturePath
+import com.iaido.core.gesture.GesturePoint
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class InferenceSegmenterTest {
+    private val path = GesturePath(listOf(GesturePoint(0f, 0f, 0L)))
+
+    @Test
+    fun `sequential gestures stay separate when their joined text is not a dictionary word`() {
+        val dictionary = dictionary("in", "the")
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("first", "in"), unit("second", "the")),
+            previousWords = emptyList(),
+            dictionary = dictionary,
+        )
+
+        assertEquals(listOf("in", "the"), options.first().words)
+        assertEquals(listOf("first", "second"), options.first().sourceGestureIds)
+    }
+
+    @Test
+    fun `sequential gestures can join into one dictionary word`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("some", "some"), unit("thing", "thing")),
+            previousWords = emptyList(),
+            dictionary = dictionary("some", "thing", "something"),
+        )
+
+        assertEquals(listOf("something"), options.first().words)
+    }
+
+    @Test
+    fun `one gesture can split into two dictionary words`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("joined", "inthe")),
+            previousWords = emptyList(),
+            dictionary = dictionary("in", "the"),
+        )
+
+        assertEquals(listOf("in", "the"), options.first().words)
+    }
+
+    @Test
+    fun `one gesture can split into three dictionary words but not four`() {
+        val segmenter = InferenceSegmenter()
+
+        val threeWords = segmenter.rank(
+            units = listOf(unit("three", "abc")),
+            previousWords = emptyList(),
+            dictionary = dictionary("a", "b", "c"),
+        )
+        val fourWords = segmenter.rank(
+            units = listOf(unit("four", "abcd")),
+            previousWords = emptyList(),
+            dictionary = dictionary("a", "b", "c", "d"),
+        )
+
+        assertEquals(listOf("a", "b", "c"), threeWords.first().words)
+        assertTrue(fourWords.isEmpty())
+    }
+
+    @Test
+    fun `concurrent paths merge into one word by default`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(concurrentUnit("pair", "in", "to")),
+            previousWords = emptyList(),
+            dictionary = dictionary("in", "to", "into"),
+        )
+
+        assertEquals(listOf("into"), options.first().words)
+    }
+
+    @Test
+    fun `concurrent paths preserve a boundary when context wins`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("go" to "in") to 3.0)),
+            confidenceMargin = 0.0,
+        ).rank(
+            units = listOf(concurrentUnit("pair", "in", "to")),
+            previousWords = listOf("go"),
+            dictionary = dictionary("in", "to", "into"),
+        )
+
+        assertEquals(listOf("in", "to"), options.first().words)
+    }
+
+    @Test
+    fun `context can change a sequential boundary`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 3.0)),
+            confidenceMargin = 0.0,
+        ).rank(
+            units = listOf(unit("to", "to"), unit("day", "day")),
+            previousWords = listOf("good"),
+            dictionary = dictionary("to", "day", "today"),
+        )
+
+        assertEquals(listOf("to", "day"), options.first().words)
+    }
+
+    @Test
+    fun `low context gain leaves the current interpretation first`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 0.5)),
+            confidenceMargin = 1.0,
+        ).rank(
+            units = listOf(unit("to", "to"), unit("day", "day")),
+            previousWords = listOf("good"),
+            dictionary = dictionary("to", "day", "today"),
+        )
+
+        assertEquals(listOf("today"), options.first().words)
+    }
+
+    @Test
+    fun `only the six most recent gesture units participate`() {
+        val options = InferenceSegmenter().rank(
+            units = (1..7).map { index -> unit(index.toString(), "a") },
+            previousWords = emptyList(),
+            dictionary = dictionary("a"),
+        )
+
+        assertEquals((2..7).map(Int::toString), options.first().sourceGestureIds)
+        assertEquals(6, options.first().words.size)
+    }
+
+    @Test
+    fun `equal scoring alternatives use dictionary order`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("choice", "b", "a")),
+            previousWords = emptyList(),
+            dictionary = dictionary("b", "a"),
+        )
+
+        assertEquals(listOf("a"), options.first().words)
+    }
+
+    private fun dictionary(vararg words: String): List<WordEntry> =
+        words.map { WordEntry(it, 1.0) }
+
+    private fun unit(id: String, vararg words: String): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path),
+        candidates = listOf(words.map { ScoredCandidate(WordEntry(it, 1.0), 1.0) }),
+        concurrent = false,
+    )
+
+    private fun concurrentUnit(id: String, first: String, second: String): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path, path),
+        candidates = listOf(
+            listOf(ScoredCandidate(WordEntry(first, 1.0), 1.0)),
+            listOf(ScoredCandidate(WordEntry(second, 1.0), 1.0)),
+        ),
+        concurrent = true,
+    )
+}
