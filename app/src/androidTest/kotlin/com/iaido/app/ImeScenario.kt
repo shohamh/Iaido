@@ -696,6 +696,9 @@ class ImeScenario(
         val targetDescription = "Iaido replacement: $sourceWords source " +
             (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
             (if (replacementWords == 1) "word" else "words")
+        waitUntil("replacement reel before previewing '$targetDescription'") {
+            device.findObject(By.descStartsWith("Iaido replacement:")) != null
+        }
         val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
             ?: error("Missing replacement reel before previewing '$targetDescription'")
         val bounds = reel.visibleBounds

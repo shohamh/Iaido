@@ -25,14 +25,14 @@ two_finger_boundary|word|some|100
 two_finger_boundary|word|thing|100
 two_finger_boundary|word|something|1
 
-six_unit|word|a|100
-six_unit|word|b|100
-six_unit|word|c|100
-six_unit|word|d|100
-six_unit|word|e|100
-six_unit|word|f|100
-six_unit|word|g|100
-six_unit|word|fg|100000
+six_unit|word|qz|100
+six_unit|word|wx|100
+six_unit|word|ec|100
+six_unit|word|rv|100
+six_unit|word|tb|100
+six_unit|word|yn|100
+six_unit|word|um|100
+six_unit|word|ynum|100000
 
 low_confidence|word|plain|100
 low_confidence|word|plan|99

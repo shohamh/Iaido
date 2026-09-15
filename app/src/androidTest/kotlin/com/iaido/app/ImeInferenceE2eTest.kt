@@ -71,11 +71,20 @@ class ImeInferenceE2eTest {
     fun seventhUnitFreezesOnlyTheOldestOfTheBoundedInferenceRun() =
         scenario(ImeScenarioData.AutoSpaceFixture.SIX_UNIT).run {
             enableInferenceAndPrefix()
-            listOf("a", "b", "c", "d", "e", "f").forEachIndexed { index, word ->
-                swipeWordExpecting(word, "X " + ('a'..'f').take(index + 1).joinToString(" "))
+            // Each fixture word spans two distinct, non-adjacent-row keys (e.g. "qz" travels
+            // from the top row to the bottom row) so it swipes reliably instead of being
+            // classified as a tap — see KeyboardGestureClassification.isTapGesture, which
+            // treats any gesture confined to a single key as a tap regardless of dictionary
+            // content. A single-letter "word" can never satisfy that displacement requirement.
+            val words = listOf("qz", "wx", "ec", "rv", "tb", "yn")
+            words.forEachIndexed { index, word ->
+                swipeWordExpecting(word, "X " + words.take(index + 1).joinToString(" "))
             }
-            swipeWordExpecting("g", "X a b c d e fg")
-            assertTextAndCursor("X a b c d e fg")
+            // The 7th unit ("um") pushes the window past its six-unit bound, freezing the
+            // oldest unit ("qz") while the fixture's overwhelmingly frequent "ynum" entry wins
+            // the re-segmentation of the newest two units ("yn" + "um") into one merged word.
+            swipeWordExpecting("um", "X " + words.dropLast(1).joinToString(" ") + " ynum")
+            assertTextAndCursor("X qz wx ec rv tb ynum")
         }
 
     @Test
