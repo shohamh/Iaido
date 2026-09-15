@@ -103,12 +103,32 @@ class InferenceSegmenter(
             }.sortedWith(rawComparator).take(maxAlternatives)
         }
 
+        // A single, non-concurrent gesture unit's own recognized text can be split into
+        // shorter dictionary words (e.g. "hello" -> "he"+"ll"+"o", or a lower-ranked raw
+        // candidate like "ids" -> "i"+"d"+"s"). That alternative stays available -- e.g. for a
+        // replacement reel -- matching the DP's normal behavior for ambiguous/low-confidence
+        // recognitions and multi-unit boundary revision (SPLIT_REEL, "inthe" -> "in the", or a
+        // genuine sequential/concurrent merge like "in"+"to" -> "into"). What must NOT happen is
+        // scoring such a *single-unit self-split* using context evidence computed between the
+        // split's OWN fragments (e.g. bigram("he", "ll"), bigram("i", "d")) as if "he"/"i" were
+        // genuinely separate, previously-typed words -- they never were; they are a byproduct of
+        // one swipe's own recognized text being cut into pieces. That is fundamentally different
+        // from a multi-unit group (formed by merging >= 2 real, separately-swiped gesture
+        // units), where the words genuinely were typed as separate units and bigram evidence
+        // between them is legitimate. Partial.append() uses the flag below to skip only the
+        // single-unit self-split's internal-context contribution, leaving frequency scoring,
+        // option generation/ranking, and every multi-unit and concurrent-unit behavior
+        // unchanged. See InferenceSegmenterTest's real-asset regression coverage for "hello"
+        // and "there is".
+        val isSingleNonConcurrentUnit = units.size == 1 && !units.single().concurrent
+
         return rawCandidates.flatMap { candidate ->
             dictionarySegmentations(candidate.text, dictionary).map { words ->
                 GroupOption(
                     words = words,
                     score = candidate.score + words.sumOf { word -> frequencyScore(dictionary.getValue(word)) },
                     sourceGestureIds = units.map { it.id },
+                    isSelfSplitOfSingleUnit = words.size > 1 && isSingleNonConcurrentUnit,
                 )
             }
         }.distinctBy { option -> option.words }
@@ -195,6 +215,11 @@ class InferenceSegmenter(
         val words: List<String>,
         val score: Double,
         val sourceGestureIds: List<String>,
+        // True only for a self-split (words.size > 1) of a single, non-concurrent gesture
+        // unit's own recognized text. Guards Partial.append() below against scoring the split
+        // using context evidence between the split's own fragments, which never corresponded
+        // to genuinely separate, previously-typed words (see groupOptions()).
+        val isSelfSplitOfSingleUnit: Boolean = false,
     )
 
     private data class Partial(
@@ -204,8 +229,23 @@ class InferenceSegmenter(
     ) {
         fun append(group: GroupOption, previousWords: List<String>, scorer: NgramContextScorer): Partial {
             val context = previousWords + words
-            val contextScore = group.words.foldIndexed(0.0) { index, total, word ->
-                total + scorer.score(context + group.words.take(index), word)
+            // A single-unit self-split (see groupOptions()) never went through a genuine word
+            // boundary: its "words" are all fragments of one swipe's own recognized text, and
+            // even the first fragment isn't a real word that was typed and then followed by the
+            // rest -- it is one arbitrary cut point among several the DP tries. Scoring it
+            // against real previous context would let a single common bigram hit (e.g. a very
+            // frequent short word like "the") outweigh the whole word's frequency margin just as
+            // easily as an internal fragment-to-fragment hit did (see InferenceSegmenterTest's
+            // real-asset regression coverage for "hello" / "there is" / "there"). So a
+            // self-split is scored on frequency alone, exactly as it would be with no context
+            // scorer at all -- the same, known-good comparison that existed before the real
+            // context scorer was wired in.
+            val contextScore = if (group.isSelfSplitOfSingleUnit) {
+                0.0
+            } else {
+                group.words.foldIndexed(0.0) { index, total, word ->
+                    total + scorer.score(context + group.words.take(index), word)
+                }
             }
             return Partial(
                 words = words + group.words,
