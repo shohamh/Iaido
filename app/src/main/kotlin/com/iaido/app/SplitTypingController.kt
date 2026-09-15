@@ -40,12 +40,16 @@ class SplitTypingController(
     fun tap(pointerId: Int, letter: Char, atMs: Long): Boolean = session.tap(pointerId, letter, atMs)
 
     fun poll(atMs: Long): String? {
-        val parts = session.poll(atMs) ?: return null
+        val parts = pollParts(atMs) ?: return null
         val candidates = merger.mergeParts(parts.parts, dictionary())
         val match = candidates.maxByOrNull { it.frequency } ?: return null
         commitText(match.word)
         return match.word
     }
+
+    fun pollParts(atMs: Long) = session.poll(atMs)
+
+    fun isPending() = session.isPending()
 
     fun cancel() = session.cancel()
 }

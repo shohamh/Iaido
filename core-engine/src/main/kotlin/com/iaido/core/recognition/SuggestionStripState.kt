@@ -11,6 +11,9 @@ data class SuggestionChip(
 class SuggestionStripState(private val rtl: Boolean) {
     private val selected = mutableMapOf<Int, Int>()
     private var chips: List<SuggestionChip> = emptyList()
+    private var replacementCandidates: List<ReplacementOption> = emptyList()
+    private var replacementPreview: ReplacementOption? = null
+    private var selectedReplacementOption: ReplacementOption? = null
 
     fun update(words: List<SuggestionChip>) {
         chips = words.mapIndexed { index, chip ->
@@ -20,6 +23,35 @@ class SuggestionStripState(private val rtl: Boolean) {
     }
 
     fun chips(): List<SuggestionChip> = if (rtl) chips.asReversed() else chips
+
+    fun updateReplacementOptions(options: List<ReplacementOption>) {
+        replacementCandidates = options.distinctBy(ReplacementOption::id)
+        replacementPreview = null
+        selectedReplacementOption = selectedReplacementOption?.let { selectedOption ->
+            replacementCandidates.firstOrNull { it.id == selectedOption.id }
+        }
+    }
+
+    /** Returns each complete candidate group in logical word order, even for RTL UI. */
+    fun replacementOptions(): List<ReplacementOption> = replacementCandidates
+
+    fun displayedReplacement(): ReplacementOption? =
+        replacementPreview ?: selectedReplacementOption ?: replacementCandidates.firstOrNull()
+
+    fun previewReplacement(candidateIndex: Int): ReplacementOption? =
+        replacementCandidates.getOrNull(candidateIndex)?.also { replacementPreview = it }
+
+    fun releaseReplacement(candidateIndex: Int): ReplacementOption? =
+        replacementCandidates.getOrNull(candidateIndex)?.also {
+            selectedReplacementOption = it
+            replacementPreview = null
+        }
+
+    fun selectedReplacement(): ReplacementOption? = selectedReplacementOption
+
+    fun cancelReplacement() {
+        replacementPreview = null
+    }
 
     fun tap(index: Int): String? = null
 

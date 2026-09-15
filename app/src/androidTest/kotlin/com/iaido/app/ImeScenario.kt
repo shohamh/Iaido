@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import android.app.Instrumentation
+import android.content.Intent
 import android.graphics.PointF
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -9,6 +10,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.iaido.core.language.Language
+import com.iaido.core.typing.SpacingMode
 import com.iaido.core.testing.SwipeFixtures
 
 data class ImeScenarioEvent(
@@ -47,6 +49,7 @@ data class PathTransform(
 
 class ImeScenario(
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
+    private val autoSpaceFixture: ImeScenarioData.AutoSpaceFixture? = null,
 ) {
     private val device = UiDevice.getInstance(instrumentation)
     private val automation = instrumentation.uiAutomation
@@ -61,6 +64,9 @@ class ImeScenario(
     private var expectedSelection = 0
     private var expectedLanguage = Language.ENGLISH
     private var expectedIme = system.iaidoImeId
+
+    /** Max incremental swipes [scrollToText] will attempt while hunting for a target label. */
+    private val scrollToTextMaxSwipes = 8
 
     fun run(block: ImeScenario.() -> Unit) {
         setup()
@@ -90,6 +96,30 @@ class ImeScenario(
     }
 
     fun swipePath(word: String, transform: PathTransform = PathTransform()) {
+        val cancelled = injectSwipeWord(word, transform)
+        if (cancelled) {
+            checkpoint("cancelledSwipe($word)")
+            return
+        }
+        val textBeforeCursor = expectedText.take(expectedSelection)
+        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.matches(Regex(".*[.!?]\\s*$"))) {
+            word.replaceFirstChar { it.uppercase() }
+        } else {
+            word
+        }
+        insertExpected(committed)
+        checkpoint("swipeWord($word)")
+    }
+
+    fun swipeWordExpecting(word: String, expected: String, transform: PathTransform = PathTransform()) {
+        check(!injectSwipeWord(word, transform)) { "Expected a completed swipe for '$word'" }
+        editor.waitForText(expected)
+        expectedText = expected
+        expectedSelection = editor.selection().last
+        checkpoint("swipeWordExpecting($word)")
+    }
+
+    private fun injectSwipeWord(word: String, transform: PathTransform): Boolean {
         require(word.isNotEmpty() && word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
         val window = keyboard()
         check(window.language == expectedLanguage) {
@@ -129,18 +159,7 @@ class ImeScenario(
         )
         pendingPointerEvents = injected
         pendingGestureSeed = transform.jitterSeed
-        if (cancelled) {
-            checkpoint("cancelledSwipe($word)")
-            return
-        }
-        val textBeforeCursor = expectedText.take(expectedSelection)
-        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.matches(Regex(".*[.!?]\\s*$"))) {
-            word.replaceFirstChar { it.uppercase() }
-        } else {
-            word
-        }
-        insertExpected(committed)
-        checkpoint("swipeWord($word)")
+        return cancelled
     }
 
     fun tapKey(key: String) {
@@ -412,6 +431,51 @@ class ImeScenario(
         checkpoint("assertText")
     }
 
+    fun assertTextAndCursor(expected: String) {
+        assertText(expected)
+        check(editor.selection().last == expected.length) {
+            "Expected cursor at ${expected.length}, observed ${editor.selection()} for '$expected'"
+        }
+        expectedSelection = expected.length
+        checkpoint("assertTextAndCursor")
+    }
+
+    fun selectSpacingModeThroughSettings(mode: SpacingMode) {
+        val firstSettings = openSettings()
+        try {
+            val label = spacingModeLabel(mode)
+            clickTextNode(label)
+            waitUntil("spacing mode '$label' selected") { isModeChecked(label) }
+        } finally {
+            firstSettings.finish()
+        }
+        SystemClock.sleep(300L)
+        recreateInputView()
+        val restartedSettings = openSettings()
+        try {
+            val label = spacingModeLabel(mode)
+            waitUntil("persisted spacing mode '$label'") { isModeChecked(label) }
+        } finally {
+            restartedSettings.finish()
+        }
+        recreateInputView()
+    }
+
+    fun previewReplacementThenCancel(sourceWords: Int, replacementWords: Int) {
+        dragReplacement(sourceWords, replacementWords, cancel = true)
+        editor.waitForText(expectedText)
+        expectedSelection = editor.selection().last
+        checkpoint("previewReplacementThenCancel($sourceWords,$replacementWords)")
+    }
+
+    fun releaseReplacement(sourceWords: Int, replacementWords: Int) {
+        val before = expectedText
+        dragReplacement(sourceWords, replacementWords, cancel = false)
+        expectedText = editor.waitForTextChange(before)
+        expectedSelection = editor.selection().last
+        checkpoint("releaseReplacement($sourceWords,$replacementWords)")
+    }
+
     fun assertLanguage(expected: Language) {
         check(expectedIme == system.iaidoImeId) { "Language markers are unavailable on the reference IME" }
         check(keyboard().language == expected) {
@@ -451,14 +515,14 @@ class ImeScenario(
     }
 
     fun relaunchHost() {
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         checkpoint("relaunchHost")
     }
 
     fun backgroundAndForeground() {
         device.pressHome()
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         checkpoint("backgroundAndForeground")
     }
@@ -501,7 +565,7 @@ class ImeScenario(
 
     private fun setup() {
         system.enableAndSelect(system.iaidoImeId)
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         system.waitForImeVisible(system.iaidoImeId)
         editor.clear()
@@ -521,6 +585,140 @@ class ImeScenario(
     }
 
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
+
+    private fun openSettings(): android.app.Activity = instrumentation.startActivitySync(
+        Intent(instrumentation.targetContext, SettingsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+
+    private fun spacingModeLabel(mode: SpacingMode): String = when (mode) {
+        SpacingMode.MANUAL -> "Manual spacing"
+        SpacingMode.AFTER_SWIPE -> "Space after swipe"
+        SpacingMode.INFER_SPACES -> "Infer spaces"
+    }
+
+    /**
+     * Resolves the checkable node for [label], or `null` if it cannot currently be found (e.g.
+     * a transient recomposition right after a click). Returns `null` rather than throwing so
+     * callers polling via [waitUntil] get real retries instead of aborting on the first miss;
+     * [waitUntil] itself still raises a failure if the node is never found before its timeout,
+     * so genuine absence is still reported as a failure.
+     */
+    private fun modeNode(label: String): androidx.test.uiautomator.UiObject2? {
+        var node = findTextNode(label) ?: return null
+        repeat(4) {
+            val current = node ?: return null
+            if (current.isCheckable) return current
+            node = current.parent
+        }
+        return node
+    }
+
+    /**
+     * `true` if [label]'s mode is currently checked, `false` if it isn't (or can't be resolved
+     * right now, including a node that went stale between being found and being queried).
+     */
+    private fun isModeChecked(label: String): Boolean = try {
+        modeNode(label)?.isChecked == true
+    } catch (e: androidx.test.uiautomator.StaleObjectException) {
+        false
+    }
+
+    /**
+     * Resolves the text node for [label] (e.g. to click it), scrolling it into view first.
+     * Returns `null` rather than throwing so callers can retry via [waitUntil].
+     */
+    private fun findTextNode(label: String): androidx.test.uiautomator.UiObject2? {
+        scrollToText(label)
+        return device.findObject(By.text(label))
+    }
+
+    /**
+     * Finds and clicks [label]'s text node, scrolling it into view first, using the same
+     * [waitUntil] timeout/retry pattern used elsewhere in this file. Retries the whole
+     * find-then-click on any failure: a single immediate lookup right after opening Settings can
+     * race the initial Compose layout pass, and a node found right after a scroll can go stale
+     * (`StaleObjectException`) before the click lands if Compose recomposes in between. It still
+     * raises a failure (via [waitUntil]) if the click never lands before the timeout.
+     */
+    private fun clickTextNode(label: String) {
+        waitUntil("spacing mode option '$label' clicked") {
+            val option = findTextNode(label)
+            if (option == null) {
+                false
+            } else {
+                try {
+                    option.click()
+                    true
+                } catch (e: androidx.test.uiautomator.StaleObjectException) {
+                    false
+                }
+            }
+        }
+    }
+
+    /**
+     * Scrolls the Settings screen's scrollable container (a Compose `verticalScroll` Column)
+     * until [label] is on screen, so callers can rely on `device.findObject(By.text(label))`
+     * afterward. Spacing-mode options live below the initial fold on a normal phone viewport
+     * (headline + live preview + Setup/App updates/Gestures sections above them), so lookups
+     * must scroll first rather than assuming the node is already in the accessibility snapshot.
+     * A no-op (best-effort) when the label is already visible or no scrollable container exists.
+     */
+    private fun scrollToText(label: String) {
+        if (device.hasObject(By.text(label))) return
+        repeat(scrollToTextMaxSwipes) {
+            val scrollable = device.findObject(By.scrollable(true)) ?: return
+            val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
+            val x = (bounds.left + bounds.right) / 2
+            // Swipe from near the bottom of the scrollable area to near its top, i.e. scroll the
+            // content *down* into view, since the spacing-mode options sit below the fold.
+            val startY = bounds.top + (bounds.height() * 0.8f).toInt()
+            val endY = bounds.top + (bounds.height() * 0.2f).toInt()
+            device.swipe(x, startY, x, endY, 20)
+            device.waitForIdle()
+            SystemClock.sleep(150L)
+            if (device.hasObject(By.text(label))) return
+        }
+    }
+
+    private fun waitUntil(description: String, condition: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (condition()) return
+            device.waitForIdle()
+            SystemClock.sleep(50L)
+        }
+        error("Timed out waiting for $description")
+    }
+
+    private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
+        val targetDescription = "Iaido replacement: $sourceWords source " +
+            (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
+            (if (replacementWords == 1) "word" else "words")
+        waitUntil("replacement reel before previewing '$targetDescription'") {
+            device.findObject(By.descStartsWith("Iaido replacement:")) != null
+        }
+        val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
+            ?: error("Missing replacement reel before previewing '$targetDescription'")
+        val bounds = reel.visibleBounds
+        val points = listOf(
+            PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
+            PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 88f),
+        )
+        pendingPointerEvents = pointer.injectScreenSwipe(
+            points = points,
+            cancel = cancel,
+            holdBeforeMoveMs = 520L,
+            onEvent = { event ->
+                if (event.action == android.view.MotionEvent.ACTION_MOVE) {
+                    waitUntil("replacement reel '$targetDescription'") {
+                        device.findObject(By.descStartsWith(targetDescription)) != null
+                    }
+                }
+            },
+        )
+    }
 
     private fun checkpoint(action: String) {
         editor.waitForText(expectedText)

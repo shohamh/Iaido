@@ -17,6 +17,11 @@ class ImeTestHostActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val fixture = intent.getStringExtra(DebugAutoSpaceFixtures.EXTRA_FIXTURE)
+        getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE).edit().apply {
+            if (fixture.isNullOrBlank()) remove(DebugAutoSpaceFixtures.FIXTURE_KEY)
+            else putString(DebugAutoSpaceFixtures.FIXTURE_KEY, fixture)
+        }.commit()
         setContentView(R.layout.ime_test_host)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         editor = findViewById(R.id.ime_test_editor)

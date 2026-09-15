@@ -21,4 +21,10 @@ class SuggestionReelMathTest {
         assertEquals(-1f, reelSettleOffset(displayedIndex = 2, selectedIndex = 1))
         assertEquals(0f, reelSettleOffset(displayedIndex = 1, selectedIndex = 1))
     }
+
+    @Test
+    fun `replacement group width preserves the larger source or replacement span`() {
+        assertEquals(2, replacementReelWidthSlots(sourceWordCount = 2, replacementWordCount = 1))
+        assertEquals(3, replacementReelWidthSlots(sourceWordCount = 1, replacementWordCount = 3))
+    }
 }

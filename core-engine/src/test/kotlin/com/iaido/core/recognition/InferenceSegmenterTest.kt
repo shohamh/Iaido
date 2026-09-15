@@ -1,0 +1,249 @@
+package com.iaido.core.recognition
+
+import com.iaido.core.dictionary.WordEntry
+import com.iaido.core.gesture.GesturePath
+import com.iaido.core.gesture.GesturePoint
+import java.io.File
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class InferenceSegmenterTest {
+    private val path = GesturePath(listOf(GesturePoint(0f, 0f, 0L)))
+
+    @Test
+    fun `sequential gestures stay separate when their joined text is not a dictionary word`() {
+        val dictionary = dictionary("in", "the")
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("first", "in"), unit("second", "the")),
+            previousWords = emptyList(),
+            dictionary = dictionary,
+        )
+
+        assertEquals(listOf("in", "the"), options.first().words)
+        assertEquals(listOf("first", "second"), options.first().sourceGestureIds)
+    }
+
+    @Test
+    fun `sequential gestures can join into one dictionary word`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("some", "some"), unit("thing", "thing")),
+            previousWords = emptyList(),
+            dictionary = dictionary("some", "thing", "something"),
+        )
+
+        assertEquals(listOf("something"), options.first().words)
+    }
+
+    @Test
+    fun `one gesture can split into two dictionary words`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("joined", "inthe")),
+            previousWords = emptyList(),
+            dictionary = dictionary("in", "the"),
+        )
+
+        assertEquals(listOf("in", "the"), options.first().words)
+    }
+
+    @Test
+    fun `one gesture can split into three dictionary words but not four`() {
+        val segmenter = InferenceSegmenter()
+
+        val threeWords = segmenter.rank(
+            units = listOf(unit("three", "abc")),
+            previousWords = emptyList(),
+            dictionary = dictionary("a", "b", "c"),
+        )
+        val fourWords = segmenter.rank(
+            units = listOf(unit("four", "abcd")),
+            previousWords = emptyList(),
+            dictionary = dictionary("a", "b", "c", "d"),
+        )
+
+        assertEquals(listOf("a", "b", "c"), threeWords.first().words)
+        assertTrue(fourWords.isEmpty())
+    }
+
+    @Test
+    fun `concurrent paths merge into one word by default`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(concurrentUnit("pair", "in", "to")),
+            previousWords = emptyList(),
+            dictionary = dictionary("in", "to", "into"),
+        )
+
+        assertEquals(listOf("into"), options.first().words)
+    }
+
+    @Test
+    fun `concurrent paths preserve a boundary when context wins`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("go" to "in") to 3.0)),
+            confidenceMargin = 0.0,
+        ).rank(
+            units = listOf(concurrentUnit("pair", "in", "to")),
+            previousWords = listOf("go"),
+            dictionary = dictionary("in", "to", "into"),
+        )
+
+        assertEquals(listOf("in", "to"), options.first().words)
+    }
+
+    @Test
+    fun `context can change a sequential boundary`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 3.0)),
+            confidenceMargin = 0.0,
+        ).rank(
+            units = listOf(unit("to", "to"), unit("day", "day")),
+            previousWords = listOf("good"),
+            dictionary = dictionary("to", "day", "today"),
+        )
+
+        assertEquals(listOf("to", "day"), options.first().words)
+    }
+
+    @Test
+    fun `low context gain leaves the current interpretation first`() {
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 0.5)),
+            confidenceMargin = 1.0,
+        ).rank(
+            units = listOf(unit("to", "to"), unit("day", "day")),
+            previousWords = listOf("good"),
+            dictionary = dictionary("to", "day", "today"),
+        )
+
+        assertEquals(listOf("today"), options.first().words)
+    }
+
+    @Test
+    fun `only the six most recent gesture units participate`() {
+        val options = InferenceSegmenter().rank(
+            units = (1..7).map { index -> unit(index.toString(), "a") },
+            previousWords = emptyList(),
+            dictionary = dictionary("a"),
+        )
+
+        assertEquals((2..7).map(Int::toString), options.first().sourceGestureIds)
+        assertEquals(6, options.first().words.size)
+    }
+
+    @Test
+    fun `equal scoring alternatives use dictionary order`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("choice", "b", "a")),
+            previousWords = emptyList(),
+            dictionary = dictionary("b", "a"),
+        )
+
+        assertEquals(listOf("a"), options.first().words)
+    }
+
+    @Test
+    fun `dictionary frequency decides otherwise equal candidate ranking`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(scoredUnit("frequency", "apple" to 1.0, "zebra" to 1.0)),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("apple", 1.0), WordEntry("zebra", 100.0)),
+        )
+
+        assertEquals(listOf("zebra"), options.first().words)
+    }
+
+    @Test
+    fun `path fit decides otherwise equal candidate ranking`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(scoredUnit("path", "apple" to 1.0, "zebra" to 2.0)),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("apple", 1.0), WordEntry("zebra", 1.0)),
+        )
+
+        assertEquals(listOf("zebra"), options.first().words)
+    }
+
+    @Test
+    fun `a confident whole-word swipe does not fragment against the real shipped dictionary and ngram data`() {
+        val entries = realDictionaryEntries()
+        val store = CompactNgramScoreStore.fromBytes(
+            realNgramBytes(),
+            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
+        )
+        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(scoreStore = store))
+
+        val options = segmenter.rank(
+            units = listOf(unit("swipe-1", "hello")),
+            previousWords = emptyList(),
+            dictionary = entries,
+        )
+
+        assertEquals(listOf("hello"), options.first().words)
+    }
+
+    /**
+     * Loads the actual shipped app/src/main/assets/dictionary/en.csv, in its stable CSV row
+     * order, exactly as EnglishDictionaryRepository does in production. Real dictionary rows
+     * (including single/double-letter fragments like "he", "ll", "o") are what makes this
+     * class of self-split regression reproducible -- the hand-rolled dictionaries used by every
+     * other test in this file are too small to contain them.
+     */
+    private fun realDictionaryEntries(): List<WordEntry> =
+        realAssetsRoot().resolve("dictionary/en.csv").readLines()
+            .drop(1)
+            .mapNotNull { line ->
+                val columns = line.split(',', limit = 2)
+                if (columns.size != 2) return@mapNotNull null
+                val word = columns[0].trim()
+                val frequency = columns[1].trim().toDoubleOrNull()
+                if (word.isEmpty() || frequency == null || frequency <= 0.0) null
+                else WordEntry(word, frequency)
+            }
+
+    /** Loads the actual shipped app/src/main/assets/context-ngrams/en.ngram.bin bytes. */
+    private fun realNgramBytes(): ByteArray =
+        realAssetsRoot().resolve("context-ngrams/en.ngram.bin").readBytes()
+
+    /**
+     * core-engine has no direct access to the app module's assets, so this resolves them via a
+     * relative path from wherever the Gradle test task's working directory happens to be
+     * (normally the core-engine project directory, but resolved defensively in case that ever
+     * changes).
+     */
+    private fun realAssetsRoot(): File {
+        var dir = File(".").absoluteFile
+        repeat(6) {
+            val candidate = File(dir, "app/src/main/assets")
+            if (candidate.isDirectory) return candidate
+            dir = dir.parentFile ?: return@repeat
+        }
+        error("Could not locate app/src/main/assets from working directory ${File(".").absolutePath}")
+    }
+
+    private fun dictionary(vararg words: String): List<WordEntry> =
+        words.map { WordEntry(it, 1.0) }
+
+    private fun unit(id: String, vararg words: String): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path),
+        candidates = listOf(words.map { ScoredCandidate(WordEntry(it, 1.0), 1.0) }),
+        concurrent = false,
+    )
+
+    private fun scoredUnit(id: String, vararg candidates: Pair<String, Double>): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path),
+        candidates = listOf(candidates.map { (word, score) -> ScoredCandidate(WordEntry(word, 1.0), score) }),
+        concurrent = false,
+    )
+
+    private fun concurrentUnit(id: String, first: String, second: String): GestureUnit = GestureUnit(
+        id = id,
+        paths = listOf(path, path),
+        candidates = listOf(
+            listOf(ScoredCandidate(WordEntry(first, 1.0), 1.0)),
+            listOf(ScoredCandidate(WordEntry(second, 1.0), 1.0)),
+        ),
+        concurrent = true,
+    )
+}

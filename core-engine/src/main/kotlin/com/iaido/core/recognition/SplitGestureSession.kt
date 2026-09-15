@@ -78,6 +78,9 @@ class SplitGestureSession(private val graceWindowMs: Long = 350L) {
         return SplitWordParts(result.map { it.letters }, result.map { it.path })
     }
 
+    /** True while another pointer or the grace window can still produce parts. */
+    fun isPending(): Boolean = active.isNotEmpty() || graceDeadlineMs != null
+
     fun cancel() {
         clear()
     }

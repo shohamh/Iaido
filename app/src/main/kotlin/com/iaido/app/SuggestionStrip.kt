@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -44,6 +47,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.iaido.core.recognition.SuggestionChip
+import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -53,9 +57,23 @@ const val SUGGESTION_STRIP_DESCRIPTION = "Iaido suggestion strip"
 fun SuggestionStrip(
     chips: List<SuggestionChip>,
     rtl: Boolean,
+    replacementOptions: List<ReplacementOption> = emptyList(),
     onRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onUndo: (chipIndex: Int) -> Unit = {},
+    onReplacementPreview: (ReplacementOption) -> Unit = {},
+    onReplacementRelease: (ReplacementOption) -> Unit = {},
+    onReplacementCancel: () -> Unit = {},
 ) {
+    if (replacementOptions.isNotEmpty()) {
+        ReplacementSuggestionStrip(
+            options = replacementOptions,
+            rtl = rtl,
+            onPreview = onReplacementPreview,
+            onRelease = onReplacementRelease,
+            onCancel = onReplacementCancel,
+        )
+        return
+    }
     val ordered = if (rtl) chips.asReversed() else chips
     val visibleSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
         ?: reelVisibleSlotCount(0)
@@ -78,6 +96,141 @@ fun SuggestionStrip(
                 onRelease = { candidate -> onRelease(index, candidate) },
                 onUndo = { onUndo(index) },
             )
+        }
+    }
+}
+
+@Composable
+private fun ReplacementSuggestionStrip(
+    options: List<ReplacementOption>,
+    rtl: Boolean,
+    onPreview: (ReplacementOption) -> Unit,
+    onRelease: (ReplacementOption) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val visibleSlotCount = reelVisibleSlotCount(options.size)
+    val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
+    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
+        ReplacementReelSelection()
+    }
+    selection.updateOptions(options)
+    val selectedIndex = selection.selectedIndex()
+
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(viewportHeight + 8.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item(key = options.joinToString { it.id }) {
+            ReplacementReelGroup(
+                options = options,
+                selectedIndex = selectedIndex,
+                rtl = rtl,
+                viewportHeight = viewportHeight,
+                onPreview = { option ->
+                    selection.preview(option)
+                    onPreview(option)
+                },
+                onRelease = { option ->
+                    selection.release(option)
+                    onRelease(option)
+                },
+                onCancel = {
+                    selection.cancel()
+                    onCancel()
+                },
+            )
+        }
+    }
+}
+
+private val ReplacementReelSelectionSaver = Saver<ReplacementReelSelection, String>(
+    save = { selection -> selection.selectedOptionId.orEmpty() },
+    restore = { selectedOptionId ->
+        ReplacementReelSelection(initialSelectedOptionId = selectedOptionId.ifEmpty { null })
+    },
+)
+
+@Composable
+private fun ReplacementReelGroup(
+    options: List<ReplacementOption>,
+    selectedIndex: Int,
+    rtl: Boolean,
+    viewportHeight: androidx.compose.ui.unit.Dp,
+    onPreview: (ReplacementOption) -> Unit,
+    onRelease: (ReplacementOption) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val stateKey = options.joinToString { it.id }
+    var dragY by remember(stateKey, selectedIndex) { mutableFloatStateOf(0f) }
+    var isDragging by remember(stateKey, selectedIndex) { mutableStateOf(false) }
+    val stepPx = with(density) { REEL_STEP_DP.dp.toPx() }
+    val thresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
+    val previewIndex = displayedReelIndex(selectedIndex, dragY / stepPx, options.lastIndex)
+    val option = options[previewIndex]
+    val layout = replacementReelLayout(option, rtl)
+    val description = replacementReelDescription(option, previewIndex, options.size)
+    val shape = RoundedCornerShape(16.dp)
+
+    LaunchedEffect(isDragging, previewIndex, stateKey) {
+        if (isDragging) onPreview(option)
+    }
+
+    Row(
+        modifier = Modifier
+            .width((160 * layout.widthSlots).dp)
+            .height(viewportHeight)
+            .semantics(mergeDescendants = true) {
+                contentDescription = description
+                stateDescription = "Swipe vertically to preview; release to commit"
+            }
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .pointerInput(stateKey, selectedIndex) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        dragY = 0f
+                        isDragging = true
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        dragY += amount.y
+                    },
+                    onDragEnd = {
+                        val shouldCommit = abs(dragY) >= thresholdPx || options.size == 1
+                        isDragging = false
+                        if (shouldCommit) onRelease(options[previewIndex]) else onCancel()
+                        dragY = 0f
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                        dragY = 0f
+                        onCancel()
+                    },
+                )
+            },
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        layout.renderedWords.forEach { word ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .padding(8.dp),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                Text(
+                    text = word,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
