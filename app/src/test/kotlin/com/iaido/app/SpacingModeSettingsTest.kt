@@ -6,9 +6,16 @@ import org.junit.jupiter.api.Test
 
 class SpacingModeSettingsTest {
     @Test
-    fun `spacing mode stored values round trip`() {
-        SpacingMode.entries.forEach { mode ->
-            assertEquals(mode, spacingModeFromStoredValue(spacingModeStoredValue(mode)))
+    fun `spacing mode stored values use stable literals and round trip`() {
+        val expectedStoredValues = mapOf(
+            SpacingMode.MANUAL to "manual",
+            SpacingMode.AFTER_SWIPE to "after_swipe",
+            SpacingMode.INFER_SPACES to "infer_spaces",
+        )
+
+        expectedStoredValues.forEach { (mode, storedValue) ->
+            assertEquals(storedValue, spacingModeStoredValue(mode))
+            assertEquals(mode, spacingModeFromStoredValue(storedValue))
         }
     }
 
