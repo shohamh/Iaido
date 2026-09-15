@@ -65,6 +65,9 @@ class ImeScenario(
     private var expectedLanguage = Language.ENGLISH
     private var expectedIme = system.iaidoImeId
 
+    /** Max incremental swipes [scrollToText] will attempt while hunting for a target label. */
+    private val scrollToTextMaxSwipes = 8
+
     fun run(block: ImeScenario.() -> Unit) {
         setup()
         var succeeded = false
@@ -441,9 +444,8 @@ class ImeScenario(
         val firstSettings = openSettings()
         try {
             val label = spacingModeLabel(mode)
-            val option = device.findObject(By.text(label)) ?: error("Missing spacing mode '$label'")
-            option.click()
-            waitUntil("spacing mode '$label' selected") { modeNode(label).isChecked }
+            clickTextNode(label)
+            waitUntil("spacing mode '$label' selected") { isModeChecked(label) }
         } finally {
             firstSettings.finish()
         }
@@ -452,7 +454,7 @@ class ImeScenario(
         val restartedSettings = openSettings()
         try {
             val label = spacingModeLabel(mode)
-            waitUntil("persisted spacing mode '$label'") { modeNode(label).isChecked }
+            waitUntil("persisted spacing mode '$label'") { isModeChecked(label) }
         } finally {
             restartedSettings.finish()
         }
@@ -595,13 +597,89 @@ class ImeScenario(
         SpacingMode.INFER_SPACES -> "Infer spaces"
     }
 
-    private fun modeNode(label: String): androidx.test.uiautomator.UiObject2 {
-        var node = device.findObject(By.text(label)) ?: error("Missing spacing mode '$label'")
+    /**
+     * Resolves the checkable node for [label], or `null` if it cannot currently be found (e.g.
+     * a transient recomposition right after a click). Returns `null` rather than throwing so
+     * callers polling via [waitUntil] get real retries instead of aborting on the first miss;
+     * [waitUntil] itself still raises a failure if the node is never found before its timeout,
+     * so genuine absence is still reported as a failure.
+     */
+    private fun modeNode(label: String): androidx.test.uiautomator.UiObject2? {
+        var node = findTextNode(label) ?: return null
         repeat(4) {
-            if (node.isCheckable) return node
-            node = node.parent ?: return@repeat
+            val current = node ?: return null
+            if (current.isCheckable) return current
+            node = current.parent
         }
         return node
+    }
+
+    /**
+     * `true` if [label]'s mode is currently checked, `false` if it isn't (or can't be resolved
+     * right now, including a node that went stale between being found and being queried).
+     */
+    private fun isModeChecked(label: String): Boolean = try {
+        modeNode(label)?.isChecked == true
+    } catch (e: androidx.test.uiautomator.StaleObjectException) {
+        false
+    }
+
+    /**
+     * Resolves the text node for [label] (e.g. to click it), scrolling it into view first.
+     * Returns `null` rather than throwing so callers can retry via [waitUntil].
+     */
+    private fun findTextNode(label: String): androidx.test.uiautomator.UiObject2? {
+        scrollToText(label)
+        return device.findObject(By.text(label))
+    }
+
+    /**
+     * Finds and clicks [label]'s text node, scrolling it into view first, using the same
+     * [waitUntil] timeout/retry pattern used elsewhere in this file. Retries the whole
+     * find-then-click on any failure: a single immediate lookup right after opening Settings can
+     * race the initial Compose layout pass, and a node found right after a scroll can go stale
+     * (`StaleObjectException`) before the click lands if Compose recomposes in between. It still
+     * raises a failure (via [waitUntil]) if the click never lands before the timeout.
+     */
+    private fun clickTextNode(label: String) {
+        waitUntil("spacing mode option '$label' clicked") {
+            val option = findTextNode(label)
+            if (option == null) {
+                false
+            } else {
+                try {
+                    option.click()
+                    true
+                } catch (e: androidx.test.uiautomator.StaleObjectException) {
+                    false
+                }
+            }
+        }
+    }
+
+    /**
+     * Scrolls the Settings screen's scrollable container (a Compose `verticalScroll` Column)
+     * until [label] is on screen, so callers can rely on `device.findObject(By.text(label))`
+     * afterward. Spacing-mode options live below the initial fold on a normal phone viewport
+     * (headline + live preview + Setup/App updates/Gestures sections above them), so lookups
+     * must scroll first rather than assuming the node is already in the accessibility snapshot.
+     * A no-op (best-effort) when the label is already visible or no scrollable container exists.
+     */
+    private fun scrollToText(label: String) {
+        if (device.hasObject(By.text(label))) return
+        repeat(scrollToTextMaxSwipes) {
+            val scrollable = device.findObject(By.scrollable(true)) ?: return
+            val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
+            val x = (bounds.left + bounds.right) / 2
+            // Swipe from near the bottom of the scrollable area to near its top, i.e. scroll the
+            // content *down* into view, since the spacing-mode options sit below the fold.
+            val startY = bounds.top + (bounds.height() * 0.8f).toInt()
+            val endY = bounds.top + (bounds.height() * 0.2f).toInt()
+            device.swipe(x, startY, x, endY, 20)
+            device.waitForIdle()
+            SystemClock.sleep(150L)
+            if (device.hasObject(By.text(label))) return
+        }
     }
 
     private fun waitUntil(description: String, condition: () -> Boolean) {
