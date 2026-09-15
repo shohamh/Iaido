@@ -11,6 +11,10 @@ internal fun reelVisibleSlotCount(candidateCount: Int): Int =
 internal fun reelSettleOffset(displayedIndex: Int, selectedIndex: Int): Float =
     (selectedIndex - displayedIndex).toFloat()
 
+/** The replacement group occupies every source or replacement slot it spans. */
+internal fun replacementReelWidthSlots(sourceWordCount: Int, replacementWordCount: Int): Int =
+    maxOf(sourceWordCount, replacementWordCount)
+
 private fun Float.roundToInt(): Int = kotlin.math.round(this).toInt()
 
 private const val SINGLE_REEL_VISIBLE_SLOT = 1

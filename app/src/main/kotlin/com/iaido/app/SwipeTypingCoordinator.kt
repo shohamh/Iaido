@@ -5,6 +5,7 @@ import com.iaido.core.gesture.GesturePath
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureUnit
 import com.iaido.core.recognition.InferenceSegmenter
+import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SegmentationOption
 import com.iaido.core.recognition.SplitWordParts
@@ -33,6 +34,7 @@ class SwipeTypingCoordinator(
     private val pollSplitParts: (Long) -> SplitWordParts? = { null },
     private val isSplitPending: () -> Boolean = { false },
     private val segmenter: InferenceSegmenter = InferenceSegmenter(),
+    private val onReplacementOptionsChanged: (List<ReplacementOption>) -> Unit = {},
 ) {
     private val transaction = SwipeInferenceTransaction(
         cursorPosition = cursorPosition,
@@ -40,6 +42,7 @@ class SwipeTypingCoordinator(
         onFinalized = onFinalizedWords,
     )
     private var nextUnitId = 0L
+    private var replacementSelection: ReplacementSelection? = null
 
     fun onSingleSwipe(path: GesturePath, layout: KeyboardLayout) {
         onRecognizedSingleSwipe(path, recognize(path, layout))
@@ -71,6 +74,44 @@ class SwipeTypingCoordinator(
 
     fun onRecognitionFailed() = finalizeAndClear()
 
+    /** Complete structured candidates for the active inference span. */
+    fun replacementOptions(): List<ReplacementOption> {
+        val selection = replacementSelection ?: activeReplacementSelection() ?: return emptyList()
+        return selection.alternatives
+            .map { option -> ReplacementOption(selection.sourceWords, option.words, option.score) }
+            .distinctBy(ReplacementOption::id)
+    }
+
+    /** Replaces the active span with a candidate while its reel is being dragged. */
+    fun previewReplacement(option: ReplacementOption): Boolean {
+        val selection = replacementSelection ?: activeReplacementSelection() ?: return false
+        val selected = replacementOption(selection, option) ?: return false
+        if (!transaction.replaceCurrent(selected.words, selection.alternatives)) return false
+        replacementSelection = selection
+        notifyReplacementOptionsChanged()
+        return true
+    }
+
+    /** Finalizes the whole selected replacement group after the reel is released. */
+    fun releaseReplacement(option: ReplacementOption): Boolean {
+        val selection = replacementSelection ?: activeReplacementSelection() ?: return false
+        val selected = replacementOption(selection, option) ?: return false
+        if (transaction.currentWords != selected.words && !previewReplacement(option)) return false
+        finalizeAndClear()
+        return true
+    }
+
+    /** Restores the transaction's words when a reel drag is cancelled. */
+    fun cancelReplacement(): Boolean {
+        val selection = replacementSelection ?: return false
+        if (transaction.currentWords != selection.sourceWords &&
+            !transaction.replaceCurrent(selection.sourceWords, selection.alternatives)
+        ) return false
+        replacementSelection = null
+        notifyReplacementOptionsChanged()
+        return true
+    }
+
     /** Resolves delayed split-session output through the coordinator seam. */
     fun poll(atMs: Long): SplitPollOutcome = pollSplitParts(atMs)?.let(SplitPollOutcome::Resolved)
         ?: if (isSplitPending()) SplitPollOutcome.Pending else SplitPollOutcome.Cancelled
@@ -91,7 +132,9 @@ class SwipeTypingCoordinator(
         check(transaction.append(unit))
         val alternatives = segmenter.rank(transaction.units, previousWords(), dictionary())
         val words = alternatives.firstOrNull()?.words ?: unit.topWords()
+        replacementSelection = null
         if (!transaction.replaceCurrent(words, alternatives)) finalizeAndClear()
+        else notifyReplacementOptionsChanged()
     }
 
     private fun slideInferenceWindow(nextUnit: GestureUnit) {
@@ -101,6 +144,7 @@ class SwipeTypingCoordinator(
         val retainedUnits = transaction.units.drop(1) + nextUnit
         val alternatives = segmenter.rank(retainedUnits, previousWords() + finalizedWords, dictionary())
         val retainedWords = alternatives.firstOrNull()?.words ?: nextUnit.topWords()
+        replacementSelection = null
         if (!transaction.slideWindow(
                 finalizedWords,
                 finalizedAlternatives,
@@ -110,13 +154,34 @@ class SwipeTypingCoordinator(
             )
         ) {
             finalizeAndClear()
-        }
+        } else notifyReplacementOptionsChanged()
     }
 
     private fun finalizeAndClear() {
+        replacementSelection = null
         transaction.finalize()
         transaction.clear()
+        notifyReplacementOptionsChanged()
     }
+
+    private fun activeReplacementSelection(): ReplacementSelection? =
+        transaction.currentWords.takeIf { it.isNotEmpty() }
+            ?.takeIf { transaction.alternatives.isNotEmpty() }
+            ?.let { words -> ReplacementSelection(words, transaction.alternatives) }
+
+    private fun replacementOption(
+        selection: ReplacementSelection,
+        option: ReplacementOption,
+    ): SegmentationOption? = selection.alternatives.firstOrNull { candidate ->
+        ReplacementOption(selection.sourceWords, candidate.words, candidate.score).id == option.id
+    }
+
+    private fun notifyReplacementOptionsChanged() = onReplacementOptionsChanged(replacementOptions())
+
+    private data class ReplacementSelection(
+        val sourceWords: List<String>,
+        val alternatives: List<SegmentationOption>,
+    )
 
     private fun GestureUnit.topWord(): String = topWords().joinToString(separator = "")
 

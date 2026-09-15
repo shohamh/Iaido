@@ -51,6 +51,7 @@ import com.iaido.core.language.Language
 import com.iaido.core.layout.KeyPosition
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.SuggestionChip
+import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -73,8 +74,12 @@ fun KeyboardInputView(
     onLanguageSwitch: () -> Unit = {},
     onCommand: (GestureTrigger) -> Unit = {},
     suggestionChips: List<SuggestionChip> = emptyList(),
+    replacementOptions: List<ReplacementOption> = emptyList(),
     onSuggestionRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onSuggestionUndo: (chipIndex: Int) -> Unit = {},
+    onReplacementPreview: (ReplacementOption) -> Unit = {},
+    onReplacementRelease: (ReplacementOption) -> Unit = {},
+    onReplacementCancel: () -> Unit = {},
     onBackspaceRepeat: () -> Unit = {},
     onBackspacePressStart: () -> Unit = {},
     onBackspaceSwipeStart: () -> Unit = {},
@@ -174,8 +179,12 @@ fun KeyboardInputView(
             SuggestionStrip(
                 chips = suggestionChips,
                 rtl = language == Language.HEBREW,
+                replacementOptions = replacementOptions,
                 onRelease = onSuggestionRelease,
                 onUndo = onSuggestionUndo,
+                onReplacementPreview = onReplacementPreview,
+                onReplacementRelease = onReplacementRelease,
+                onReplacementCancel = onReplacementCancel,
             )
             Box(
                 modifier = Modifier

@@ -31,6 +31,7 @@ import com.iaido.core.recognition.FlowCorrectionEngine
 import com.iaido.core.recognition.FlowWord
 import com.iaido.core.recognition.NgramContextScorer
 import com.iaido.core.recognition.NgramScoreStore
+import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SegmentationOption
 import com.iaido.core.recognition.SessionCorrectionHistory
@@ -52,6 +53,7 @@ class IaidoInputMethodService : InputMethodService() {
     private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
+    private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
     private val splitPreview = mutableStateOf<String?>(null)
     private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
     private val editorTextChangeDetector = EditorTextChangeDetector()
@@ -152,6 +154,7 @@ class IaidoInputMethodService : InputMethodService() {
             },
             pollSplitParts = splitController::pollParts,
             isSplitPending = splitController::isPending,
+            onReplacementOptionsChanged = { options -> replacementOptions.value = options },
         )
     }
 
@@ -307,8 +310,12 @@ class IaidoInputMethodService : InputMethodService() {
                         handleCommand(trigger)
                     },
                     suggestionChips = sessionChips.value,
+                    replacementOptions = replacementOptions.value,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
+                    onReplacementPreview = swipeTypingCoordinator::previewReplacement,
+                    onReplacementRelease = swipeTypingCoordinator::releaseReplacement,
+                    onReplacementCancel = swipeTypingCoordinator::cancelReplacement,
                     onBackspaceRepeat = {
                         swipeTypingCoordinator.onNonSwipeInput()
                         typingController.backspace()

@@ -8,6 +8,8 @@ import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SplitWordParts
 import com.iaido.core.typing.SpacingMode
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SwipeTypingCoordinatorTest {
@@ -59,6 +61,37 @@ class SwipeTypingCoordinatorTest {
 
         assertEquals("in the", editor.text)
         assertEquals(6, editor.cursor())
+    }
+
+    @Test
+    fun `replacement reel previews restores and commits a full inference group`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("in", "the", "inthe"),
+            finalized::add,
+        )
+
+        coordinator.onSingleSwipe(path(5), layout)
+        val split = coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }
+
+        assertEquals(listOf("inthe"), split.sourceWords)
+        assertTrue(coordinator.previewReplacement(split))
+        assertEquals("in the", editor.text)
+        assertEquals(6, editor.cursor())
+
+        coordinator.cancelReplacement()
+
+        assertEquals("inthe", editor.text)
+        assertTrue(coordinator.replacementOptions().any { it.replacementWords == listOf("in", "the") })
+        assertTrue(coordinator.previewReplacement(split))
+        assertTrue(coordinator.releaseReplacement(split))
+        assertEquals("in the", editor.text)
+        assertEquals(6, editor.cursor())
+        assertEquals(listOf(listOf("in", "the")), finalized)
+        assertFalse(coordinator.replacementOptions().isNotEmpty())
     }
 
     @Test
