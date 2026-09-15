@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import android.app.Instrumentation
+import android.content.Intent
 import android.graphics.PointF
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -9,6 +10,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.iaido.core.language.Language
+import com.iaido.core.typing.SpacingMode
 import com.iaido.core.testing.SwipeFixtures
 
 data class ImeScenarioEvent(
@@ -47,6 +49,7 @@ data class PathTransform(
 
 class ImeScenario(
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
+    private val autoSpaceFixture: ImeScenarioData.AutoSpaceFixture? = null,
 ) {
     private val device = UiDevice.getInstance(instrumentation)
     private val automation = instrumentation.uiAutomation
@@ -90,6 +93,30 @@ class ImeScenario(
     }
 
     fun swipePath(word: String, transform: PathTransform = PathTransform()) {
+        val cancelled = injectSwipeWord(word, transform)
+        if (cancelled) {
+            checkpoint("cancelledSwipe($word)")
+            return
+        }
+        val textBeforeCursor = expectedText.take(expectedSelection)
+        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.matches(Regex(".*[.!?]\\s*$"))) {
+            word.replaceFirstChar { it.uppercase() }
+        } else {
+            word
+        }
+        insertExpected(committed)
+        checkpoint("swipeWord($word)")
+    }
+
+    fun swipeWordExpecting(word: String, expected: String, transform: PathTransform = PathTransform()) {
+        check(!injectSwipeWord(word, transform)) { "Expected a completed swipe for '$word'" }
+        editor.waitForText(expected)
+        expectedText = expected
+        expectedSelection = editor.selection().last
+        checkpoint("swipeWordExpecting($word)")
+    }
+
+    private fun injectSwipeWord(word: String, transform: PathTransform): Boolean {
         require(word.isNotEmpty() && word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
         val window = keyboard()
         check(window.language == expectedLanguage) {
@@ -129,18 +156,7 @@ class ImeScenario(
         )
         pendingPointerEvents = injected
         pendingGestureSeed = transform.jitterSeed
-        if (cancelled) {
-            checkpoint("cancelledSwipe($word)")
-            return
-        }
-        val textBeforeCursor = expectedText.take(expectedSelection)
-        val committed = if (textBeforeCursor.isEmpty() || textBeforeCursor.matches(Regex(".*[.!?]\\s*$"))) {
-            word.replaceFirstChar { it.uppercase() }
-        } else {
-            word
-        }
-        insertExpected(committed)
-        checkpoint("swipeWord($word)")
+        return cancelled
     }
 
     fun tapKey(key: String) {
@@ -412,6 +428,52 @@ class ImeScenario(
         checkpoint("assertText")
     }
 
+    fun assertTextAndCursor(expected: String) {
+        assertText(expected)
+        check(editor.selection().last == expected.length) {
+            "Expected cursor at ${expected.length}, observed ${editor.selection()} for '$expected'"
+        }
+        expectedSelection = expected.length
+        checkpoint("assertTextAndCursor")
+    }
+
+    fun selectSpacingModeThroughSettings(mode: SpacingMode) {
+        val firstSettings = openSettings()
+        try {
+            val label = spacingModeLabel(mode)
+            val option = device.findObject(By.text(label)) ?: error("Missing spacing mode '$label'")
+            option.click()
+            waitUntil("spacing mode '$label' selected") { modeNode(label).isChecked }
+        } finally {
+            firstSettings.finish()
+        }
+        SystemClock.sleep(300L)
+        recreateInputView()
+        val restartedSettings = openSettings()
+        try {
+            val label = spacingModeLabel(mode)
+            waitUntil("persisted spacing mode '$label'") { modeNode(label).isChecked }
+        } finally {
+            restartedSettings.finish()
+        }
+        recreateInputView()
+    }
+
+    fun previewReplacementThenCancel(sourceWords: Int, replacementWords: Int) {
+        dragReplacement(sourceWords, replacementWords, cancel = true)
+        editor.waitForText(expectedText)
+        expectedSelection = editor.selection().last
+        checkpoint("previewReplacementThenCancel($sourceWords,$replacementWords)")
+    }
+
+    fun releaseReplacement(sourceWords: Int, replacementWords: Int) {
+        val before = expectedText
+        dragReplacement(sourceWords, replacementWords, cancel = false)
+        expectedText = editor.waitForTextChange(before)
+        expectedSelection = editor.selection().last
+        checkpoint("releaseReplacement($sourceWords,$replacementWords)")
+    }
+
     fun assertLanguage(expected: Language) {
         check(expectedIme == system.iaidoImeId) { "Language markers are unavailable on the reference IME" }
         check(keyboard().language == expected) {
@@ -451,14 +513,14 @@ class ImeScenario(
     }
 
     fun relaunchHost() {
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         checkpoint("relaunchHost")
     }
 
     fun backgroundAndForeground() {
         device.pressHome()
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         checkpoint("backgroundAndForeground")
     }
@@ -501,7 +563,7 @@ class ImeScenario(
 
     private fun setup() {
         system.enableAndSelect(system.iaidoImeId)
-        system.launchHost()
+        system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
         system.waitForImeVisible(system.iaidoImeId)
         editor.clear()
@@ -521,6 +583,61 @@ class ImeScenario(
     }
 
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
+
+    private fun openSettings(): android.app.Activity = instrumentation.startActivitySync(
+        Intent(instrumentation.targetContext, SettingsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+
+    private fun spacingModeLabel(mode: SpacingMode): String = when (mode) {
+        SpacingMode.MANUAL -> "Manual spacing"
+        SpacingMode.AFTER_SWIPE -> "Space after swipe"
+        SpacingMode.INFER_SPACES -> "Infer spaces"
+    }
+
+    private fun modeNode(label: String): androidx.test.uiautomator.UiObject2 {
+        var node = device.findObject(By.text(label)) ?: error("Missing spacing mode '$label'")
+        repeat(4) {
+            if (node.isCheckable) return node
+            node = node.parent ?: return@repeat
+        }
+        return node
+    }
+
+    private fun waitUntil(description: String, condition: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (condition()) return
+            device.waitForIdle()
+            SystemClock.sleep(50L)
+        }
+        error("Timed out waiting for $description")
+    }
+
+    private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
+        val targetDescription = "Iaido replacement: $sourceWords source " +
+            if (sourceWords == 1) "word" else "words" + " to $replacementWords replacement " +
+            if (replacementWords == 1) "word" else "words"
+        val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
+            ?: error("Missing replacement reel before previewing '$targetDescription'")
+        val bounds = reel.visibleBounds
+        val points = listOf(
+            PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
+            PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 88f),
+        )
+        pendingPointerEvents = pointer.injectScreenSwipe(
+            points = points,
+            cancel = cancel,
+            holdBeforeMoveMs = 520L,
+            onEvent = { event ->
+                if (event.action == android.view.MotionEvent.ACTION_MOVE) {
+                    waitUntil("replacement reel '$targetDescription'") {
+                        device.findObject(By.descStartsWith(targetDescription)) != null
+                    }
+                }
+            },
+        )
+    }
 
     private fun checkpoint(action: String) {
         editor.waitForText(expectedText)

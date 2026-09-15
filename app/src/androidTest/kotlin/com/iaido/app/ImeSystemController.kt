@@ -19,9 +19,10 @@ class ImeSystemController(
     val iaidoImeId: String = ComponentName(packageName, "$packageName.IaidoInputMethodService").flattenToShortString()
     val referenceImeId: String = ComponentName(packageName, "$packageName.ReferenceInputMethodService").flattenToShortString()
 
-    fun launchHost() {
+    fun launchHost(autoSpaceFixture: String? = null) {
         val component = ComponentName(packageName, "$packageName.ImeTestHostActivity").flattenToShortString()
-        shell("am start -n $component -f 0x14000000")
+        val fixtureArgument = autoSpaceFixture?.let { " --es ${DebugAutoSpaceFixtures.EXTRA_FIXTURE} $it" }.orEmpty()
+        shell("am start -n $component -f 0x14000000$fixtureArgument")
         check(device.wait(Until.hasObject(By.res("$packageName:id/ime_test_editor")), DEFAULT_TIMEOUT_MS)) {
             "IME test host did not launch; focused=${device.currentPackageName}"
         }

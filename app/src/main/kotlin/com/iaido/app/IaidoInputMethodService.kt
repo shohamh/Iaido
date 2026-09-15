@@ -79,10 +79,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
     private val splitController by lazy {
         SplitTypingController(
-            dictionary = {
-                if (activeLanguage == Language.ENGLISH) dictionaryRepository.words()
-                else hebrewDictionaryRepository.words()
-            },
+            dictionary = ::activeDictionary,
             commitText = typingController::commitWord,
         )
     }
@@ -90,10 +87,12 @@ class IaidoInputMethodService : InputMethodService() {
         windowSize = 3,
         scoreStore = object : NgramScoreStore {
             override fun bigram(previous: String, next: String): Double =
-                ngramStores.store(activeLanguage).bigram(previous, next)
+                debugAutoSpaceFixture()?.bigram(previous, next)
+                    ?: ngramStores.store(activeLanguage).bigram(previous, next)
 
             override fun trigram(first: String, second: String, next: String): Double =
-                ngramStores.store(activeLanguage).trigram(first, second, next)
+                debugAutoSpaceFixture()?.trigram(first, second, next)
+                    ?: ngramStores.store(activeLanguage).trigram(first, second, next)
         },
     )
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
@@ -406,8 +405,12 @@ class IaidoInputMethodService : InputMethodService() {
         }
     }
 
-    private fun activeDictionary() = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
-    else hebrewDictionaryRepository.words()
+    private fun activeDictionary() = if (activeLanguage == Language.ENGLISH) {
+        debugAutoSpaceFixture()?.dictionary ?: learningDictionary.entries()
+    } else hebrewDictionaryRepository.words()
+
+    private fun debugAutoSpaceFixture(): DebugAutoSpaceFixture? =
+        DebugAutoSpaceFixtures.active(applicationContext)
 
     private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String): Boolean {
         val inputConnection = currentInputConnection ?: return false
