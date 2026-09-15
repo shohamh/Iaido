@@ -96,6 +96,21 @@ class ReplacementReelLayoutTest {
     }
 
     @Test
+    fun `preview selection survives coordinator candidate refresh before release`() {
+        val original = ReplacementOption(listOf("inthe"), listOf("inthe"), 1.0)
+        val split = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.8)
+        val refreshedOriginal = ReplacementOption(listOf("inthe"), listOf("inthe"), 1.1)
+        val refreshedSplit = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.9)
+        val selection = ReplacementReelSelection(listOf(original, split))
+
+        selection.preview(split)
+        selection.updateOptions(listOf(refreshedOriginal, refreshedSplit))
+
+        assertEquals(1, selection.selectedIndex())
+        assertEquals(refreshedSplit, selection.selectedOption())
+    }
+
+    @Test
     fun `accessibility description exposes cardinality words and candidate position`() {
         val description = replacementReelDescription(
             option = ReplacementOption(listOf("in", "the"), listOf("inthe"), 0.8),

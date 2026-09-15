@@ -23,6 +23,7 @@ Result: exit 0.
 - Added a deterministic regression that selects a split replacement, refreshes it with the same structured words and a new score, and verifies the refreshed candidate remains selected and displayed.
 - The regression was observed failing before the state fix, then the complete focused Task 5 command passed with `--rerun-tasks` (exit 0, 44.4 seconds).
 - Production replacement reels now retain a saveable selected stable ID and resolve it against refreshed candidates instead of always starting at index zero. A JVM state regression verifies the refreshed option remains at its selected index; the complete focused Task 5 command passed again with `--rerun-tasks` (exit 0, 54 seconds).
+- The production lifecycle now records the stable ID during drag preview, before the coordinator republishes candidates. The remembered reel selection is restored through a Saver and resolves that ID against each refreshed option list; release may clear the transaction without losing the in-drag selection. A focused regression was red before this lifecycle API existed and passed after the fix.
 
 ## Caveat
 

@@ -31,20 +31,51 @@ internal fun replacementSelectedIndex(
     .takeIf { it >= 0 }
     ?: 0
 
-internal class ReplacementReelSelection(private val options: List<ReplacementOption>) {
+internal class ReplacementReelSelection(
+    initialOptions: List<ReplacementOption> = emptyList(),
+    initialSelectedOptionId: String? = null,
+) {
+    private var options: List<ReplacementOption> = initialOptions
+    var selectedOptionId: String? = initialSelectedOptionId
+        private set
     var committed: ReplacementOption? = null
         private set
     var isPreviewing: Boolean = false
         private set
 
-    fun preview(index: Int): ReplacementOption? = options.getOrNull(index)?.also { isPreviewing = true }
+    fun updateOptions(options: List<ReplacementOption>) {
+        this.options = options
+        if (selectedOptionId != null && options.none { it.id == selectedOptionId }) {
+            selectedOptionId = null
+        }
+    }
 
-    fun release(index: Int): ReplacementOption? = options.getOrNull(index)?.also {
-        committed = it
+    fun selectedIndex(): Int = replacementSelectedIndex(options, selectedOptionId)
+
+    fun selectedOption(): ReplacementOption? = options.getOrNull(selectedIndex())
+
+    fun preview(index: Int): ReplacementOption? = options.getOrNull(index)?.also(::selectPreview)
+
+    fun preview(option: ReplacementOption): ReplacementOption? =
+        options.firstOrNull { it.id == option.id }?.also(::selectPreview)
+
+    fun release(index: Int): ReplacementOption? = options.getOrNull(index)?.also(::selectRelease)
+
+    fun release(option: ReplacementOption): ReplacementOption? =
+        options.firstOrNull { it.id == option.id }?.also(::selectRelease)
+
+    fun cancel() {
         isPreviewing = false
     }
 
-    fun cancel() {
+    private fun selectPreview(option: ReplacementOption) {
+        selectedOptionId = option.id
+        isPreviewing = true
+    }
+
+    private fun selectRelease(option: ReplacementOption) {
+        selectedOptionId = option.id
+        committed = option
         isPreviewing = false
     }
 }

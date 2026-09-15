@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -109,12 +110,11 @@ private fun ReplacementSuggestionStrip(
 ) {
     val visibleSlotCount = reelVisibleSlotCount(options.size)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
-    var selectedOptionId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selectedIndex = replacementSelectedIndex(options, selectedOptionId)
-
-    LaunchedEffect(options, selectedIndex) {
-        selectedOptionId = options[selectedIndex].id
+    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
+        ReplacementReelSelection()
     }
+    selection.updateOptions(options)
+    val selectedIndex = selection.selectedIndex()
 
     LazyRow(
         modifier = Modifier
@@ -130,16 +130,29 @@ private fun ReplacementSuggestionStrip(
                 selectedIndex = selectedIndex,
                 rtl = rtl,
                 viewportHeight = viewportHeight,
-                onPreview = onPreview,
+                onPreview = { option ->
+                    selection.preview(option)
+                    onPreview(option)
+                },
                 onRelease = { option ->
-                    selectedOptionId = option.id
+                    selection.release(option)
                     onRelease(option)
                 },
-                onCancel = onCancel,
+                onCancel = {
+                    selection.cancel()
+                    onCancel()
+                },
             )
         }
     }
 }
+
+private val ReplacementReelSelectionSaver = Saver<ReplacementReelSelection, String>(
+    save = { selection -> selection.selectedOptionId.orEmpty() },
+    restore = { selectedOptionId ->
+        ReplacementReelSelection(initialSelectedOptionId = selectedOptionId.ifEmpty { null })
+    },
+)
 
 @Composable
 private fun ReplacementReelGroup(
