@@ -6,6 +6,7 @@ import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureUnit
 import com.iaido.core.recognition.InferenceSegmenter
 import com.iaido.core.recognition.ScoredCandidate
+import com.iaido.core.recognition.SplitWordParts
 import com.iaido.core.typing.SpacingMode
 
 /** Coordinates completed recognition units with one editable host-text span. */
@@ -15,12 +16,14 @@ class SwipeTypingCoordinator(
     private val dictionary: () -> List<WordEntry>,
     private val previousWords: () -> List<String>,
     cursorPosition: () -> Int,
-    replaceHostSpan: (HostTextSpan, String) -> Unit,
+    replaceHostSpan: (HostTextSpan, String) -> Boolean,
     private val commitCompletedText: (String) -> Unit = { text ->
         val cursor = cursorPosition()
         replaceHostSpan(HostTextSpan(cursor, cursor), text)
     },
     onFinalizedWords: (HostTextSpan, List<String>) -> Unit = { _, _ -> },
+    private val hasFollowingWhitespace: () -> Boolean = { false },
+    private val pollSplitParts: (Long) -> SplitWordParts? = { null },
     private val segmenter: InferenceSegmenter = InferenceSegmenter(),
 ) {
     private val transaction = SwipeInferenceTransaction(
@@ -29,14 +32,13 @@ class SwipeTypingCoordinator(
         onFinalized = onFinalizedWords,
     )
     private var nextUnitId = 0L
-    private var needsBoundaryBeforeNextInference = false
 
     fun onSingleSwipe(path: GesturePath, layout: KeyboardLayout) {
         onRecognizedSingleSwipe(path, recognize(path, layout))
     }
 
     fun onRecognizedSingleSwipe(path: GesturePath, candidates: List<ScoredCandidate>) {
-        if (candidates.isEmpty()) return
+        if (candidates.isEmpty()) return onRecognitionFailed()
         accept(GestureUnit(nextId(), listOf(path), listOf(candidates), concurrent = false))
     }
 
@@ -48,8 +50,8 @@ class SwipeTypingCoordinator(
         parts: List<GesturePath>,
         candidates: List<List<ScoredCandidate>>,
     ) {
-        if (parts.size != 2) return
-        if (candidates.size != parts.size || candidates.any { it.isEmpty() }) return
+        if (parts.size != 2) return onRecognitionFailed()
+        if (candidates.size != parts.size || candidates.any { it.isEmpty() }) return onRecognitionFailed()
         accept(GestureUnit(nextId(), parts, candidates, concurrent = true))
     }
 
@@ -59,40 +61,45 @@ class SwipeTypingCoordinator(
 
     fun onExternalEdit() = finalizeAndClear()
 
-    /** Delayed split-session callers use this as their lifecycle-safe no-op boundary. */
-    fun poll(atMs: Long) {
-        @Suppress("UNUSED_VARIABLE")
-        val ignoredTime = atMs
-    }
+    fun onRecognitionFailed() = finalizeAndClear()
+
+    /** Resolves delayed split-session output through the coordinator seam. */
+    fun poll(atMs: Long): SplitWordParts? = pollSplitParts(atMs)
 
     private fun accept(unit: GestureUnit) {
         when (spacingMode()) {
             SpacingMode.MANUAL -> commitCompletedText(unit.topWord())
-            SpacingMode.AFTER_SWIPE -> commitCompletedText(unit.topWord() + " ")
+            SpacingMode.AFTER_SWIPE -> commitCompletedText(unit.topWord() + if (hasFollowingWhitespace()) "" else " ")
             SpacingMode.INFER_SPACES -> acceptInference(unit)
         }
     }
 
     private fun acceptInference(unit: GestureUnit) {
-        if (needsBoundaryBeforeNextInference) {
-            commitCompletedText(" ")
-            needsBoundaryBeforeNextInference = false
+        if (transaction.units.size == SwipeInferenceTransaction.MAX_GESTURE_UNITS) {
+            slideInferenceWindow(unit)
+            return
         }
-        check(transaction.append(unit)) { "Inference run must be cleared after its six-unit bound" }
+        check(transaction.append(unit))
         val alternatives = segmenter.rank(transaction.units, previousWords(), dictionary())
         val words = alternatives.firstOrNull()?.words ?: unit.topWords()
-        transaction.replaceCurrent(words, alternatives)
-        if (transaction.units.size == SwipeInferenceTransaction.MAX_GESTURE_UNITS) {
-            transaction.finalize()
-            transaction.clear()
-            needsBoundaryBeforeNextInference = true
+        if (!transaction.replaceCurrent(words, alternatives)) finalizeAndClear()
+    }
+
+    private fun slideInferenceWindow(nextUnit: GestureUnit) {
+        val oldestUnit = transaction.units.first()
+        val finalizedWords = segmenter.rank(listOf(oldestUnit), previousWords(), dictionary())
+            .firstOrNull()?.words ?: oldestUnit.topWords()
+        val retainedUnits = transaction.units.drop(1) + nextUnit
+        val alternatives = segmenter.rank(retainedUnits, previousWords() + finalizedWords, dictionary())
+        val retainedWords = alternatives.firstOrNull()?.words ?: nextUnit.topWords()
+        if (!transaction.slideWindow(finalizedWords, retainedUnits, retainedWords, alternatives)) {
+            finalizeAndClear()
         }
     }
 
     private fun finalizeAndClear() {
         transaction.finalize()
         transaction.clear()
-        needsBoundaryBeforeNextInference = false
     }
 
     private fun GestureUnit.topWord(): String = topWords().joinToString(separator = "")

@@ -7,6 +7,8 @@ import com.iaido.core.recognition.GestureUnit
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SegmentationOption
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SwipeInferenceTransactionTest {
@@ -19,14 +21,14 @@ class SwipeInferenceTransactionTest {
         )
         transaction.append(unit("joined", "inthe"))
 
-        transaction.replaceCurrent(
+        assertTrue(transaction.replaceCurrent(
             words = listOf("inthe"),
             alternatives = listOf(option(listOf("inthe"))),
-        )
-        transaction.replaceCurrent(
+        ))
+        assertTrue(transaction.replaceCurrent(
             words = listOf("in", "the"),
             alternatives = listOf(option(listOf("in", "the"))),
-        )
+        ))
 
         assertEquals("hello in the", editor.text)
         assertEquals(12, editor.cursor())
@@ -50,7 +52,7 @@ class SwipeInferenceTransactionTest {
             onFinalized = { _, words -> finalized += words },
         )
         transaction.append(unit("first", "some"))
-        transaction.replaceCurrent(listOf("some"), listOf(option(listOf("some"))))
+        assertTrue(transaction.replaceCurrent(listOf("some"), listOf(option(listOf("some")))))
 
         transaction.finalize()
         transaction.clear()
@@ -59,6 +61,28 @@ class SwipeInferenceTransactionTest {
         assertEquals(emptyList<GestureUnit>(), transaction.units)
         assertEquals(emptyList<String>(), transaction.currentWords)
         assertEquals(null, transaction.sourceSpan)
+    }
+
+    @Test
+    fun `failed host replacement leaves the existing transaction state untouched`() {
+        val editor = FakeEditor()
+        val transaction = SwipeInferenceTransaction(
+            cursorPosition = editor::cursor,
+            replaceHostSpan = editor::replace,
+        )
+        transaction.append(unit("first", "in"))
+        assertTrue(transaction.replaceCurrent(listOf("in"), listOf(option(listOf("in")))))
+        val previousSpan = transaction.sourceSpan
+        val previousWords = transaction.currentWords
+        val previousAlternatives = transaction.alternatives
+
+        editor.failReplacements = true
+        assertFalse(transaction.replaceCurrent(listOf("in", "the"), listOf(option(listOf("in", "the")))))
+
+        assertEquals("in", editor.text)
+        assertEquals(previousSpan, transaction.sourceSpan)
+        assertEquals(previousWords, transaction.currentWords)
+        assertEquals(previousAlternatives, transaction.alternatives)
     }
 
     private fun unit(id: String, word: String): GestureUnit = GestureUnit(
@@ -77,10 +101,14 @@ class SwipeInferenceTransactionTest {
 
         fun cursor(): Int = cursorPosition
 
-        fun replace(span: HostTextSpan, replacement: String) {
+        var failReplacements = false
+
+        fun replace(span: HostTextSpan, replacement: String): Boolean {
+            if (failReplacements) return false
             replacements += span to replacement
             text = text.replaceRange(span.start, span.end, replacement)
             cursorPosition = span.start + replacement.length
+            return true
         }
     }
 }

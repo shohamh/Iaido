@@ -146,6 +146,10 @@ class IaidoInputMethodService : InputMethodService() {
             replaceHostSpan = ::replaceInferenceHostSpan,
             commitCompletedText = typingController::commitWord,
             onFinalizedWords = ::recordFinalizedInferenceWords,
+            hasFollowingWhitespace = {
+                currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.isWhitespace() == true
+            },
+            pollSplitParts = splitController::pollParts,
         )
     }
 
@@ -184,6 +188,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
+        swipeTypingCoordinator.onNonSwipeInput()
         super.onStartInputView(info, restarting)
         loadSpacingMode()
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
@@ -267,7 +272,12 @@ class IaidoInputMethodService : InputMethodService() {
                         correctionExecutor.execute {
                             val results = controller.recognize(path, layout, dictionary)
                             mainHandler.post {
-                                if (sessionId != expectedSession || activeLanguage != language || results.isEmpty()) return@post
+                                if (sessionId != expectedSession || activeLanguage != language) return@post
+                                if (results.isEmpty()) {
+                                    swipeTypingCoordinator.onRecognitionFailed()
+                                    return@post
+                                }
+                                rememberCandidates(results)
                                 swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
                             }
                         }
@@ -322,12 +332,22 @@ class IaidoInputMethodService : InputMethodService() {
                         val expectedLanguage = activeLanguage
                         splitGraceHandler.postDelayed({
                             if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@postDelayed
-                            val parts = splitController.pollParts(System.currentTimeMillis()) ?: return@postDelayed
+                            val parts = swipeTypingCoordinator.poll(System.currentTimeMillis()) ?: run {
+                                swipeTypingCoordinator.onRecognitionFailed()
+                                splitPreview.value = null
+                                return@postDelayed
+                            }
                             val dictionary = activeDictionary()
                             correctionExecutor.execute {
                                 val candidates = parts.paths.map { part -> controller.recognize(part, layout, dictionary) }
                                 mainHandler.post {
                                     if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@post
+                                    if (candidates.any { it.isEmpty() }) {
+                                        swipeTypingCoordinator.onRecognitionFailed()
+                                        splitPreview.value = null
+                                        return@post
+                                    }
+                                    rememberCandidates(candidates.flatten())
                                     if (parts.paths.size == 1) {
                                         swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
                                     } else {
@@ -340,6 +360,7 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onSplitCancel = {
                         splitController.cancel()
+                        swipeTypingCoordinator.onRecognitionFailed()
                         splitPreview.value = null
                     },
                     splitPreview = splitPreview.value,
@@ -367,15 +388,16 @@ class IaidoInputMethodService : InputMethodService() {
     private fun activeDictionary() = if (activeLanguage == Language.ENGLISH) learningDictionary.entries()
     else hebrewDictionaryRepository.words()
 
-    private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String) {
-        val inputConnection = currentInputConnection ?: return
+    private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String): Boolean {
+        val inputConnection = currentInputConnection ?: return false
         inferenceReplacementInProgress = true
         try {
-            if (!inputConnection.setSelection(span.start, span.end)) return
+            if (!inputConnection.setSelection(span.start, span.end)) return false
             if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(span.start, span.end, replacement)
-            if (!inputConnection.commitText(replacement, 1)) return
+            if (!inputConnection.commitText(replacement, 1)) return false
             cursorPosition = span.start + replacement.length
             inputConnection.setSelection(cursorPosition, cursorPosition)
+            return true
         } finally {
             inferenceReplacementInProgress = false
         }

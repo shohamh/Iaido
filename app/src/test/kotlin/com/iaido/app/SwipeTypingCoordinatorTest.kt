@@ -5,6 +5,7 @@ import com.iaido.core.gesture.GesturePath
 import com.iaido.core.gesture.GesturePoint
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.ScoredCandidate
+import com.iaido.core.recognition.SplitWordParts
 import com.iaido.core.typing.SpacingMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -32,6 +33,21 @@ class SwipeTypingCoordinatorTest {
         coordinator.onTwoFingerResult(listOf(path(3), path(4)), layout)
 
         assertEquals("in there ", editor.text)
+    }
+
+    @Test
+    fun `space after swipe does not duplicate whitespace already after the cursor`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.AFTER_SWIPE,
+            dictionary("in"),
+            hasFollowingWhitespace = { true },
+        )
+
+        coordinator.onSingleSwipe(path(1), layout)
+
+        assertEquals("in", editor.text)
     }
 
     @Test
@@ -65,7 +81,7 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
-    fun `six inference units freeze the run before a seventh can rewrite it`() {
+    fun `seventh inference unit slides the window and finalizes only the oldest unit`() {
         val editor = FakeEditor()
         val finalized = mutableListOf<List<String>>()
         val coordinator = coordinator(
@@ -78,8 +94,18 @@ class SwipeTypingCoordinatorTest {
         repeat(6) { coordinator.onSingleSwipe(path(8), layout) }
         coordinator.onSingleSwipe(path(8), layout)
 
-        assertEquals(listOf(listOf("a", "a", "a", "a", "a", "a")), finalized)
+        assertEquals(listOf(listOf("a")), finalized)
         assertEquals("a a a a a a a", editor.text)
+
+        coordinator.onNonSwipeInput()
+
+        assertEquals(
+            listOf(
+                listOf("a"),
+                listOf("a", "a", "a", "a", "a", "a"),
+            ),
+            finalized,
+        )
     }
 
     @Test
@@ -109,11 +135,41 @@ class SwipeTypingCoordinatorTest {
         assertEquals("", editor.text)
     }
 
+    @Test
+    fun `failed inferred host replacement finalizes then clears the active run`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in", "the"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        editor.failReplacements = true
+        coordinator.onSingleSwipe(path(2), layout)
+
+        assertEquals("in", editor.text)
+        assertEquals(listOf(listOf("in")), finalized)
+    }
+
+    @Test
+    fun `poll returns the resolved split result through the coordinator seam`() {
+        val editor = FakeEditor()
+        val expected = SplitWordParts(listOf("in"), listOf(path(1)))
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("in"),
+            pollSplitParts = { atMs -> if (atMs == 350L) expected else null },
+        )
+
+        assertEquals(expected, coordinator.poll(350L))
+    }
+
     private fun coordinator(
         editor: FakeEditor,
         mode: SpacingMode,
         dictionary: List<WordEntry>,
         onFinalized: (List<String>) -> Unit = {},
+        hasFollowingWhitespace: () -> Boolean = { false },
+        pollSplitParts: (Long) -> SplitWordParts? = { null },
     ) = SwipeTypingCoordinator(
         spacingMode = { mode },
         recognize = { path, _ -> candidatesFor(path) },
@@ -122,6 +178,8 @@ class SwipeTypingCoordinatorTest {
         cursorPosition = editor::cursor,
         replaceHostSpan = editor::replace,
         onFinalizedWords = { _, words -> onFinalized(words) },
+        hasFollowingWhitespace = hasFollowingWhitespace,
+        pollSplitParts = pollSplitParts,
     )
 
     private fun candidatesFor(path: GesturePath): List<ScoredCandidate> = when (path.points.firstOrNull()?.x?.toInt()) {
@@ -151,10 +209,14 @@ class SwipeTypingCoordinatorTest {
 
         fun cursor(): Int = cursorPosition
 
-        fun replace(span: HostTextSpan, replacement: String) {
+        var failReplacements = false
+
+        fun replace(span: HostTextSpan, replacement: String): Boolean {
+            if (failReplacements) return false
             replacements += span to replacement
             text = text.replaceRange(span.start, span.end, replacement)
             cursorPosition = span.start + replacement.length
+            return true
         }
     }
 }
