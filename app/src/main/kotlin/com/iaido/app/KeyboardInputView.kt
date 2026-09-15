@@ -149,6 +149,17 @@ fun KeyboardInputView(
             }
         }
 
+        fun resetBackspaceGestureState() {
+            backspaceMode = BackspaceMode.NONE
+            backspaceDx = 0f
+            backspaceDy = 0f
+        }
+
+        fun cancelBackspaceGesture() {
+            if (backspaceMode != BackspaceMode.NONE) onBackspaceSwipeCancel()
+            resetBackspaceGestureState()
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -318,6 +329,7 @@ fun KeyboardInputView(
                             }
                             MotionEvent.ACTION_UP -> {
                                 if (splitMode) {
+                                    cancelBackspaceGesture()
                                     if (splitEnded.add(pointerId)) {
                                         val path = splitPoints[pointerId]?.toList().orEmpty()
                                         if (path.isNotEmpty()) onSplitEnd(pointerId, GesturePath(path), layout, event.eventTime)
@@ -334,7 +346,7 @@ fun KeyboardInputView(
                                     when (backspaceMode) {
                                         BackspaceMode.PRESS -> {
                                             onTap(BACKSPACE_KEY)
-                                            onBackspaceSwipeCancel()
+                                            cancelBackspaceGesture()
                                         }
                                         BackspaceMode.DELETE -> {
                                             val releaseIndex = event.findPointerIndex(pointerId)
@@ -345,10 +357,10 @@ fun KeyboardInputView(
                                                 )
                                             }
                                             onBackspaceSwipeEnd()
+                                            resetBackspaceGestureState()
                                         }
-                                        else -> onBackspaceSwipeCancel()
+                                        else -> cancelBackspaceGesture()
                                     }
-                                    backspaceMode = BackspaceMode.NONE
                                     points = emptyList()
                                     pointerId = MotionEvent.INVALID_POINTER_ID
                                     startKey = null
@@ -379,8 +391,7 @@ fun KeyboardInputView(
                             }
                             MotionEvent.ACTION_CANCEL -> {
                                 if (splitMode) onSplitCancel()
-                                if (backspaceMode != BackspaceMode.NONE) onBackspaceSwipeCancel()
-                                backspaceMode = BackspaceMode.NONE
+                                cancelBackspaceGesture()
                                 splitMode = false
                                 splitPoints.clear()
                                 splitEnded.clear()

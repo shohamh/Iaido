@@ -47,6 +47,8 @@ import com.iaido.core.recognition.SuggestionChip
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+const val SUGGESTION_STRIP_DESCRIPTION = "Iaido suggestion strip"
+
 @Composable
 fun SuggestionStrip(
     chips: List<SuggestionChip>,
@@ -63,7 +65,8 @@ fun SuggestionStrip(
             .fillMaxWidth()
             .height(viewportHeight + 8.dp)
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         ordered.forEachIndexed { index, chip ->

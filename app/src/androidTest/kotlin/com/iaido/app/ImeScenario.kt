@@ -246,32 +246,58 @@ class ImeScenario(
         device.waitForIdle()
         SystemClock.sleep(1_000L)
         val suggestion = device.findObject(By.desc("Iaido suggestion $index"))
-        val center = if (suggestion != null) {
+        val reelTarget: Pair<PointF, Float>
+        val validateReelPath: (List<PointF>) -> Unit
+        if (suggestion != null) {
             val bounds = suggestion.visibleBounds
-            PointF(
+            reelTarget = PointF(
                 (bounds.left + bounds.right) / 2f,
                 (bounds.top + bounds.bottom) / 2f,
-            )
+            ) to verticalDistancePx
+            validateReelPath = {}
         } else {
             val root = device.findObject(By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION))
                 ?: error("Missing keyboard root while locating suggestion $index")
             val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION))
                 ?: error("Missing keyboard surface while locating suggestion $index")
-            val point = PointF(root.visibleBounds.left + 80f, root.visibleBounds.top + 60f)
-            check(root.visibleBounds.contains(point.x.toInt(), point.y.toInt())) {
-                "Correction reel fallback point is outside the keyboard root: point=$point root=${root.visibleBounds}"
+            val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+                ?: error("Missing suggestion strip while locating suggestion $index")
+            val stripBounds = strip.visibleBounds
+            val rootBounds = root.visibleBounds
+            val surfaceBounds = surface.visibleBounds
+            check(rootBounds.contains(stripBounds)) {
+                "Suggestion strip is outside the keyboard root: strip=$stripBounds root=$rootBounds"
             }
-            check(point.y < surface.visibleBounds.top) {
-                "Correction reel fallback point is not above the keyboard surface: point=$point surface=${surface.visibleBounds}"
+            check(stripBounds.bottom <= surfaceBounds.top) {
+                "Suggestion strip overlaps the keyboard surface: strip=$stripBounds surface=$surfaceBounds"
             }
-            point
+            val point = PointF(
+                (stripBounds.left + 80f).coerceIn(stripBounds.left + 1f, stripBounds.right - 1f),
+                (stripBounds.top + stripBounds.bottom) / 2f,
+            )
+            val safeDistance = verticalDistancePx.coerceIn(
+                rootBounds.top.toFloat() - point.y,
+                surfaceBounds.top.toFloat() - point.y - 1f,
+            )
+            reelTarget = point to safeDistance
+            validateReelPath = { path ->
+                check(path.all { candidate ->
+                    rootBounds.contains(candidate.x.toInt(), candidate.y.toInt()) &&
+                        candidate.y < surfaceBounds.top
+                }) {
+                    "Correction reel fallback path leaves the suggestion area: path=$path root=$rootBounds surface=$surfaceBounds"
+                }
+            }
         }
+        val (reelStart, safeVerticalDistance) = reelTarget
         fun injectReelSwipe() {
+            val path = (1..3).map { step ->
+                val fraction = step / 3f
+                PointF(reelStart.x, reelStart.y + safeVerticalDistance * fraction)
+            }.let { listOf(reelStart) + it }
+            validateReelPath(path)
             pendingPointerEvents = pointer.injectScreenSwipe(
-                points = (1..3).map { step ->
-                    val fraction = step / 3f
-                    PointF(center.x, center.y + verticalDistancePx * fraction)
-                }.let { listOf(center) + it },
+                points = path,
                 holdBeforeMoveMs = 520L,
             )
         }
