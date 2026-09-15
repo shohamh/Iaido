@@ -5,7 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -192,14 +192,14 @@ private fun ReplacementReelGroup(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .pointerInput(stateKey, selectedIndex) {
-                detectDragGesturesAfterLongPress(
+                detectVerticalDragGestures(
                     onDragStart = {
                         dragY = 0f
                         isDragging = true
                     },
-                    onDrag = { change, amount ->
+                    onVerticalDrag = { change, amount ->
                         change.consume()
-                        dragY += amount.y
+                        dragY += amount
                     },
                     onDragEnd = {
                         val shouldCommit = abs(dragY) >= thresholdPx || options.size == 1
@@ -249,20 +249,16 @@ private fun SuggestionChipView(
     val scope = rememberCoroutineScope()
     val stateKey = chip.id ?: index
     val reelOffset = remember(stateKey) { Animatable(0f) }
-    var dragX by remember(stateKey) { mutableFloatStateOf(0f) }
     var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
     var isDragging by remember(stateKey) { mutableStateOf(false) }
     val reelStepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val dragThresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
-    val undoThresholdPx = with(density) { UNDO_THRESHOLD_DP.dp.toPx() }
     val maxIndex = alternatives.lastIndex
     val minOffset = (chip.selectedIndex - maxIndex).toFloat()
     val maxOffset = chip.selectedIndex.toFloat()
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
     val latestDragOffset = rememberUpdatedState(dragOffset)
-    val latestDragX = rememberUpdatedState(dragX)
-    val latestDragY = rememberUpdatedState(dragY)
     val renderedOffset = if (isDragging) dragOffset else reelOffset.value
     val displayedIndex = displayedReelIndex(chip.selectedIndex, renderedOffset, maxIndex)
     val currentWord = alternatives.getOrNull(displayedIndex).orEmpty()
@@ -275,7 +271,6 @@ private fun SuggestionChipView(
     val foregroundColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     LaunchedEffect(chip.id, chip.word, chip.selectedIndex) {
-        dragX = 0f
         dragY = 0f
         isDragging = false
         reelOffset.snapTo(0f)
@@ -302,17 +297,15 @@ private fun SuggestionChipView(
                 shape = shape,
             )
             .pointerInput(chip.id, chip.word, chip.selectedIndex) {
-                detectDragGesturesAfterLongPress(
+                detectVerticalDragGestures(
                     onDragStart = {
                         scope.launch { reelOffset.stop() }
-                        dragX = 0f
                         dragY = 0f
                         isDragging = true
                     },
                     onDragEnd = {
                         val releaseOffset = latestDragOffset.value
-                        val shouldUndo = latestDragX.value <= -undoThresholdPx && latestDragY.value <= -undoThresholdPx
-                        val shouldSelect = !shouldUndo && abs(dragY) >= dragThresholdPx && alternatives.size > 1
+                        val shouldSelect = abs(dragY) >= dragThresholdPx && alternatives.size > 1
                         val targetIndex = displayedReelIndex(chip.selectedIndex, releaseOffset, maxIndex)
                         val targetOffset = if (shouldSelect) {
                             reelSettleOffset(targetIndex, chip.selectedIndex)
@@ -329,13 +322,11 @@ private fun SuggestionChipView(
                                     stiffness = Spring.StiffnessMediumLow,
                                 ),
                             )
-                            if (shouldUndo) onUndo()
                             if (shouldSelect) {
                                 onRelease(targetIndex)
                             }
                             reelOffset.snapTo(0f)
                         }
-                        dragX = 0f
                         dragY = 0f
                     },
                     onDragCancel = {
@@ -346,13 +337,11 @@ private fun SuggestionChipView(
                             reelOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
                             reelOffset.snapTo(0f)
                         }
-                        dragX = 0f
                         dragY = 0f
                     },
-                    onDrag = { change, amount ->
+                    onVerticalDrag = { change, amount ->
                         change.consume()
-                        dragX += amount.x
-                        dragY += amount.y
+                        dragY += amount
                     },
                 )
             },
@@ -425,4 +414,3 @@ private fun SuggestionChipView(
 
 private const val REEL_STEP_DP = 36f
 private const val DRAG_THRESHOLD_DP = 12f
-private const val UNDO_THRESHOLD_DP = 24f

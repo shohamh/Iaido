@@ -23,4 +23,14 @@ class ImeReelE2eTest {
             }
         }
     }
+
+    @Test
+    fun correctionReelRespondsToAnImmediateSwipeWithoutRequiringALongPressFirst() {
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("there")
+            val before = state().expectedText
+            val after = swipeSuggestionImmediately(index = 0, verticalDistancePx = -96f)
+            check(after != before) { "Reel did not respond to an immediate (no long-press) swipe: '$before'" }
+        }
+    }
 }
