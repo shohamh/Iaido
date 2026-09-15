@@ -32,5 +32,7 @@ six_unit|word|d|100
 six_unit|word|e|100
 six_unit|word|f|100
 six_unit|word|g|100
+six_unit|word|fg|100000
 
 low_confidence|word|plain|100
+low_confidence|word|plan|99

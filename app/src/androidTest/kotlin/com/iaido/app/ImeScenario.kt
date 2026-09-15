@@ -616,8 +616,8 @@ class ImeScenario(
 
     private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
         val targetDescription = "Iaido replacement: $sourceWords source " +
-            if (sourceWords == 1) "word" else "words" + " to $replacementWords replacement " +
-            if (replacementWords == 1) "word" else "words"
+            (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
+            (if (replacementWords == 1) "word" else "words")
         val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
             ?: error("Missing replacement reel before previewing '$targetDescription'")
         val bounds = reel.visibleBounds

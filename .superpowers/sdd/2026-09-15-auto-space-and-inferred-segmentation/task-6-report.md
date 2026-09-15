@@ -8,6 +8,10 @@
 - Added deterministic debug dictionary/ngram fixtures for split, join,
   reanalysis, two-finger, bounded-window, and low-confidence journeys.
 - Added connected drag preview/cancel/release assertions for replacement reels.
+- Strengthened the six-unit fixture to require a seventh swipe to reanalyze
+  the retained window, added a competing low-confidence dictionary alternative,
+  asserted full split-reel source/replacement cardinality in accessibility
+  labels, and explicitly checked cursor restoration after cancellation.
 
 ## Verification
 
@@ -18,6 +22,9 @@ Bounded compile/assemble check:
 ```
 
 Result: exit 0; `BUILD SUCCESSFUL in 8s`.
+
+The follow-up fixture/assertion changes were included in the same bounded
+assemble check before the strengthening commit.
 
 `git diff --check`
 

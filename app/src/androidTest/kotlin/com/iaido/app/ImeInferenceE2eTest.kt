@@ -38,7 +38,7 @@ class ImeInferenceE2eTest {
             enableInferenceAndPrefix()
             swipeWordExpecting("inthe", "X inthe")
             previewReplacementThenCancel(sourceWords = 1, replacementWords = 2)
-            assertText("X inthe")
+            assertTextAndCursor("X inthe")
             releaseReplacement(sourceWords = 1, replacementWords = 2)
             assertTextAndCursor("X in the")
         }
@@ -71,10 +71,11 @@ class ImeInferenceE2eTest {
     fun seventhUnitFreezesOnlyTheOldestOfTheBoundedInferenceRun() =
         scenario(ImeScenarioData.AutoSpaceFixture.SIX_UNIT).run {
             enableInferenceAndPrefix()
-            listOf("a", "b", "c", "d", "e", "f", "g").forEachIndexed { index, word ->
-                swipeWordExpecting(word, "X " + ('a'..'g').take(index + 1).joinToString(" "))
+            listOf("a", "b", "c", "d", "e", "f").forEachIndexed { index, word ->
+                swipeWordExpecting(word, "X " + ('a'..'f').take(index + 1).joinToString(" "))
             }
-            assertTextAndCursor("X a b c d e f g")
+            swipeWordExpecting("g", "X a b c d e fg")
+            assertTextAndCursor("X a b c d e fg")
         }
 
     @Test
