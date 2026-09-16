@@ -20,4 +20,4 @@ internal fun replacementReelWidthSlots(sourceWordCount: Int, replacementWordCoun
 
 private fun Float.roundToInt(): Int = kotlin.math.round(this).toInt()
 
-private const val MAX_REEL_VISIBLE_SLOTS = 3
+internal const val MAX_REEL_VISIBLE_SLOTS = 3

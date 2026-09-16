@@ -37,12 +37,13 @@ class ImeReelE2eTest {
         }
     }
 
-    @Test
     /**
-     * Exercises the fix in realistic usage but does not definitively pin the bug it's named for.
-     * The fallback gesture in [swipeSuggestion] finalizes the swipe-typing transaction before
-     * the assertion runs, clearing replacementOptions regardless of whether the SuggestionStrip.kt
-     * early-return bug is present.
+     * Exercises the fix in realistic usage but does not definitively pin the two-word bug this
+     * scenario was originally aimed at. The fallback gesture in [swipeSuggestion] finalizes the
+     * swipe-typing transaction before the assertion runs, clearing replacementOptions regardless
+     * of whether the SuggestionStrip.kt early-return bug is present — so this test only confirms
+     * that a correction chip remains addressable (findable via its content description) after a
+     * single reel-based correction, in this specific single-word gesture sequence.
      *
      * A real two-word version (`swipeWord("there") -> tapSpace() -> swipeWord("world")`, asserting
      * chip 0 stays visible) was tried and reliably reproduces the bug pre-fix, but does not reach
@@ -55,7 +56,8 @@ class ImeReelE2eTest {
      * not yet determined. Tracked as a follow-up; see SuggestionStrip.kt's ReplacementReelSlot/
      * ReplacementReelGroup composables and their semantics {} blocks as the likely starting point.
      */
-    fun previouslyTypedCorrectionChipsStayVisibleWhileTheNextWordIsMidSwipe() {
+    @Test
+    fun correctionChipRemainsAddressableAfterAReelCorrection() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")

@@ -69,10 +69,16 @@ fun SuggestionStrip(
     val replacementSlotCount = if (replacementOptions.isEmpty()) 0 else reelVisibleSlotCount(replacementOptions.size)
     val visibleSlotCount = maxOf(chipSlotCount, replacementSlotCount)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
+    // The outer strip's height is pinned to the maximum possible slot count so the strip
+    // (and therefore the whole keyboard, which wraps its height around it) never grows or
+    // shrinks at runtime as chips with different candidate counts appear and clear. Chips
+    // and reel groups below still use the per-render `viewportHeight`/`visibleSlotCount` for
+    // their own internal centering.
+    val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(viewportHeight + 8.dp)
+            .height(pinnedStripHeight + 8.dp)
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
