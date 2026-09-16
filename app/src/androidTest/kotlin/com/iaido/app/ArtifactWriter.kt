@@ -20,19 +20,21 @@ object ArtifactWriter {
     ): File {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(context.getExternalFilesDir("ime-e2e"), safeName(testName)).apply { mkdirs() }
-        device.takeScreenshot(File(directory, "screen.png"))
-        device.dumpWindowHierarchy(File(directory, "windows.xml"))
-        write(directory, "ime.txt", shell("dumpsys input_method"))
-        write(directory, "focused-window.txt", shell("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp'"))
-        write(directory, "logcat.txt", shell("logcat -d -v threadtime Iaido:D AndroidRuntime:E *:S"))
-        write(directory, "metadata.json", jsonObject(
-            "package" to context.packageName,
-            "api" to Build.VERSION.SDK_INT.toString(),
-            "test" to testName,
-            "failure" to (failure.stackTraceToString()),
-        ))
-        write(directory, "state.json", scenarioState?.let(::stateJson).orEmpty())
-        write(directory, "trace.jsonl", scenarioState?.trace.orEmpty().joinToString("\n", transform = ::eventJson))
+        runCatching { device.takeScreenshot(File(directory, "screen.png")) }
+        runCatching { device.dumpWindowHierarchy(File(directory, "windows.xml")) }
+        runCatching { write(directory, "ime.txt", shell("dumpsys input_method")) }
+        runCatching { write(directory, "focused-window.txt", shell("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp'")) }
+        runCatching { write(directory, "logcat.txt", shell("logcat -d -v threadtime Iaido:D AndroidRuntime:E *:S")) }
+        runCatching {
+            write(directory, "metadata.json", jsonObject(
+                "package" to context.packageName,
+                "api" to Build.VERSION.SDK_INT.toString(),
+                "test" to testName,
+                "failure" to (failure.stackTraceToString()),
+            ))
+        }
+        runCatching { write(directory, "state.json", scenarioState?.let(::stateJson).orEmpty()) }
+        runCatching { write(directory, "trace.jsonl", scenarioState?.trace.orEmpty().joinToString("\n", transform = ::eventJson)) }
         return directory
     }
 
