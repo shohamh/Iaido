@@ -29,3 +29,19 @@ internal const val REEL_ITEM_SPACING_DP = 8f
 /** A chip's resting width: its selected word's measured width plus padding, clamped to a usable range. */
 internal fun chipReservedWidthDp(measuredTextWidthDp: Float): Float =
     (measuredTextWidthDp + CHIP_HORIZONTAL_PADDING_DP * 2).coerceIn(MIN_CHIP_WIDTH_DP, MAX_CHIP_WIDTH_DP)
+
+/**
+ * The width to actually draw a reel row at. Never below [reservedWidthDp] (its slot's resting
+ * width) and, when a neighbor exists to visually overlap, never above [reservedWidthDp] plus
+ * [neighborReservedWidthDp] plus one item-spacing gap. With no neighbor to overlap, the row is
+ * capped at its own reserved width (the caller's Text then ellipsizes it).
+ */
+internal fun overflowDrawWidthDp(
+    naturalWidthDp: Float,
+    reservedWidthDp: Float,
+    neighborReservedWidthDp: Float?,
+): Float {
+    if (neighborReservedWidthDp == null) return reservedWidthDp
+    val cap = reservedWidthDp + neighborReservedWidthDp + REEL_ITEM_SPACING_DP
+    return naturalWidthDp.coerceIn(reservedWidthDp, cap)
+}

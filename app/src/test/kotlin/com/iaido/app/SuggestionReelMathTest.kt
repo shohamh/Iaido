@@ -52,4 +52,33 @@ class SuggestionReelMathTest {
     fun `reserved chip width caps very long words so one chip cannot eat the whole strip`() {
         assertEquals(140f, chipReservedWidthDp(measuredTextWidthDp = 500f))
     }
+
+    @Test
+    fun `a row no wider than its reserved slot draws at the reserved width`() {
+        assertEquals(80f, overflowDrawWidthDp(naturalWidthDp = 50f, reservedWidthDp = 80f, neighborReservedWidthDp = 100f))
+    }
+
+    @Test
+    fun `a wider row grows up to its reserved width plus the neighbor it overlaps`() {
+        assertEquals(
+            150f,
+            overflowDrawWidthDp(naturalWidthDp = 150f, reservedWidthDp = 80f, neighborReservedWidthDp = 100f),
+        )
+    }
+
+    @Test
+    fun `growth is capped at the reserved width plus neighbor plus item spacing`() {
+        assertEquals(
+            188f,
+            overflowDrawWidthDp(naturalWidthDp = 300f, reservedWidthDp = 80f, neighborReservedWidthDp = 100f),
+        )
+    }
+
+    @Test
+    fun `a row cannot grow past its own reserved width when there is no neighbor to overlap`() {
+        assertEquals(
+            80f,
+            overflowDrawWidthDp(naturalWidthDp = 300f, reservedWidthDp = 80f, neighborReservedWidthDp = null),
+        )
+    }
 }
