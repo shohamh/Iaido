@@ -53,6 +53,15 @@ class SessionCorrectionHistoryTest {
     }
 
     @Test
+    fun `cursor resting at a just-finished word's end still includes the earlier word`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 5, "there", listOf("there"))
+        val second = history.record(6, 11, "world", listOf("world"))
+
+        assertEquals(listOf(first, second), history.aroundCursor(11).map { it.id })
+    }
+
+    @Test
     fun `deleting a range removes intersecting words and shifts later ranges`() {
         val history = SessionCorrectionHistory()
         history.record(0, 3, "one", listOf("one"))

@@ -43,7 +43,7 @@ class SessionCorrectionHistory {
 
     fun aroundCursor(cursor: Int, maxWords: Int = 3): List<SessionWord> {
         require(maxWords > 0) { "maxWords must be positive" }
-        val containing = entries.filter { cursor in it.start..it.end }
+        val containing = entries.filter { cursor in it.start until it.end }
         if (containing.isNotEmpty()) return containing.takeLast(maxWords)
         return entries.filter { it.end <= cursor }.takeLast(maxWords)
     }
