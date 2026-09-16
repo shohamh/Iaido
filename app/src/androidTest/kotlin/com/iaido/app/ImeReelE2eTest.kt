@@ -38,6 +38,13 @@ class ImeReelE2eTest {
     }
 
     @Test
+    /**
+     * Exercises the fix in realistic usage but does not definitively pin the bug it's named for.
+     * The fallback gesture in [swipeSuggestion] finalizes the swipe-typing transaction before
+     * the assertion runs, clearing replacementOptions regardless of whether the SuggestionStrip.kt
+     * early-return bug is present. A true two-word scenario test (committed word + active swipe
+     * simultaneously) would more thoroughly validate the fix.
+     */
     fun previouslyTypedCorrectionChipsStayVisibleWhileTheNextWordIsMidSwipe() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ImeScenario().also(artifacts::track).run {
