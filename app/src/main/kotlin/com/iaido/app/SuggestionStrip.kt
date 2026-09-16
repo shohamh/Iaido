@@ -317,6 +317,9 @@ private fun SuggestionChipView(
                             0f
                         }
                         isDragging = false
+                        if (shouldSelect) {
+                            onRelease(targetIndex)
+                        }
                         scope.launch {
                             reelOffset.snapTo(releaseOffset)
                             reelOffset.animateTo(
@@ -326,9 +329,6 @@ private fun SuggestionChipView(
                                     stiffness = Spring.StiffnessMediumLow,
                                 ),
                             )
-                            if (shouldSelect) {
-                                onRelease(targetIndex)
-                            }
                             reelOffset.snapTo(0f)
                         }
                         dragY = 0f

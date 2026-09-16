@@ -386,6 +386,54 @@ class ImeScenario(
         return expectedText
     }
 
+    /**
+     * Like [swipeSuggestion], but returns the elapsed ms between the release (ACTION_UP) and the
+     * editor text actually changing. A single synthetic reel swipe unreliably lands on the chip's
+     * own drag detector on the very first attempt in this emulator (matching [swipeSuggestion]'s
+     * own established first-attempt flakiness) -- so, like [swipeSuggestion], this always performs
+     * a throwaway first attempt, then measures only the second, empirically-reliable attempt's
+     * release-to-commit latency, re-baselining `before` immediately beforehand so the first
+     * attempt's own (possibly unrelated) effect on the text doesn't corrupt the measured baseline.
+     */
+    fun swipeSuggestionCommitLatencyMs(index: Int, verticalDistancePx: Float): Long {
+        device.waitForIdle()
+        SystemClock.sleep(1_000L)
+        val target = locateReelSwipeTarget(index, verticalDistancePx)
+        val path = (1..3).map { step ->
+            val fraction = step / 3f
+            PointF(target.start.x, target.start.y + target.verticalDistancePx * fraction)
+        }.let { listOf(target.start) + it }
+        target.validatePath(path)
+        var releasedAtMs = -1L
+        fun injectReelSwipe() {
+            releasedAtMs = -1L
+            pendingPointerEvents = pointer.injectScreenSwipe(
+                points = path,
+                holdBeforeMoveMs = 520L,
+                onEvent = { event ->
+                    if (event.action == android.view.MotionEvent.ACTION_UP) {
+                        releasedAtMs = SystemClock.elapsedRealtime()
+                    }
+                },
+            )
+        }
+        injectReelSwipe()
+        runCatching { editor.waitForTextChange(expectedText, timeoutMs = 1_500L) }
+        device.waitForIdle()
+        SystemClock.sleep(500L)
+        val before = editor.text()
+        injectReelSwipe()
+        val after = editor.waitForTextChange(before)
+        check(releasedAtMs >= 0L) { "Reel swipe never reported a release event" }
+        val committedAtMs = SystemClock.elapsedRealtime()
+        expectedText = after
+        device.waitForIdle()
+        SystemClock.sleep(200L)
+        expectedSelection = editor.selection().last
+        checkpoint("swipeSuggestionCommitLatencyMs($index, $verticalDistancePx)")
+        return committedAtMs - releasedAtMs
+    }
+
     fun holdBackspace(durationMs: Long = 1_000L): String {
         val before = editor.text()
         val center = keyboard().keyCenter("backspace")

@@ -68,4 +68,16 @@ class ImeReelE2eTest {
             }
         }
     }
+
+    @Test
+    fun correctionReelCommitsImmediatelyRatherThanAfterTheSettleAnimation() {
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("there")
+            val latencyMs = swipeSuggestionCommitLatencyMs(index = 0, verticalDistancePx = -96f)
+            check(latencyMs < 600L) {
+                "Reel commit took ${latencyMs}ms after release; expected the word to commit " +
+                    "immediately on release, not after the settle animation finishes"
+            }
+        }
+    }
 }
