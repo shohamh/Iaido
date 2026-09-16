@@ -181,6 +181,24 @@ class InferenceSegmenterTest {
         assertEquals(listOf("hello"), options.first().words)
     }
 
+    @Test
+    fun `sequential gestures join into a common word over a rare-word split against real dictionary data`() {
+        val entries = realDictionaryEntries()
+        val store = CompactNgramScoreStore.fromBytes(
+            realNgramBytes(),
+            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
+        )
+        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(scoreStore = store))
+
+        val options = segmenter.rank(
+            units = listOf(unit("wh-unit", "wh"), unit("at-unit", "at")),
+            previousWords = emptyList(),
+            dictionary = entries,
+        )
+
+        assertEquals(listOf("what"), options.first().words)
+    }
+
     /**
      * Loads the actual shipped app/src/main/assets/dictionary/en.csv, in its stable CSV row
      * order, exactly as EnglishDictionaryRepository does in production. Real dictionary rows

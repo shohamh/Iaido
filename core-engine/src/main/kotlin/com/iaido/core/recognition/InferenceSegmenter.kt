@@ -103,24 +103,31 @@ class InferenceSegmenter(
             }.sortedWith(rawComparator).take(maxAlternatives)
         }
 
-        // A single, non-concurrent gesture unit's own recognized text can be split into
-        // shorter dictionary words (e.g. "hello" -> "he"+"ll"+"o", or a lower-ranked raw
-        // candidate like "ids" -> "i"+"d"+"s"). That alternative stays available -- e.g. for a
-        // replacement reel -- matching the DP's normal behavior for ambiguous/low-confidence
-        // recognitions and multi-unit boundary revision (SPLIT_REEL, "inthe" -> "in the", or a
-        // genuine sequential/concurrent merge like "in"+"to" -> "into"). What must NOT happen is
-        // scoring such a *single-unit self-split* using context evidence computed between the
-        // split's OWN fragments (e.g. bigram("he", "ll"), bigram("i", "d")) as if "he"/"i" were
-        // genuinely separate, previously-typed words -- they never were; they are a byproduct of
-        // one swipe's own recognized text being cut into pieces. That is fundamentally different
-        // from a multi-unit group (formed by merging >= 2 real, separately-swiped gesture
-        // units), where the words genuinely were typed as separate units and bigram evidence
-        // between them is legitimate. Partial.append() uses the flag below to skip only the
-        // single-unit self-split's internal-context contribution, leaving frequency scoring,
-        // option generation/ranking, and every multi-unit and concurrent-unit behavior
-        // unchanged. See InferenceSegmenterTest's real-asset regression coverage for "hello"
-        // and "there is".
-        val isSingleNonConcurrentUnit = units.size == 1 && !units.single().concurrent
+        // A gesture unit's own recognized text can be split into shorter dictionary words (e.g.
+        // "hello" -> "he"+"ll"+"o", or a lower-ranked raw candidate like "ids" -> "i"+"d"+"s").
+        // That alternative stays available -- e.g. for a replacement reel -- matching the DP's
+        // normal behavior for ambiguous/low-confidence recognitions and multi-unit boundary
+        // revision (SPLIT_REEL, "inthe" -> "in the", or a genuine sequential/concurrent merge
+        // like "in"+"to" -> "into"). What must NOT happen is scoring such a self-split using
+        // context evidence computed between fragments that were never genuinely separate,
+        // previously-typed words (e.g. bigram("he", "ll"), bigram("i", "d")) -- they are a
+        // byproduct of one or more swipes' own recognized text being cut into more pieces than
+        // there were real touch paths. A concurrent (two-finger) unit contributes two real touch
+        // paths; a single-finger unit contributes one. Only when the group's word count exceeds
+        // the number of real touch paths across its units did at least one word boundary fall
+        // inside a single touch path's own text rather than between two genuinely separate
+        // swipes -- e.g. two single-finger units "wh"+"at" concatenate to "what", and "what" can
+        // also be dictionary-split into "w"+"h"+"at": that group has 3 words against 2 real touch
+        // paths, so at least one boundary (between "w" and "h") is an internal artifact, not a
+        // real gesture boundary, and the whole group's context score is suppressed below. A
+        // 2-word split of that same "what" text ("wh"+"at") has exactly 2 words for 2 real touch
+        // paths -- one boundary per touch path -- so its context evidence is legitimate and kept.
+        // Partial.append() uses the flag below to skip only an over-fragmented group's internal-
+        // context contribution, leaving frequency scoring, option generation/ranking, and every
+        // properly-bounded multi-unit and concurrent-unit behavior unchanged. See
+        // InferenceSegmenterTest's real-asset regression coverage for "hello", "there is", and
+        // "wh"+"at".
+        val realTouchPathCount = units.sumOf { unit -> if (unit.concurrent) 2 else 1 }
 
         return rawCandidates.flatMap { candidate ->
             dictionarySegmentations(candidate.text, dictionary).map { words ->
@@ -128,7 +135,7 @@ class InferenceSegmenter(
                     words = words,
                     score = candidate.score + words.sumOf { word -> frequencyScore(dictionary.getValue(word)) },
                     sourceGestureIds = units.map { it.id },
-                    isSelfSplitOfSingleUnit = words.size > 1 && isSingleNonConcurrentUnit,
+                    isOverFragmented = words.size > realTouchPathCount,
                 )
             }
         }.distinctBy { option -> option.words }
@@ -215,11 +222,13 @@ class InferenceSegmenter(
         val words: List<String>,
         val score: Double,
         val sourceGestureIds: List<String>,
-        // True only for a self-split (words.size > 1) of a single, non-concurrent gesture
-        // unit's own recognized text. Guards Partial.append() below against scoring the split
-        // using context evidence between the split's own fragments, which never corresponded
-        // to genuinely separate, previously-typed words (see groupOptions()).
-        val isSelfSplitOfSingleUnit: Boolean = false,
+        // True when the group's word count exceeds the number of real touch paths across its
+        // source units, meaning at least one word boundary falls inside a single touch path's
+        // own recognized text rather than between two genuinely separate swipes. Guards
+        // Partial.append() below against scoring such a boundary using context evidence between
+        // fragments that never corresponded to genuinely separate, previously-typed words (see
+        // groupOptions()).
+        val isOverFragmented: Boolean = false,
     )
 
     private data class Partial(
@@ -229,18 +238,18 @@ class InferenceSegmenter(
     ) {
         fun append(group: GroupOption, previousWords: List<String>, scorer: NgramContextScorer): Partial {
             val context = previousWords + words
-            // A single-unit self-split (see groupOptions()) never went through a genuine word
-            // boundary: its "words" are all fragments of one swipe's own recognized text, and
-            // even the first fragment isn't a real word that was typed and then followed by the
-            // rest -- it is one arbitrary cut point among several the DP tries. Scoring it
-            // against real previous context would let a single common bigram hit (e.g. a very
-            // frequent short word like "the") outweigh the whole word's frequency margin just as
-            // easily as an internal fragment-to-fragment hit did (see InferenceSegmenterTest's
-            // real-asset regression coverage for "hello" / "there is" / "there"). So a
-            // self-split is scored on frequency alone, exactly as it would be with no context
-            // scorer at all -- the same, known-good comparison that existed before the real
-            // context scorer was wired in.
-            val contextScore = if (group.isSelfSplitOfSingleUnit) {
+            // An over-fragmented group (see groupOptions()) never went through only genuine word
+            // boundaries: at least one of its "words" is a fragment of a single touch path's own
+            // recognized text, and even its first word isn't guaranteed to be a real word that
+            // was typed and then followed by the rest -- it is one arbitrary cut point among
+            // several the DP tries. Scoring it against real previous context would let a single
+            // common bigram hit (e.g. a very frequent short word like "the") outweigh the whole
+            // word's frequency margin just as easily as an internal fragment-to-fragment hit did
+            // (see InferenceSegmenterTest's real-asset regression coverage for "hello" /
+            // "there is" / "there" / "wh"+"at"). So an over-fragmented group is scored on
+            // frequency alone, exactly as it would be with no context scorer at all -- the same,
+            // known-good comparison that existed before the real context scorer was wired in.
+            val contextScore = if (group.isOverFragmented) {
                 0.0
             } else {
                 group.words.foldIndexed(0.0) { index, total, word ->
@@ -266,7 +275,14 @@ class InferenceSegmenter(
         private const val MAX_CANDIDATES_PER_PATH = 8
         private const val DEFAULT_CONFIDENCE_MARGIN = 1.0
         private const val FREQUENCY_WEIGHT = 0.1
-        private const val MIN_FREQUENCY = 1.0
+
+        // The shipped dictionary stores frequency as a probability (all entries are well below
+        // 1.0; the most common English word, "the", is ~0.054). A floor of 1.0 clamps every real
+        // entry to the same value, making ln(frequency) zero for every word and silently
+        // disabling the frequency term the DP relies on to prefer a common joined word (e.g.
+        // "what") over a split into rare dictionary fragments (e.g. "wh" + "at"). The floor only
+        // needs to stay below the smallest real frequency so ln() never sees zero/negative input.
+        private const val MIN_FREQUENCY = 1e-9
 
         private val candidateComparator = compareByDescending<ScoredCandidate> { it.score }
             .thenBy { it.word.word }

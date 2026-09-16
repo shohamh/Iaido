@@ -19,8 +19,13 @@ object ScoringConstants {
     /** Maximum sample-index distance for two corners to be considered matched. */
     const val CORNER_MATCH_INDEX_TOLERANCE: Int = 2
 
+    // The shipped dictionary stores frequency as a probability (all entries are well below 1.0;
+    // the most common English word, "the", is ~0.054). A floor of 1.0 clamped every real entry to
+    // the same value, making ln(frequency) zero for every word and silently disabling the
+    // frequency term. The floor only needs to stay below the smallest real frequency so ln()
+    // never sees zero/negative input.
     /** Frequency floor used before applying the logarithm. */
-    const val MIN_FREQUENCY: Double = 1.0
+    const val MIN_FREQUENCY: Double = 1e-9
 
     /** Weight applied to the raw DTW-style shape distance term. */
     const val SHAPE_DISTANCE_WEIGHT: Double = 1.0
