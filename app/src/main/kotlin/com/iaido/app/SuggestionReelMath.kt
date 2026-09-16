@@ -45,3 +45,13 @@ internal fun overflowDrawWidthDp(
     val cap = reservedWidthDp + neighborReservedWidthDp + REEL_ITEM_SPACING_DP
     return naturalWidthDp.coerceIn(reservedWidthDp, cap)
 }
+
+/**
+ * Index, within the chip-only portion of the strip (in the same order [SuggestionStrip] already
+ * renders chips), of the newest chip: last for left-to-right, first for right-to-left, matching
+ * `ordered = if (rtl) chips.asReversed() else chips`.
+ */
+internal fun autoScrollTargetIndex(chipCount: Int, rtl: Boolean): Int {
+    if (chipCount <= 0) return 0
+    return if (rtl) 0 else chipCount - 1
+}

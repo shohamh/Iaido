@@ -81,4 +81,16 @@ class SuggestionReelMathTest {
             overflowDrawWidthDp(naturalWidthDp = 300f, reservedWidthDp = 80f, neighborReservedWidthDp = null),
         )
     }
+
+    @Test
+    fun `auto-scroll targets the last chip for left-to-right and the first for right-to-left`() {
+        assertEquals(4, autoScrollTargetIndex(chipCount = 5, rtl = false))
+        assertEquals(0, autoScrollTargetIndex(chipCount = 5, rtl = true))
+    }
+
+    @Test
+    fun `auto-scroll target is zero with no chips`() {
+        assertEquals(0, autoScrollTargetIndex(chipCount = 0, rtl = false))
+        assertEquals(0, autoScrollTargetIndex(chipCount = 0, rtl = true))
+    }
 }
