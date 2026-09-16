@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -264,6 +263,14 @@ private fun SuggestionChipView(
 ) {
     val alternatives = chip.alternatives.ifEmpty { listOf(chip.word) }
     val density = LocalDensity.current
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val selectedWord = alternatives.getOrElse(chip.selectedIndex) { alternatives.first() }
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+    val reservedWidthDp = remember(selectedWord, bodyStyle) {
+        val measuredWidthPx = textMeasurer.measure(text = selectedWord, style = bodyStyle).size.width
+        val measuredWidthDp = with(density) { measuredWidthPx.toDp() }.value
+        chipReservedWidthDp(measuredWidthDp)
+    }
     val scope = rememberCoroutineScope()
     val stateKey = chip.id ?: index
     val reelOffset = remember(stateKey) { Animatable(0f) }
@@ -296,8 +303,7 @@ private fun SuggestionChipView(
 
     Row(
         modifier = modifier
-            .widthIn(min = 104.dp, max = 184.dp)
-            .width(160.dp)
+            .width(reservedWidthDp.dp)
             .height(viewportHeight)
             .semantics(mergeDescendants = true) {
                 contentDescription = "Iaido suggestion $index"
