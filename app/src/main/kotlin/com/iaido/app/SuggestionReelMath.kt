@@ -6,7 +6,10 @@ internal fun displayedReelIndex(selectedIndex: Int, dragOffsetSteps: Float, maxI
 }
 
 internal fun reelVisibleSlotCount(candidateCount: Int): Int =
-    SINGLE_REEL_VISIBLE_SLOT
+    candidateCount.coerceIn(1, MAX_REEL_VISIBLE_SLOTS)
+
+internal fun reelCenterSlotOffset(visibleSlotCount: Int): Float =
+    (visibleSlotCount - 1) / 2f
 
 internal fun reelSettleOffset(displayedIndex: Int, selectedIndex: Int): Float =
     (selectedIndex - displayedIndex).toFloat()
@@ -17,4 +20,4 @@ internal fun replacementReelWidthSlots(sourceWordCount: Int, replacementWordCoun
 
 private fun Float.roundToInt(): Int = kotlin.math.round(this).toInt()
 
-private const val SINGLE_REEL_VISIBLE_SLOT = 1
+internal const val MAX_REEL_VISIBLE_SLOTS = 3

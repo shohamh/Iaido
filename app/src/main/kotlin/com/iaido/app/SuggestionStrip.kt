@@ -5,7 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -64,29 +63,37 @@ fun SuggestionStrip(
     onReplacementRelease: (ReplacementOption) -> Unit = {},
     onReplacementCancel: () -> Unit = {},
 ) {
-    if (replacementOptions.isNotEmpty()) {
-        ReplacementSuggestionStrip(
-            options = replacementOptions,
-            rtl = rtl,
-            onPreview = onReplacementPreview,
-            onRelease = onReplacementRelease,
-            onCancel = onReplacementCancel,
-        )
-        return
-    }
     val ordered = if (rtl) chips.asReversed() else chips
-    val visibleSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
+    val chipSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
         ?: reelVisibleSlotCount(0)
+    val replacementSlotCount = if (replacementOptions.isEmpty()) 0 else reelVisibleSlotCount(replacementOptions.size)
+    val visibleSlotCount = maxOf(chipSlotCount, replacementSlotCount)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
+    // The outer strip's height is pinned to the maximum possible slot count so the strip
+    // (and therefore the whole keyboard, which wraps its height around it) never grows or
+    // shrinks at runtime as chips with different candidate counts appear and clear. Chips
+    // and reel groups below still use the per-render `viewportHeight`/`visibleSlotCount` for
+    // their own internal centering.
+    val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(viewportHeight + 8.dp)
+            .height(pinnedStripHeight + 8.dp)
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (replacementOptions.isNotEmpty() && rtl) {
+            ReplacementReelSlot(
+                options = replacementOptions,
+                rtl = rtl,
+                viewportHeight = viewportHeight,
+                onPreview = onReplacementPreview,
+                onRelease = onReplacementRelease,
+                onCancel = onReplacementCancel,
+            )
+        }
         ordered.forEachIndexed { index, chip ->
             SuggestionChipView(
                 chip = chip,
@@ -97,51 +104,14 @@ fun SuggestionStrip(
                 onUndo = { onUndo(index) },
             )
         }
-    }
-}
-
-@Composable
-private fun ReplacementSuggestionStrip(
-    options: List<ReplacementOption>,
-    rtl: Boolean,
-    onPreview: (ReplacementOption) -> Unit,
-    onRelease: (ReplacementOption) -> Unit,
-    onCancel: () -> Unit,
-) {
-    val visibleSlotCount = reelVisibleSlotCount(options.size)
-    val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
-    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
-        ReplacementReelSelection()
-    }
-    selection.updateOptions(options)
-    val selectedIndex = selection.selectedIndex()
-
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(viewportHeight + 8.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item(key = options.joinToString { it.id }) {
-            ReplacementReelGroup(
-                options = options,
-                selectedIndex = selectedIndex,
+        if (replacementOptions.isNotEmpty() && !rtl) {
+            ReplacementReelSlot(
+                options = replacementOptions,
                 rtl = rtl,
                 viewportHeight = viewportHeight,
-                onPreview = { option ->
-                    selection.preview(option)
-                    onPreview(option)
-                },
-                onRelease = { option ->
-                    selection.release(option)
-                    onRelease(option)
-                },
-                onCancel = {
-                    selection.cancel()
-                    onCancel()
-                },
+                onPreview = onReplacementPreview,
+                onRelease = onReplacementRelease,
+                onCancel = onReplacementCancel,
             )
         }
     }
@@ -153,6 +123,40 @@ private val ReplacementReelSelectionSaver = Saver<ReplacementReelSelection, Stri
         ReplacementReelSelection(initialSelectedOptionId = selectedOptionId.ifEmpty { null })
     },
 )
+
+@Composable
+private fun ReplacementReelSlot(
+    options: List<ReplacementOption>,
+    rtl: Boolean,
+    viewportHeight: androidx.compose.ui.unit.Dp,
+    onPreview: (ReplacementOption) -> Unit,
+    onRelease: (ReplacementOption) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
+        ReplacementReelSelection()
+    }
+    selection.updateOptions(options)
+    val selectedIndex = selection.selectedIndex()
+    ReplacementReelGroup(
+        options = options,
+        selectedIndex = selectedIndex,
+        rtl = rtl,
+        viewportHeight = viewportHeight,
+        onPreview = { option ->
+            selection.preview(option)
+            onPreview(option)
+        },
+        onRelease = { option ->
+            selection.release(option)
+            onRelease(option)
+        },
+        onCancel = {
+            selection.cancel()
+            onCancel()
+        },
+    )
+}
 
 @Composable
 private fun ReplacementReelGroup(
@@ -192,14 +196,14 @@ private fun ReplacementReelGroup(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
             .pointerInput(stateKey, selectedIndex) {
-                detectDragGesturesAfterLongPress(
+                detectVerticalDragGestures(
                     onDragStart = {
                         dragY = 0f
                         isDragging = true
                     },
-                    onDrag = { change, amount ->
+                    onVerticalDrag = { change, amount ->
                         change.consume()
-                        dragY += amount.y
+                        dragY += amount
                     },
                     onDragEnd = {
                         val shouldCommit = abs(dragY) >= thresholdPx || options.size == 1
@@ -249,20 +253,16 @@ private fun SuggestionChipView(
     val scope = rememberCoroutineScope()
     val stateKey = chip.id ?: index
     val reelOffset = remember(stateKey) { Animatable(0f) }
-    var dragX by remember(stateKey) { mutableFloatStateOf(0f) }
     var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
     var isDragging by remember(stateKey) { mutableStateOf(false) }
     val reelStepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val dragThresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
-    val undoThresholdPx = with(density) { UNDO_THRESHOLD_DP.dp.toPx() }
     val maxIndex = alternatives.lastIndex
     val minOffset = (chip.selectedIndex - maxIndex).toFloat()
     val maxOffset = chip.selectedIndex.toFloat()
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
     val latestDragOffset = rememberUpdatedState(dragOffset)
-    val latestDragX = rememberUpdatedState(dragX)
-    val latestDragY = rememberUpdatedState(dragY)
     val renderedOffset = if (isDragging) dragOffset else reelOffset.value
     val displayedIndex = displayedReelIndex(chip.selectedIndex, renderedOffset, maxIndex)
     val currentWord = alternatives.getOrNull(displayedIndex).orEmpty()
@@ -275,7 +275,6 @@ private fun SuggestionChipView(
     val foregroundColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     LaunchedEffect(chip.id, chip.word, chip.selectedIndex) {
-        dragX = 0f
         dragY = 0f
         isDragging = false
         reelOffset.snapTo(0f)
@@ -302,17 +301,15 @@ private fun SuggestionChipView(
                 shape = shape,
             )
             .pointerInput(chip.id, chip.word, chip.selectedIndex) {
-                detectDragGesturesAfterLongPress(
+                detectVerticalDragGestures(
                     onDragStart = {
                         scope.launch { reelOffset.stop() }
-                        dragX = 0f
                         dragY = 0f
                         isDragging = true
                     },
                     onDragEnd = {
                         val releaseOffset = latestDragOffset.value
-                        val shouldUndo = latestDragX.value <= -undoThresholdPx && latestDragY.value <= -undoThresholdPx
-                        val shouldSelect = !shouldUndo && abs(dragY) >= dragThresholdPx && alternatives.size > 1
+                        val shouldSelect = abs(dragY) >= dragThresholdPx && alternatives.size > 1
                         val targetIndex = displayedReelIndex(chip.selectedIndex, releaseOffset, maxIndex)
                         val targetOffset = if (shouldSelect) {
                             reelSettleOffset(targetIndex, chip.selectedIndex)
@@ -329,13 +326,11 @@ private fun SuggestionChipView(
                                     stiffness = Spring.StiffnessMediumLow,
                                 ),
                             )
-                            if (shouldUndo) onUndo()
                             if (shouldSelect) {
                                 onRelease(targetIndex)
                             }
                             reelOffset.snapTo(0f)
                         }
-                        dragX = 0f
                         dragY = 0f
                     },
                     onDragCancel = {
@@ -346,13 +341,11 @@ private fun SuggestionChipView(
                             reelOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
                             reelOffset.snapTo(0f)
                         }
-                        dragX = 0f
                         dragY = 0f
                     },
-                    onDrag = { change, amount ->
+                    onVerticalDrag = { change, amount ->
                         change.consume()
-                        dragX += amount.x
-                        dragY += amount.y
+                        dragY += amount
                     },
                 )
             },
@@ -363,12 +356,13 @@ private fun SuggestionChipView(
                 .clipToBounds()
                 .padding(horizontal = 14.dp),
         ) {
+            val centerSlotOffset = reelCenterSlotOffset(visibleSlotCount)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
                         translationY = with(density) {
-                            ((renderedOffset - chip.selectedIndex) * REEL_STEP_DP).dp.toPx()
+                            ((renderedOffset - chip.selectedIndex + centerSlotOffset) * REEL_STEP_DP).dp.toPx()
                         }
                     },
             ) {
@@ -425,4 +419,3 @@ private fun SuggestionChipView(
 
 private const val REEL_STEP_DP = 36f
 private const val DRAG_THRESHOLD_DP = 12f
-private const val UNDO_THRESHOLD_DP = 24f

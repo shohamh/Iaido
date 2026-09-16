@@ -261,60 +261,89 @@ class ImeScenario(
         checkpoint("tapSuggestion($index)")
     }
 
-    fun swipeSuggestion(index: Int, verticalDistancePx: Float): String {
-        device.waitForIdle()
-        SystemClock.sleep(1_000L)
+    private data class ReelSwipeTarget(
+        val start: PointF,
+        val verticalDistancePx: Float,
+        val validatePath: (List<PointF>) -> Unit,
+    )
+
+    /**
+     * Resolves where to start the reel swipe for suggestion [index], retrying the whole
+     * find-then-read-bounds lookup on [androidx.test.uiautomator.StaleObjectException]: a node
+     * found via [device.findObject] can go stale before its bounds are read if Compose
+     * recomposes the suggestion strip in between, mirroring the retry pattern used elsewhere in
+     * this file (see [clickTextNode], [isModeChecked]).
+     */
+    private fun locateReelSwipeTarget(index: Int, verticalDistancePx: Float): ReelSwipeTarget {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (true) {
+            try {
+                return tryLocateReelSwipeTarget(index, verticalDistancePx)
+            } catch (e: androidx.test.uiautomator.StaleObjectException) {
+                if (SystemClock.elapsedRealtime() >= deadline) throw e
+                device.waitForIdle()
+                SystemClock.sleep(50L)
+            }
+        }
+    }
+
+    private fun tryLocateReelSwipeTarget(index: Int, verticalDistancePx: Float): ReelSwipeTarget {
         val suggestion = device.findObject(By.desc("Iaido suggestion $index"))
-        val reelTarget: Pair<PointF, Float>
-        val validateReelPath: (List<PointF>) -> Unit
         if (suggestion != null) {
             val bounds = suggestion.visibleBounds
-            reelTarget = PointF(
-                (bounds.left + bounds.right) / 2f,
-                (bounds.top + bounds.bottom) / 2f,
-            ) to verticalDistancePx
-            validateReelPath = {}
-        } else {
-            val root = device.findObject(By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION))
-                ?: error("Missing keyboard root while locating suggestion $index")
-            val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION))
-                ?: error("Missing keyboard surface while locating suggestion $index")
-            val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
-                ?: error("Missing suggestion strip while locating suggestion $index")
-            val stripBounds = strip.visibleBounds
-            val rootBounds = root.visibleBounds
-            val surfaceBounds = surface.visibleBounds
-            check(rootBounds.contains(stripBounds)) {
-                "Suggestion strip is outside the keyboard root: strip=$stripBounds root=$rootBounds"
-            }
-            check(stripBounds.bottom <= surfaceBounds.top) {
-                "Suggestion strip overlaps the keyboard surface: strip=$stripBounds surface=$surfaceBounds"
-            }
-            val point = PointF(
-                (stripBounds.left + 80f).coerceIn(stripBounds.left + 1f, stripBounds.right - 1f),
-                (stripBounds.top + stripBounds.bottom) / 2f,
+            return ReelSwipeTarget(
+                start = PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
+                verticalDistancePx = verticalDistancePx,
+                validatePath = {},
             )
-            val safeDistance = verticalDistancePx.coerceIn(
-                rootBounds.top.toFloat() - point.y,
-                surfaceBounds.top.toFloat() - point.y - 1f,
-            )
-            reelTarget = point to safeDistance
-            validateReelPath = { path ->
+        }
+        val root = device.findObject(By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION))
+            ?: error("Missing keyboard root while locating suggestion $index")
+        val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION))
+            ?: error("Missing keyboard surface while locating suggestion $index")
+        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+            ?: error("Missing suggestion strip while locating suggestion $index")
+        val stripBounds = strip.visibleBounds
+        val rootBounds = root.visibleBounds
+        val surfaceBounds = surface.visibleBounds
+        check(rootBounds.contains(stripBounds)) {
+            "Suggestion strip is outside the keyboard root: strip=$stripBounds root=$rootBounds"
+        }
+        check(stripBounds.bottom <= surfaceBounds.top) {
+            "Suggestion strip overlaps the keyboard surface: strip=$stripBounds surface=$surfaceBounds"
+        }
+        val point = PointF(
+            (stripBounds.left + 80f).coerceIn(stripBounds.left + 1f, stripBounds.right - 1f),
+            (stripBounds.top + stripBounds.bottom) / 2f,
+        )
+        val safeDistance = verticalDistancePx.coerceIn(
+            rootBounds.top.toFloat() - point.y,
+            surfaceBounds.top.toFloat() - point.y - 1f,
+        )
+        return ReelSwipeTarget(
+            start = point,
+            verticalDistancePx = safeDistance,
+            validatePath = { path ->
                 check(path.all { candidate ->
                     rootBounds.contains(candidate.x.toInt(), candidate.y.toInt()) &&
                         candidate.y < surfaceBounds.top
                 }) {
                     "Correction reel fallback path leaves the suggestion area: path=$path root=$rootBounds surface=$surfaceBounds"
                 }
-            }
-        }
-        val (reelStart, safeVerticalDistance) = reelTarget
+            },
+        )
+    }
+
+    fun swipeSuggestion(index: Int, verticalDistancePx: Float): String {
+        device.waitForIdle()
+        SystemClock.sleep(1_000L)
+        val target = locateReelSwipeTarget(index, verticalDistancePx)
         fun injectReelSwipe() {
             val path = (1..3).map { step ->
                 val fraction = step / 3f
-                PointF(reelStart.x, reelStart.y + safeVerticalDistance * fraction)
-            }.let { listOf(reelStart) + it }
-            validateReelPath(path)
+                PointF(target.start.x, target.start.y + target.verticalDistancePx * fraction)
+            }.let { listOf(target.start) + it }
+            target.validatePath(path)
             pendingPointerEvents = pointer.injectScreenSwipe(
                 points = path,
                 holdBeforeMoveMs = 520L,
@@ -334,6 +363,26 @@ class ImeScenario(
         SystemClock.sleep(200L)
         expectedSelection = editor.selection().last
         checkpoint("swipeSuggestion($index, $verticalDistancePx)")
+        return expectedText
+    }
+
+    fun swipeSuggestionImmediately(index: Int, verticalDistancePx: Float): String {
+        device.waitForIdle()
+        SystemClock.sleep(1_000L)
+        val target = locateReelSwipeTarget(index, verticalDistancePx)
+        val path = (1..3).map { step ->
+            val fraction = step / 3f
+            PointF(target.start.x, target.start.y + target.verticalDistancePx * fraction)
+        }.let { listOf(target.start) + it }
+        target.validatePath(path)
+        val before = expectedText
+        pendingPointerEvents = pointer.injectScreenSwipe(points = path, holdBeforeMoveMs = 0L)
+        val after = editor.waitForTextChange(before, timeoutMs = 1_500L)
+        expectedText = after
+        device.waitForIdle()
+        SystemClock.sleep(200L)
+        expectedSelection = editor.selection().last
+        checkpoint("swipeSuggestionImmediately($index, $verticalDistancePx)")
         return expectedText
     }
 
