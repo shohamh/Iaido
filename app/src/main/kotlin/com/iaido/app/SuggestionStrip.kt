@@ -16,8 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -75,44 +76,57 @@ fun SuggestionStrip(
     // and reel groups below still use the per-render `viewportHeight`/`visibleSlotCount` for
     // their own internal centering.
     val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
-    Row(
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(ordered.map { it.id }, rtl) {
+        if (ordered.isEmpty()) return@LaunchedEffect
+        val leadingExtraItem = replacementOptions.isNotEmpty() && rtl
+        val targetIndex = (if (leadingExtraItem) 1 else 0) + autoScrollTargetIndex(ordered.size, rtl)
+        listState.animateScrollToItem(targetIndex)
+    }
+
+    LazyRow(
+        state = listState,
         modifier = Modifier
             .fillMaxWidth()
             .height(pinnedStripHeight + 8.dp)
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(REEL_ITEM_SPACING_DP.dp),
     ) {
         if (replacementOptions.isNotEmpty() && rtl) {
-            ReplacementReelSlot(
-                options = replacementOptions,
-                rtl = rtl,
-                viewportHeight = viewportHeight,
-                onPreview = onReplacementPreview,
-                onRelease = onReplacementRelease,
-                onCancel = onReplacementCancel,
-            )
+            item(key = "replacement-slot") {
+                ReplacementReelSlot(
+                    options = replacementOptions,
+                    rtl = rtl,
+                    viewportHeight = viewportHeight,
+                    onPreview = onReplacementPreview,
+                    onRelease = onReplacementRelease,
+                    onCancel = onReplacementCancel,
+                )
+            }
         }
-        ordered.forEachIndexed { index, chip ->
+        itemsIndexed(ordered, key = { _, chip -> chip.id ?: -1 }) { index, chip ->
             SuggestionChipView(
                 chip = chip,
                 index = index,
                 visibleSlotCount = visibleSlotCount,
-                modifier = Modifier,
+                modifier = Modifier.animateItem(),
                 onRelease = { candidate -> onRelease(index, candidate) },
                 onUndo = { onUndo(index) },
             )
         }
         if (replacementOptions.isNotEmpty() && !rtl) {
-            ReplacementReelSlot(
-                options = replacementOptions,
-                rtl = rtl,
-                viewportHeight = viewportHeight,
-                onPreview = onReplacementPreview,
-                onRelease = onReplacementRelease,
-                onCancel = onReplacementCancel,
-            )
+            item(key = "replacement-slot") {
+                ReplacementReelSlot(
+                    options = replacementOptions,
+                    rtl = rtl,
+                    viewportHeight = viewportHeight,
+                    onPreview = onReplacementPreview,
+                    onRelease = onReplacementRelease,
+                    onCancel = onReplacementCancel,
+                )
+            }
         }
     }
 }

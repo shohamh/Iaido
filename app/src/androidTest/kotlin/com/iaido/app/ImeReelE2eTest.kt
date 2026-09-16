@@ -80,4 +80,24 @@ class ImeReelE2eTest {
             }
         }
     }
+
+    @Test
+    fun stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords() {
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("there")
+            tapSpace()
+            swipeWord("is")
+            tapSpace()
+            swipeWord("a")
+            tapSpace()
+            swipeWord("ninja")
+            val device = androidx.test.uiautomator.UiDevice.getInstance(
+                androidx.test.InstrumentationRegistry.getInstrumentation(),
+            )
+            device.waitForIdle()
+            check(device.findObject(androidx.test.uiautomator.By.desc("Iaido suggestion 3")) != null) {
+                "Newest chip (index 3, 'ninja') is not visible without further scrolling after four words"
+            }
+        }
+    }
 }
