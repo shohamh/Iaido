@@ -41,4 +41,15 @@ class SuggestionReelMathTest {
         assertEquals(2, replacementReelWidthSlots(sourceWordCount = 2, replacementWordCount = 1))
         assertEquals(3, replacementReelWidthSlots(sourceWordCount = 1, replacementWordCount = 3))
     }
+
+    @Test
+    fun `reserved chip width adds padding around the measured word and has a usable minimum`() {
+        assertEquals(56f, chipReservedWidthDp(measuredTextWidthDp = 10f))
+        assertEquals(120f, chipReservedWidthDp(measuredTextWidthDp = 100f))
+    }
+
+    @Test
+    fun `reserved chip width caps very long words so one chip cannot eat the whole strip`() {
+        assertEquals(140f, chipReservedWidthDp(measuredTextWidthDp = 500f))
+    }
 }
