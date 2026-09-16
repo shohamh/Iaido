@@ -66,7 +66,7 @@ class IaidoInputMethodService : InputMethodService() {
     private var backspaceSwipeText = ""
     private var backspaceSwipeCursor = 0
     private var backspaceSwipeDeletedCount = 0
-    private var inferenceReplacementInProgress = false
+    private val inferenceSelectionGuard = InferenceSelectionGuard()
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
@@ -209,6 +209,7 @@ class IaidoInputMethodService : InputMethodService() {
         lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
+        inferenceSelectionGuard.clear()
         textObservationEnabled = info?.let(::supportsTextObservation) == true
         cursorPosition = currentInputConnection
             ?.getExtractedText(extractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR)
@@ -232,6 +233,7 @@ class IaidoInputMethodService : InputMethodService() {
         lastDeletedWord = null
         splitController.cancel()
         splitGraceHandler.removeCallbacksAndMessages(null)
+        inferenceSelectionGuard.clear()
         textObservationEnabled = false
     }
 
@@ -244,7 +246,12 @@ class IaidoInputMethodService : InputMethodService() {
         candidatesEnd: Int,
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-        if (!inferenceReplacementInProgress && (newSelStart != cursorPosition || newSelEnd != newSelStart)) {
+        val suppressedAsInferenceReplacement = inferenceSelectionGuard.shouldSuppress(
+            newSelStart,
+            newSelEnd,
+            timeoutMs = INFERENCE_SELECTION_GUARD_TIMEOUT_MS,
+        )
+        if (!suppressedAsInferenceReplacement && (newSelStart != cursorPosition || newSelEnd != newSelStart)) {
             swipeTypingCoordinator.onCursorMoved()
         }
         cursorPosition = newSelStart
@@ -417,17 +424,23 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String): Boolean {
         val inputConnection = currentInputConnection ?: return false
-        inferenceReplacementInProgress = true
-        try {
-            if (!inputConnection.setSelection(span.start, span.end)) return false
-            if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(span.start, span.end, replacement)
-            if (!inputConnection.commitText(replacement, 1)) return false
-            cursorPosition = span.start + replacement.length
-            inputConnection.setSelection(cursorPosition, cursorPosition)
-            return true
-        } finally {
-            inferenceReplacementInProgress = false
+        val expectedCursor = span.start + replacement.length
+        // Arm before making any framework calls: onUpdateSelection callbacks for this edit can be
+        // delivered asynchronously, after this function has already returned, so the guard must stay
+        // armed until it actually observes the matching callback (see InferenceSelectionGuard's doc).
+        inferenceSelectionGuard.arm(expectedCursor, expectedCursor)
+        if (!inputConnection.setSelection(span.start, span.end)) {
+            inferenceSelectionGuard.clear()
+            return false
         }
+        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(span.start, span.end, replacement)
+        if (!inputConnection.commitText(replacement, 1)) {
+            inferenceSelectionGuard.clear()
+            return false
+        }
+        cursorPosition = expectedCursor
+        inputConnection.setSelection(cursorPosition, cursorPosition)
+        return true
     }
 
     private fun recordFinalizedInferenceWords(
@@ -736,6 +749,7 @@ class IaidoInputMethodService : InputMethodService() {
     private companion object {
         const val TEXT_MONITOR_TOKEN = 0x4E4B
         const val MAX_BACKSPACE_SWIPE_CHARS = 60
+        const val INFERENCE_SELECTION_GUARD_TIMEOUT_MS = 1_000L
     }
 
     private fun switchLanguage() {
