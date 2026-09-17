@@ -62,4 +62,15 @@ class TrieCandidateGeneratorTest {
 
         assertTrue(candidates.any { it.word == "hi" })
     }
+
+    @Test
+    fun `matches capitalized dictionary words against lowercase keyboard layouts`() {
+        val candidates = generator.generateCandidates(
+            pathThrough('t', 'h', 'e'),
+            layout,
+            listOf(WordEntry("The", 1.0)),
+        )
+
+        assertTrue(candidates.any { it.word == "The" })
+    }
 }

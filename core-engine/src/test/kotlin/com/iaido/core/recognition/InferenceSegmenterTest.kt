@@ -164,6 +164,20 @@ class InferenceSegmenterTest {
     }
 
     @Test
+    fun `inference keeps the stronger swipe candidate over a more frequent near match`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(scoredUnit("hello", "hello" to -0.4, "help" to -0.65)),
+            previousWords = emptyList(),
+            dictionary = listOf(
+                WordEntry("hello", 5.2480746025e-05),
+                WordEntry("help", 5.6234132519e-04),
+            ),
+        )
+
+        assertEquals(listOf("hello"), options.first().words)
+    }
+
+    @Test
     fun `a confident whole-word swipe does not fragment against the real shipped dictionary and ngram data`() {
         val entries = realDictionaryEntries()
         val store = CompactNgramScoreStore.fromBytes(

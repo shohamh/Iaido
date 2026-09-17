@@ -1,5 +1,6 @@
 package com.iaido.app
 
+
 import com.iaido.core.dictionary.WordEntry
 import com.iaido.core.gesture.GesturePath
 import com.iaido.core.layout.KeyboardLayout
@@ -144,7 +145,10 @@ class SwipeTypingCoordinator(
             capitalizeFirstWord = SentenceCapitalization.needsCapitalization(textBeforeCursor())
         }
         check(transaction.append(unit))
-        val alternatives = segmenter.rank(transaction.units, previousWords(), dictionary())
+        val alternatives = preserveSingleGestureTopWord(
+            unit,
+            segmenter.rank(transaction.units, previousWords(), dictionary()),
+        )
         val words = applyPendingCapitalization(alternatives.firstOrNull()?.words ?: unit.topWords())
         replacementSelection = null
         if (!transaction.replaceCurrent(words, alternatives)) finalizeAndClear()
@@ -204,6 +208,27 @@ class SwipeTypingCoordinator(
     }
 
     private fun notifyReplacementOptionsChanged() = onReplacementOptionsChanged(replacementOptions())
+
+    /**
+     * Inference may split one swipe or join several swipes, but it must not replace a single
+     * swipe's best whole-word recognition with another whole word merely because that word is
+     * more frequent. That loses the geometric evidence that produced the recognizer result (for
+     * example, an exact `hello` path being changed to `help`).
+     */
+    private fun preserveSingleGestureTopWord(
+        unit: GestureUnit,
+        alternatives: List<SegmentationOption>,
+    ): List<SegmentationOption> {
+        val recognizedWords = unit.topWords()
+        val first = alternatives.firstOrNull() ?: return alternatives
+        if (unit.paths.size != 1 || recognizedWords.size != 1 || first.words.size != 1) return alternatives
+        if (first.words == recognizedWords) return alternatives
+
+        return alternatives.sortedWith(
+            compareByDescending<SegmentationOption> { it.words == recognizedWords }
+                .thenByDescending { it.score },
+        )
+    }
 
     private data class ReplacementSelection(
         val sourceWords: List<String>,

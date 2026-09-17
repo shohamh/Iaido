@@ -41,7 +41,7 @@ class ShapePathScorer(
 
     /** A word's "ideal path" is straight lines connecting its successive key centers. */
     private fun idealPathFor(word: String, layout: KeyboardLayout): GesturePath {
-        val points = word.mapIndexed { i, c ->
+        val points = word.lowercase().mapIndexed { i, c ->
             val key = layout.centerOf(c)
             GesturePoint(key.x, key.y, i * 100L)
         }

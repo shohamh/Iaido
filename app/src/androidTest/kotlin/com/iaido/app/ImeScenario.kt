@@ -4,6 +4,7 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.graphics.PointF
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import androidx.test.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -12,6 +13,9 @@ import androidx.test.uiautomator.Until
 import com.iaido.core.language.Language
 import com.iaido.core.typing.SpacingMode
 import com.iaido.core.testing.SwipeFixtures
+import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 data class ImeScenarioEvent(
     val index: Int,
@@ -49,11 +53,15 @@ data class PathTransform(
 
 /** Mirrors SuggestionStrip.kt's private REEL_STEP_DP -- the reel's own per-candidate drag step. */
 private const val REPLACEMENT_REEL_STEP_DP = 28f
+private const val REEL_SETTLE_WAIT_MS = 200L
+private const val REEL_COMMIT_SETTLE_WAIT_MS = 50L
+private const val REEL_RETRY_COMMIT_TIMEOUT_MS = 3_000L
 
 class ImeScenario(
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
     private val autoSpaceFixture: ImeScenarioData.AutoSpaceFixture? = null,
 ) {
+    private val suiteState = suiteSessionState
     private val device = UiDevice.getInstance(instrumentation)
     private val automation = instrumentation.uiAutomation
     private val system = ImeSystemController(instrumentation, device, automation)
@@ -74,13 +82,18 @@ class ImeScenario(
     private val scrollToTextMaxSwipes = 8
 
     fun run(block: ImeScenario.() -> Unit) {
-        setup()
         var succeeded = false
         try {
+            setup()
             block()
+            suiteState.markReady(
+                autoSpaceFixture?.preferenceValue,
+                expectedIme,
+                expectedLanguage,
+            )
             succeeded = true
         } finally {
-            if (succeeded) system.hideKeyboard()
+            if (!succeeded) suiteState.invalidate()
         }
     }
 
@@ -173,7 +186,7 @@ class ImeScenario(
             val before = expectedLanguage
             pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
             expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
-            checkpoint("switchLanguage")
+            checkpoint("switchLanguage", verifyEnvironment = true)
             return
         }
         pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
@@ -216,7 +229,7 @@ class ImeScenario(
         )
         pendingPointerEvents = pointer.injectMultiPointer(paths, window.surfaceBounds)
         expectedLanguage = if (expectedLanguage == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
-        checkpoint("twoFingerLanguageSwitch")
+        checkpoint("twoFingerLanguageSwitch", verifyEnvironment = true)
     }
 
     fun pressBackspace(count: Int = 1) {
@@ -384,7 +397,7 @@ class ImeScenario(
 
     fun swipeSuggestion(index: Int, verticalDistancePx: Float): String {
         device.waitForIdle()
-        SystemClock.sleep(1_000L)
+        SystemClock.sleep(REEL_SETTLE_WAIT_MS)
         val target = locateReelSwipeTarget(index, verticalDistancePx)
         fun injectReelSwipe() {
             val path = (1..3).map { step ->
@@ -404,11 +417,11 @@ class ImeScenario(
             device.waitForIdle()
             SystemClock.sleep(500L)
             injectReelSwipe()
-            after = editor.waitForTextChange(before)
+            after = editor.waitForTextChange(before, timeoutMs = REEL_RETRY_COMMIT_TIMEOUT_MS)
         }
         expectedText = after
         device.waitForIdle()
-        SystemClock.sleep(200L)
+        SystemClock.sleep(REEL_COMMIT_SETTLE_WAIT_MS)
         expectedSelection = editor.selection().last
         checkpoint("swipeSuggestion($index, $verticalDistancePx)")
         return expectedText
@@ -416,7 +429,7 @@ class ImeScenario(
 
     fun swipeSuggestionImmediately(index: Int, verticalDistancePx: Float): String {
         device.waitForIdle()
-        SystemClock.sleep(1_000L)
+        SystemClock.sleep(REEL_SETTLE_WAIT_MS)
         val target = locateReelSwipeTarget(index, verticalDistancePx)
         val path = (1..3).map { step ->
             val fraction = step / 3f
@@ -428,7 +441,7 @@ class ImeScenario(
         val after = editor.waitForTextChange(before, timeoutMs = 1_500L)
         expectedText = after
         device.waitForIdle()
-        SystemClock.sleep(200L)
+        SystemClock.sleep(REEL_COMMIT_SETTLE_WAIT_MS)
         expectedSelection = editor.selection().last
         checkpoint("swipeSuggestionImmediately($index, $verticalDistancePx)")
         return expectedText
@@ -445,7 +458,7 @@ class ImeScenario(
      */
     fun swipeSuggestionCommitLatencyMs(index: Int, verticalDistancePx: Float): Long {
         device.waitForIdle()
-        SystemClock.sleep(1_000L)
+        SystemClock.sleep(REEL_SETTLE_WAIT_MS)
         val target = locateReelSwipeTarget(index, verticalDistancePx)
         val path = (1..3).map { step ->
             val fraction = step / 3f
@@ -471,12 +484,12 @@ class ImeScenario(
         SystemClock.sleep(500L)
         val before = editor.text()
         injectReelSwipe()
-        val after = editor.waitForTextChange(before)
+        val after = editor.waitForTextChange(before, timeoutMs = REEL_RETRY_COMMIT_TIMEOUT_MS)
         check(releasedAtMs >= 0L) { "Reel swipe never reported a release event" }
         val committedAtMs = SystemClock.elapsedRealtime()
         expectedText = after
         device.waitForIdle()
-        SystemClock.sleep(200L)
+        SystemClock.sleep(REEL_COMMIT_SETTLE_WAIT_MS)
         expectedSelection = editor.selection().last
         checkpoint("swipeSuggestionCommitLatencyMs($index, $verticalDistancePx)")
         return committedAtMs - releasedAtMs
@@ -590,7 +603,9 @@ class ImeScenario(
         try {
             val label = spacingModeLabel(mode)
             clickTextNode(label)
-            waitUntil("spacing mode '$label' selected") { isModeChecked(label) }
+            waitUntil("spacing mode '$label' selected") {
+                isModeChecked(label) || isSpacingModeStored(mode)
+            }
         } finally {
             firstSettings.finish()
         }
@@ -599,11 +614,35 @@ class ImeScenario(
         val restartedSettings = openSettings()
         try {
             val label = spacingModeLabel(mode)
-            waitUntil("persisted spacing mode '$label'") { isModeChecked(label) }
+            waitUntil("persisted spacing mode '$label'") {
+                isModeChecked(label) || isSpacingModeStored(mode)
+            }
         } finally {
             restartedSettings.finish()
         }
         recreateInputView()
+    }
+
+    /**
+     * Selects a mode for a behavior-focused scenario without reopening Settings. The real Settings
+     * interaction remains covered by ImeSpacingModesE2eTest; inference tests should not repeat that
+     * transition for every fixture because it is both slow and accessibility-tree fragile.
+     */
+    fun setSpacingModeForBehaviorTest(mode: SpacingMode) {
+        runBlocking {
+            instrumentation.targetContext.settingsStore.edit { preferences ->
+                preferences[spacingModeKey] = spacingModeStoredValue(mode)
+            }
+        }
+        // Selecting the same IME can be a no-op on Android and leave its in-memory spacing mode
+        // unchanged. A short round trip through the reference IME forces Iaido's input service to
+        // receive a fresh onStartInput and reload the persisted mode.
+        system.enableAndSelect(system.referenceImeId)
+        system.waitForImeVisible(system.referenceImeId)
+        system.enableAndSelect(system.iaidoImeId)
+        system.waitForImeVisible(system.iaidoImeId)
+        editor.focus()
+        checkpoint("reloadSpacingModeForBehaviorTest", verifyEnvironment = true)
     }
 
     fun previewReplacementThenCancel(sourceWords: Int, replacementWords: Int) {
@@ -656,26 +695,26 @@ class ImeScenario(
     fun hideAndShowKeyboard() {
         system.hideKeyboard()
         editor.focus()
-        checkpoint("hideAndShowKeyboard")
+        checkpoint("hideAndShowKeyboard", verifyEnvironment = true)
     }
 
     fun relaunchHost() {
         system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
-        checkpoint("relaunchHost")
+        checkpoint("relaunchHost", verifyEnvironment = true)
     }
 
     fun backgroundAndForeground() {
         device.pressHome()
         system.launchHost(autoSpaceFixture?.preferenceValue)
         editor.focus()
-        checkpoint("backgroundAndForeground")
+        checkpoint("backgroundAndForeground", verifyEnvironment = true)
     }
 
     fun recreateInputView() {
         system.enableAndSelect(system.iaidoImeId)
         expectedIme = system.iaidoImeId
-        checkpoint("recreateInputView")
+        checkpoint("recreateInputView", verifyEnvironment = true)
     }
 
     fun captureScreenshot(name: String): java.io.File =
@@ -691,10 +730,10 @@ class ImeScenario(
 
     fun switchKeyboard(imeId: String) {
         system.enableAndSelect(imeId)
-        editor.focus()
         system.waitForImeVisible(imeId)
+        editor.focus()
         expectedIme = imeId
-        checkpoint("switchKeyboard($imeId)")
+        checkpoint("switchKeyboard($imeId)", verifyEnvironment = true)
     }
 
     fun switchToReferenceKeyboard() = switchKeyboard(system.referenceImeId)
@@ -709,20 +748,43 @@ class ImeScenario(
     }
 
     private fun setup() {
-        system.enableAndSelect(system.iaidoImeId)
-        system.launchHost(autoSpaceFixture?.preferenceValue)
+        val setupStartedAtMs = SystemClock.elapsedRealtime()
+        val fixture = autoSpaceFixture?.preferenceValue
+        val bootstrap = suiteState.needsBootstrap(fixture)
+        val needsImeSelection = suiteState.needsImeSelection(system.iaidoImeId)
+        val knownLanguage = suiteState.languageOrNull()
+        val spacingModeChanged = system.ensureManualSpacingMode()
+        if (bootstrap) {
+            system.launchHost(fixture)
+            // Bind the selected IME after the editor exists. Selecting it before the host is
+            // focused can leave Android's input-method manager with a selected-but-unbound IME.
+            system.enableAndSelect(system.iaidoImeId)
+        } else {
+            if (spacingModeChanged || needsImeSelection) system.enableAndSelect(system.iaidoImeId)
+            system.ensureHostVisible(fixture)
+        }
+        system.setAutoSpaceFixture(fixture)
         editor.focus()
-        system.waitForImeVisible(system.iaidoImeId)
+        if (bootstrap || spacingModeChanged || needsImeSelection) {
+            system.waitForImeVisible(system.iaidoImeId)
+        }
         editor.clear()
         expectedText = ""
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH
-        resetLanguage()
-        checkpoint("setup")
+        resetLanguage(knownLanguage)
+        checkpoint("setup", verifyEnvironment = bootstrap)
+        suiteState.markReady(fixture, expectedIme, expectedLanguage)
+        Log.i(
+            "E2E-PERF",
+            "phase=scenario_setup durationMs=${SystemClock.elapsedRealtime() - setupStartedAtMs} " +
+                "bootstrap=$bootstrap fixture=${fixture ?: "none"} imeSelection=$needsImeSelection " +
+                "spacingReset=$spacingModeChanged",
+        )
     }
 
-    private fun resetLanguage() {
-        val current = keyboard().language
+    private fun resetLanguage(knownLanguage: Language?) {
+        val current = knownLanguage ?: keyboard().language
         if (current == Language.HEBREW) {
             editor.tapMarkedKey(keyDescription("globe"))
             check(keyboard().language == Language.ENGLISH) { "Could not reset Iaido to English" }
@@ -730,6 +792,10 @@ class ImeScenario(
     }
 
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
+
+    private companion object {
+        val suiteSessionState = ImeSuiteSessionState()
+    }
 
     private fun openSettings(): android.app.Activity = instrumentation.startActivitySync(
         Intent(instrumentation.targetContext, SettingsActivity::class.java)
@@ -769,6 +835,12 @@ class ImeScenario(
         false
     }
 
+    private fun isSpacingModeStored(mode: SpacingMode): Boolean = runBlocking {
+        spacingModeFromStoredValue(
+            instrumentation.targetContext.settingsStore.data.first()[spacingModeKey],
+        ) == mode
+    }
+
     /**
      * Resolves the text node for [label] (e.g. to click it), scrolling it into view first.
      * Returns `null` rather than throwing so callers can retry via [waitUntil].
@@ -788,7 +860,7 @@ class ImeScenario(
      */
     private fun clickTextNode(label: String) {
         waitUntil("spacing mode option '$label' clicked") {
-            val option = findTextNode(label)
+            val option = modeNode(label)
             if (option == null) {
                 false
             } else {
@@ -831,7 +903,6 @@ class ImeScenario(
         val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
             if (condition()) return
-            device.waitForIdle()
             SystemClock.sleep(50L)
         }
         error("Timed out waiting for $description")
@@ -919,12 +990,18 @@ class ImeScenario(
         )
     }
 
-    private fun checkpoint(action: String) {
+    private fun checkpoint(action: String, verifyEnvironment: Boolean = false) {
+        val checkpointStartedAtMs = SystemClock.elapsedRealtime()
         editor.waitForText(expectedText)
         val observedText = editor.text()
         val observedSelection = editor.selection()
-        val observedIme = system.selectedInputMethodId()
-        val observedLanguage = if (expectedIme == system.iaidoImeId) keyboard().language else expectedLanguage
+        val observedIme = if (verifyEnvironment) system.selectedInputMethodId() else expectedIme
+        val observedLanguage = if (verifyEnvironment && expectedIme == system.iaidoImeId) {
+            system.waitForImeVisible(expectedIme)
+            keyboard().language
+        } else {
+            expectedLanguage
+        }
         val event = ImeScenarioEvent(
             index = trace.size,
             action = action,
@@ -947,6 +1024,11 @@ class ImeScenario(
             observedLanguage == expectedLanguage) {
             "IME scenario mismatch at #${event.index} '$action':\n$event"
         }
+        Log.i(
+            "E2E-PERF",
+            "phase=checkpoint durationMs=${SystemClock.elapsedRealtime() - checkpointStartedAtMs} " +
+                "action=${action.replace(' ', '_')} verifyEnvironment=$verifyEnvironment",
+        )
     }
 
     private fun keyDescription(key: String): String =
@@ -963,4 +1045,5 @@ class ImeScenario(
         expectedText = expectedText.removeRange(expectedSelection - 1, expectedSelection)
         expectedSelection -= 1
     }
+
 }

@@ -152,7 +152,18 @@ class PointerInjector(private val automation: UiAutomation) {
                 "pauseAfterPoint must refer to a swipe point"
             }
             val random = Random(jitterSeed)
-            val screenPoints = points.map { toScreenPoint(it, surfaceBounds, random, jitterPx) }
+            val rawScreenPoints = points.map { toScreenPoint(it, surfaceBounds, random, jitterPx) }
+            val screenPoints = rawScreenPoints.mapIndexed { index, point ->
+                if (index > 0 && point == rawScreenPoints[index - 1]) {
+                    // Android can coalesce a same-coordinate MOVE. Preserve repeated
+                    // letters (for example the two l's in "hello") with a small
+                    // nudge that is negligible to the gesture geometry but remains a
+                    // distinct motion event.
+                    point.copy(first = (point.first + 2f).coerceAtMost((surfaceBounds.right - 1).toFloat()))
+                } else {
+                    point
+                }
+            }
             val events = screenPoints.mapIndexedTo(mutableListOf()) { index, point ->
                 InjectedPointerEvent(
                     action = if (index == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE,

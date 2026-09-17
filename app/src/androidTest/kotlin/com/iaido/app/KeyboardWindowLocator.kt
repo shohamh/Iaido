@@ -5,6 +5,8 @@ import android.graphics.Rect
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import android.os.SystemClock
+import android.util.Log
 import com.iaido.core.language.Language
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -29,6 +31,7 @@ object KeyboardWindowLocator {
     private val requiredKeys = listOf("globe", "space", "backspace")
 
     fun locate(device: UiDevice, timeoutMs: Long = 5_000L): KeyboardWindow {
+        val startedAtMs = SystemClock.elapsedRealtime()
         if (!device.wait(Until.hasObject(By.desc(ROOT_DESCRIPTION)), timeoutMs)) {
             throw missingMarker("root '$ROOT_DESCRIPTION'", device)
         }
@@ -51,19 +54,29 @@ object KeyboardWindowLocator {
         validateBounds("surface", surfaceBounds, rootBounds)
         keyBounds.forEach { (key, bounds) -> validateBounds("key '$key'", bounds, surfaceBounds) }
 
-        return KeyboardWindow(
+        val window = KeyboardWindow(
             rootBounds = rootBounds,
             surfaceBounds = surfaceBounds,
             language = language,
             keyBounds = keyBounds,
         )
+        Log.i(
+            "E2E-PERF",
+            "phase=keyboard_locator durationMs=${SystemClock.elapsedRealtime() - startedAtMs} " +
+                "language=${language.name}",
+        )
+        return window
     }
 
     private fun waitForLanguage(device: UiDevice, timeoutMs: Long): Language {
         val english = By.desc(LANGUAGE_DESCRIPTION_PREFIX + Language.ENGLISH.name)
         val hebrew = By.desc(LANGUAGE_DESCRIPTION_PREFIX + Language.HEBREW.name)
-        if (device.wait(Until.hasObject(english), timeoutMs)) return Language.ENGLISH
-        if (device.wait(Until.hasObject(hebrew), timeoutMs)) return Language.HEBREW
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        do {
+            if (device.findObject(english) != null) return Language.ENGLISH
+            if (device.findObject(hebrew) != null) return Language.HEBREW
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
         throw missingMarker("language marker", device)
     }
 

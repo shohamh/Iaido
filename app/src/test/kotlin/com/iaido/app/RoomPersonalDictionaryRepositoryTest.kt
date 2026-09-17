@@ -61,4 +61,14 @@ class RoomPersonalDictionaryRepositoryTest {
         assertTrue(repository.ngramBoost("write", "ninjacode") > 1.0)
         assertTrue(repository.ngramBoost("ninjacode", "today") > 1.0)
     }
+
+    @Test
+    fun `persisted sentence capitalization is folded into the lowercase dictionary word`() {
+        val dao = FakeDao().apply {
+            rows["There"] = PersonalOverrideEntity("There", 2.0, 1)
+        }
+        val repository = RoomPersonalDictionaryRepository(dao, listOf(WordEntry("there", 1.0)))
+
+        assertEquals(listOf("there"), repository.entries().map { it.word })
+    }
 }

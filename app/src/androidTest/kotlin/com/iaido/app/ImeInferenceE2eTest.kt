@@ -99,7 +99,7 @@ class ImeInferenceE2eTest {
         ImeScenario(autoSpaceFixture = fixture).also(artifacts::track)
 
     private fun ImeScenario.enableInferenceAndPrefix() {
-        selectSpacingModeThroughSettings(SpacingMode.INFER_SPACES)
+        setSpacingModeForBehaviorTest(SpacingMode.INFER_SPACES)
         tapKey("x")
         tapSpace()
         assertText("X ")

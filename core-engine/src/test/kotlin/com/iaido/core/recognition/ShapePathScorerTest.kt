@@ -89,4 +89,13 @@ class ShapePathScorerTest {
 
         assertEquals("bye", results.first().word.word)
     }
+
+    @Test
+    fun `scoring capitalized dictionary words uses lowercase keyboard keys`() {
+        val path = pathThrough('t', 'h', 'e')
+
+        val results = scorer.score(path, listOf(WordEntry("The", 1.0)), layout)
+
+        assertEquals("The", results.single().word.word)
+    }
 }

@@ -91,4 +91,34 @@ class GestureRecognizerTest {
 
         assertEquals("there", results.first().word.word)
     }
+
+    @Test
+    fun `an exact app-layout hello path outranks the shorter help candidate`() {
+        val path = appPathThrough('h', 'e', 'l', 'l', 'o')
+        val results = recognizer.recognize(
+            path,
+            appLayout,
+            listOf(
+                WordEntry("hello", 5.2480746025e-05),
+                WordEntry("help", 5.6234132519e-04),
+            ),
+        )
+
+        assertEquals("hello", results.first().word.word, results.joinToString { "${it.word.word}=${it.score}" })
+    }
+
+    @Test
+    fun `a path with a coalesced repeated letter still prefers hello`() {
+        val path = appPathThrough('h', 'e', 'l', 'o')
+        val results = recognizer.recognize(
+            path,
+            appLayout,
+            listOf(
+                WordEntry("hello", 5.2480746025e-05),
+                WordEntry("help", 5.6234132519e-04),
+            ),
+        )
+
+        assertEquals("hello", results.first().word.word, results.joinToString { "${it.word.word}=${it.score}" })
+    }
 }

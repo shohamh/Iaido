@@ -7,7 +7,6 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
-import androidx.test.uiautomator.Until
 
 class ImeEditorDriver(
     private val device: UiDevice,
@@ -15,10 +14,11 @@ class ImeEditorDriver(
     private val packageName: String,
 ) {
     fun focus() {
-        editor().click()
-        check(device.wait(Until.hasObject(editorSelector()), ImeSystemController.DEFAULT_TIMEOUT_MS)) {
-            "IME test editor lost focus or host disappeared"
-        }
+        val bounds = editor().visibleBounds
+        pointerInjector.injectTap(
+            centerX = (bounds.left + bounds.right) / 2f,
+            centerY = (bounds.top + bounds.bottom) / 2f,
+        )
     }
 
     fun clear() {
@@ -75,7 +75,6 @@ class ImeEditorDriver(
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         do {
             if (text() == expected) return
-            device.waitForIdle()
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
         check(false) {
@@ -88,7 +87,6 @@ class ImeEditorDriver(
         do {
             val current = text()
             if (current != previous) return current
-            device.waitForIdle()
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
         error("Editor text did not change from '$previous'")
@@ -103,7 +101,11 @@ class ImeEditorDriver(
         var lastFailure: Throwable? = null
         while (SystemClock.elapsedRealtime() < deadline) {
             try {
-                markedView(id).click()
+                val bounds = markedView(id).visibleBounds
+                pointerInjector.injectTap(
+                    centerX = (bounds.left + bounds.right) / 2f,
+                    centerY = (bounds.top + bounds.bottom) / 2f,
+                )
                 return
             } catch (failure: StaleObjectException) {
                 lastFailure = failure
@@ -135,8 +137,6 @@ class ImeEditorDriver(
         }
         error("Missing $description")
     }
-
-    private fun editorSelector() = By.res(resourceId("ime_test_editor"))
 
     private fun resourceId(id: String) = "$packageName:id/$id"
 

@@ -8,7 +8,7 @@ class PersonalDictionary(
     private val base: List<WordEntry>,
     private val maxBoost: Double = 32.0,
 ) {
-    private val baseByWord = base.associateBy { it.word }
+    private val baseByWord = base.associateBy { normalizeWord(it.word) }
     private data class OverrideState(var boost: Double = 1.0, var uses: Int = 0)
 
     private val wordOverrides = mutableMapOf<String, OverrideState>()
@@ -17,8 +17,9 @@ class PersonalDictionary(
 
     fun reinforce(word: String, amount: Double = 1.0) {
         require(amount > 0.0)
-        decayWordsExcept(word)
-        increase(wordOverrides, word, amount)
+        val normalizedWord = normalizeWord(word)
+        decayWordsExcept(normalizedWord)
+        increase(wordOverrides, normalizedWord, amount)
     }
 
     fun record(
@@ -28,22 +29,27 @@ class PersonalDictionary(
         previousWord: String? = null,
         nextWord: String? = null,
     ) {
+        val normalizedOriginal = original?.let(::normalizeWord)
+        val normalizedReplacement = normalizeWord(replacement)
         val amount = if (signal == LearningSignal.DELETE_RETYPE) 3.0 else 1.0
-        reinforce(replacement, amount)
-        if (signal != LearningSignal.EXPLICIT_ADD && original != null && original != replacement) {
-            decrease(wordOverrides, original)
+        reinforce(normalizedReplacement, amount)
+        if (signal != LearningSignal.EXPLICIT_ADD &&
+            normalizedOriginal != null && normalizedOriginal != normalizedReplacement
+        ) {
+            decrease(wordOverrides, normalizedOriginal)
         }
-        if (signal == LearningSignal.EXPLICIT_ADD) customWords += replacement
+        if (signal == LearningSignal.EXPLICIT_ADD) customWords += normalizedReplacement
         if (signal == LearningSignal.DELETE_RETYPE) {
-            previousWord?.let { reinforceNgram(it, replacement) }
-            nextWord?.let { reinforceNgram(replacement, it) }
+            previousWord?.let { reinforceNgram(normalizeWord(it), normalizedReplacement) }
+            nextWord?.let { reinforceNgram(normalizedReplacement, normalizeWord(it)) }
         }
     }
 
     fun forget(word: String) {
-        wordOverrides.remove(word)
-        customWords.remove(word)
-        ngramOverrides.keys.removeAll { it.first == word || it.second == word }
+        val normalizedWord = normalizeWord(word)
+        wordOverrides.remove(normalizedWord)
+        customWords.remove(normalizedWord)
+        ngramOverrides.keys.removeAll { it.first == normalizedWord || it.second == normalizedWord }
     }
 
     fun reset() {
@@ -62,18 +68,19 @@ class PersonalDictionary(
 
     fun restore(entries: List<WordEntry>) {
         entries.forEach { entry ->
-            val baseFrequency = baseByWord[entry.word]?.frequency
-            if (baseFrequency == null) customWords += entry.word
+            val word = normalizeWord(entry.word)
+            val baseFrequency = baseByWord[word]?.frequency
+            if (baseFrequency == null) customWords += word
             val boost = if (baseFrequency == null) {
                 entry.frequency / ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
             } else {
                 entry.frequency / baseFrequency
             }
-            wordOverrides[entry.word] = OverrideState(boost.coerceIn(0.1, maxBoost), uses = 1)
+            wordOverrides[word] = OverrideState(boost.coerceIn(0.1, maxBoost), uses = 1)
         }
     }
 
-    fun entries(): List<WordEntry> = (base.map { it.word } + customWords).distinct().map { word ->
+    fun entries(): List<WordEntry> = (base.map { normalizeWord(it.word) } + customWords).distinct().map { word ->
         val baseFrequency = baseByWord[word]?.frequency ?: ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
         WordEntry(word, baseFrequency * (wordOverrides[word]?.boost ?: 1.0))
     }
@@ -97,6 +104,8 @@ class PersonalDictionary(
         state.boost = (state.boost + amount / (state.uses + 1)).coerceAtMost(maxBoost)
         state.uses += 1
     }
+
+    private fun normalizeWord(word: String): String = word.lowercase()
 
     private fun <K> decrease(overrides: MutableMap<K, OverrideState>, key: K) {
         val state = overrides.getOrPut(key) { OverrideState() }

@@ -108,4 +108,14 @@ class PersonalDictionaryTest {
         assertEquals(2.5, dictionary.entries().single { it.word == "hello" }.frequency)
         assertEquals(0.02, dictionary.entries().single { it.word == "ninjacode" }.frequency)
     }
+
+    @Test
+    fun `learning keeps sentence capitalization out of recognition words`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("there", 1.0)))
+
+        dictionary.record(LearningSignal.DELETE_RETYPE, replacement = "There")
+        dictionary.restore(listOf(WordEntry("There", 2.0)))
+
+        assertEquals(listOf("there"), dictionary.entries().map { it.word })
+    }
 }

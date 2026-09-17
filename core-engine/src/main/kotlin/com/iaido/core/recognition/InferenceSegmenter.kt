@@ -274,7 +274,9 @@ class InferenceSegmenter(
         private const val MAX_ALTERNATIVES = 16
         private const val MAX_CANDIDATES_PER_PATH = 8
         private const val DEFAULT_CONFIDENCE_MARGIN = 1.0
-        private const val FREQUENCY_WEIGHT = 0.1
+        // Keep inference's frequency contribution aligned with ShapePathScorer so the
+        // segmentation pass cannot overturn a geometrically stronger swipe candidate.
+        private const val FREQUENCY_WEIGHT = ScoringConstants.FREQUENCY_WEIGHT
 
         // The shipped dictionary stores frequency as a probability (all entries are well below
         // 1.0; the most common English word, "the", is ~0.054). A floor of 1.0 clamps every real

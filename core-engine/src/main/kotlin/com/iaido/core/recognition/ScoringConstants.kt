@@ -28,7 +28,7 @@ object ScoringConstants {
     const val MIN_FREQUENCY: Double = 1e-9
 
     /** Weight applied to the raw DTW-style shape distance term. */
-    const val SHAPE_DISTANCE_WEIGHT: Double = 1.0
+    const val SHAPE_DISTANCE_WEIGHT: Double = 2.1
 
     /** Weight applied to the corner-matching bonus/penalty term. */
     const val CORNER_BONUS_WEIGHT: Double = 0.5

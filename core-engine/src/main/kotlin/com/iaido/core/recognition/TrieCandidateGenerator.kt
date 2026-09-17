@@ -28,7 +28,7 @@ class TrieCandidateGenerator(
 
     private fun isPlausible(word: String, path: GesturePath, layout: KeyboardLayout): Boolean {
         var searchStartIndex = 0
-        for (letter in word) {
+        for (letter in word.lowercase()) {
             val key = layout.normalize(layout.centerOf(letter))
             val matchIndex = findNearestPointFrom(searchStartIndex, key, path)
             if (matchIndex == -1) return false
