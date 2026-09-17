@@ -68,6 +68,32 @@ class SessionCorrectionHistory {
         return edit
     }
 
+    /** Merges [firstId] and its immediate successor [secondId] into one entry reading [replacement]. */
+    fun join(firstId: Int, secondId: Int, replacement: String): WordReplacement? {
+        val firstIndex = entries.indexOfFirst { it.id == firstId }
+        if (firstIndex < 0) return null
+        val secondIndex = entries.indexOfFirst { it.id == secondId }
+        if (secondIndex != firstIndex + 1) return null
+        val first = entries[firstIndex]
+        val second = entries[secondIndex]
+        val edit = WordReplacement(first.id, first.start, second.end, first.current, replacement)
+        val delta = replacement.length - (second.end - first.start)
+        entries[firstIndex] = first.copy(
+            end = first.start + replacement.length,
+            current = replacement,
+            candidates = (listOf(replacement) + first.candidates + second.candidates).distinct(),
+            corrected = true,
+        )
+        entries.removeAt(secondIndex)
+        if (delta != 0) {
+            for (later in firstIndex + 1 until entries.size) {
+                val shifted = entries[later]
+                entries[later] = shifted.copy(start = shifted.start + delta, end = shifted.end + delta)
+            }
+        }
+        return edit
+    }
+
     fun undo(id: Int): WordReplacement? {
         val entry = entries.firstOrNull { it.id == id } ?: return null
         if (!entry.corrected) return null

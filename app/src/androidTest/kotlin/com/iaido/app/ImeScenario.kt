@@ -312,9 +312,30 @@ class ImeScenario(
         check(stripBounds.bottom <= surfaceBounds.top) {
             "Suggestion strip overlaps the keyboard surface: strip=$stripBounds surface=$surfaceBounds"
         }
+        // The strip auto-scrolls horizontally to keep the newest chip in view (see
+        // SuggestionStrip's LaunchedEffect(ordered.map { it.id }, rtl)), which can leave a chip
+        // this fallback is trying to reach (via a fixed offset off the strip's own left/leading
+        // edge -- the "Iaido suggestion $index" node isn't reliably findable before the first
+        // drag, a pre-existing accessibility-tree staleness condition) scrolled out of that fixed
+        // offset's reach. Reset the strip's own horizontal scroll to its start first, so the
+        // fixed-offset point below reliably lands on the leading chip regardless of how many
+        // chips or edge-anchored replacement-reel content the strip has accumulated.
+        val resetSwipeY = ((stripBounds.top + stripBounds.bottom) / 2f).toInt()
+        device.swipe(stripBounds.left + 4, resetSwipeY, stripBounds.right - 4, resetSwipeY, 12)
+        device.waitForIdle()
+        // The strip's own outer height is pinned to fit the tallest possible reel
+        // (MAX_REEL_VISIBLE_SLOTS), but each chip's own Row is only as tall as its actual
+        // alternative count needs (as little as one REEL_STEP_DP slot) and is top-aligned within
+        // that pinned strip -- so a chip with few alternatives (as short as one slot) sits in a
+        // narrow band near the strip's own top edge, not its vertical center. Targeting near that
+        // top edge (rather than the strip's center) both reliably lands within any chip's bounds,
+        // regardless of its height, and -- since the keyboard's own root view leaves very little
+        // room above the strip -- maximizes the vertical drag room available before hitting that
+        // root boundary, which a short chip needs to reach even one step past its own
+        // alternatives into an appended join candidate.
         val point = PointF(
             (stripBounds.left + 80f).coerceIn(stripBounds.left + 1f, stripBounds.right - 1f),
-            (stripBounds.top + stripBounds.bottom) / 2f,
+            stripBounds.top + 90f,
         )
         val safeDistance = verticalDistancePx.coerceIn(
             rootBounds.top.toFloat() - point.y,

@@ -39,12 +39,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.launch
@@ -76,12 +78,30 @@ fun SuggestionStrip(
     // their own internal centering.
     val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
     val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+    val bodyTextStyleKey = bodyStyle
 
     LaunchedEffect(ordered.map { it.id }, rtl) {
         if (ordered.isEmpty()) return@LaunchedEffect
         val leadingExtraItem = replacementOptions.isNotEmpty() && rtl
         val targetIndex = (if (leadingExtraItem) 1 else 0) + autoScrollTargetIndex(ordered.size, rtl)
         listState.animateScrollToItem(targetIndex)
+    }
+
+    val reservedWidths = remember(ordered, bodyTextStyleKey) {
+        ordered.map { chip ->
+            val word = chip.alternatives.getOrElse(chip.selectedIndex) { chip.alternatives.firstOrNull() ?: chip.word }
+            val measuredWidthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
+            chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
+        }
+    }
+    val joinAttachments = remember(chips, replacementOptions) {
+        attachJoinCandidates(chips, replacementOptions)
+    }
+    val orderedIdToIndex = remember(ordered) {
+        ordered.mapIndexed { i, orderedChip -> (orderedChip.id ?: -1) to i }.toMap()
     }
 
     LazyRow(
@@ -106,13 +126,44 @@ fun SuggestionStrip(
             }
         }
         itemsIndexed(ordered, key = { _, chip -> chip.id ?: -1 }) { index, chip ->
+            val chipId = chip.id ?: -1
+            val trailingJoin = joinAttachments.firstOrNull { it.firstChipId == chipId }
+            val leadingJoin = joinAttachments.firstOrNull { it.lastChipId == chipId }
+            val join = trailingJoin ?: leadingJoin
+            // The other chip this join spans to, if any -- looked up by its actual rendered
+            // position so the overlap direction is correct even when `ordered` is RTL-reversed.
+            val otherChipIndex = when {
+                trailingJoin != null -> orderedIdToIndex[trailingJoin.lastChipId]
+                leadingJoin != null -> orderedIdToIndex[leadingJoin.firstChipId]
+                else -> null
+            }
+            // With no join at this boundary, an oversized *same-chip* alternative still needs a
+            // neighbor to grow into: prefer the next (more-recently-typed-side) chip when one
+            // exists, otherwise the previous one, otherwise none (it just ellipsizes).
+            val growsForward = when {
+                otherChipIndex != null -> otherChipIndex > index
+                index + 1 < reservedWidths.size -> true
+                else -> false
+            }
+            val neighborReservedWidthDp = when {
+                otherChipIndex != null -> reservedWidths.getOrNull(otherChipIndex)
+                growsForward -> reservedWidths.getOrNull(index + 1)
+                else -> reservedWidths.getOrNull(index - 1)
+            }
             SuggestionChipView(
                 chip = chip,
                 index = index,
                 visibleSlotCount = visibleSlotCount,
                 modifier = Modifier.animateItem(),
+                reservedWidthDp = reservedWidths[index],
+                neighborReservedWidthDp = neighborReservedWidthDp,
+                growsForward = growsForward,
+                joinCandidate = join?.option,
                 onRelease = { candidate -> onRelease(index, candidate) },
                 onUndo = { onUndo(index) },
+                onReplacementPreview = onReplacementPreview,
+                onReplacementRelease = onReplacementRelease,
+                onReplacementCancel = onReplacementCancel,
             )
         }
         if (replacementOptions.isNotEmpty() && !rtl) {
@@ -258,19 +309,23 @@ private fun SuggestionChipView(
     index: Int,
     visibleSlotCount: Int,
     modifier: Modifier,
+    reservedWidthDp: Float,
+    neighborReservedWidthDp: Float?,
+    growsForward: Boolean,
+    joinCandidate: ReplacementOption?,
     onRelease: (Int) -> Unit,
     onUndo: () -> Unit,
+    onReplacementPreview: (ReplacementOption) -> Unit,
+    onReplacementRelease: (ReplacementOption) -> Unit,
+    onReplacementCancel: () -> Unit,
 ) {
-    val alternatives = chip.alternatives.ifEmpty { listOf(chip.word) }
-    val density = LocalDensity.current
-    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val selectedWord = alternatives.getOrElse(chip.selectedIndex) { alternatives.first() }
-    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
-    val reservedWidthDp = remember(selectedWord, bodyStyle) {
-        val measuredWidthPx = textMeasurer.measure(text = selectedWord, style = bodyStyle).size.width
-        val measuredWidthDp = with(density) { measuredWidthPx.toDp() }.value
-        chipReservedWidthDp(measuredWidthDp)
+    val baseAlternatives = chip.alternatives.ifEmpty { listOf(chip.word) }
+    val alternatives = if (joinCandidate != null) {
+        baseAlternatives + joinCandidate.replacementWords.joinToString(" ")
+    } else {
+        baseAlternatives
     }
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val stateKey = chip.id ?: index
     val reelOffset = remember(stateKey) { Animatable(0f) }
@@ -301,9 +356,18 @@ private fun SuggestionChipView(
         reelOffset.snapTo(0f)
     }
 
+    val displayedWord = alternatives.getOrNull(displayedIndex).orEmpty()
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val displayedWordWidthDp = remember(displayedWord) {
+        val widthPx = textMeasurer.measure(text = displayedWord, style = bodyStyle).size.width
+        with(density) { widthPx.toDp() }.value
+    }
+    val drawWidthDp = overflowDrawWidthDp(displayedWordWidthDp, reservedWidthDp, neighborReservedWidthDp)
+
     Row(
         modifier = modifier
-            .width(reservedWidthDp.dp)
+            .overflowGrow(reservedWidthDp, drawWidthDp, growsForward)
             .height(viewportHeight)
             .semantics(mergeDescendants = true) {
                 contentDescription = "Iaido suggestion $index"
@@ -338,7 +402,11 @@ private fun SuggestionChipView(
                         }
                         isDragging = false
                         if (shouldSelect) {
-                            onRelease(targetIndex)
+                            if (joinCandidate != null && targetIndex == baseAlternatives.size) {
+                                onReplacementRelease(joinCandidate)
+                            } else {
+                                onRelease(targetIndex)
+                            }
                         }
                         scope.launch {
                             reelOffset.snapTo(releaseOffset)
@@ -436,6 +504,32 @@ private fun SuggestionChipView(
         }
     }
 }
+
+/**
+ * Measures [content] at [drawWidthDp] (which may exceed [reservedWidthDp]) but reports
+ * [reservedWidthDp] as this element's layout size, so siblings in the parent layout are never
+ * disturbed by the overflow. When [drawWidthDp] is wider than [reservedWidthDp], the content is
+ * drawn at an elevated z-index so it paints over the neighbor it overlaps instead of underneath
+ * it, anchored on the side given by [growsForward] (true: overflow extends past the element's
+ * trailing/end edge; false: past its leading/start edge).
+ */
+private fun Modifier.overflowGrow(
+    reservedWidthDp: Float,
+    drawWidthDp: Float,
+    growsForward: Boolean,
+): Modifier = this
+    .zIndex(if (drawWidthDp > reservedWidthDp) 1f else 0f)
+    .layout { measurable, constraints ->
+        val reservedWidthPx = reservedWidthDp.dp.roundToPx()
+        val drawWidthPx = drawWidthDp.dp.roundToPx()
+        val placeable = measurable.measure(
+            constraints.copy(minWidth = drawWidthPx, maxWidth = drawWidthPx),
+        )
+        layout(reservedWidthPx, placeable.height) {
+            val x = if (growsForward) 0 else reservedWidthPx - drawWidthPx
+            placeable.place(x, 0)
+        }
+    }
 
 private const val REEL_STEP_DP = 36f
 private const val DRAG_THRESHOLD_DP = 12f

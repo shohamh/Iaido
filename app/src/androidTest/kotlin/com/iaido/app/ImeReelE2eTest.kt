@@ -113,4 +113,47 @@ class ImeReelE2eTest {
             }
         }
     }
+
+    /**
+     * Uses the same [ImeScenarioData.AutoSpaceFixture.JOIN_REEL] fixture as
+     * [ImeInferenceE2eTest]'s existing join coverage, rather than the real shipped dictionary:
+     * the real dictionary gives "in"/"to" (and "wh"/"at") 8-16 single-word alternatives each,
+     * which the swipe surface's own limited vertical gesture room (the keyboard's root view
+     * leaves only ~150px above the strip -- confirmed empirically, well under one
+     * [MAX_REEL_VISIBLE_SLOTS]-worth of steps) cannot physically overshoot past in one synthetic
+     * drag. The fixture's tiny dictionary ("in", "to", "into" -- see
+     * `app/src/debug/assets/auto-space-fixtures.txt`) gives each word exactly one real
+     * alternative (itself), so one step reliably reaches the appended join slot -- except for a
+     * sentence-initial word, which always additionally carries its own lowercase variant as a
+     * second candidate (from `SentenceCapitalization`), pushing it one step out of reach; typing
+     * a preceding "X " prefix first (matching `ImeInferenceE2eTest.enableInferenceAndPrefix`)
+     * avoids that by keeping "in" mid-sentence.
+     */
+    @Test
+    fun scrollingPastAChipsLastAlternativeCommitsTheJoinedWord() {
+        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.JOIN_REEL).also(artifacts::track).run {
+            tapKey("x")
+            tapSpace()
+            swipeWord("in")
+            tapSpace()
+            swipeWord("to")
+            tapSpace()
+            val before = state().expectedText
+            // The pure-typing accessibility tree is stale before the first reel gesture (a
+            // documented, pre-existing condition -- see stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords's
+            // @Ignore above), so locateReelSwipeTarget falls back to a fixed offset from the
+            // strip's own left edge, after first resetting the strip's horizontal scroll position
+            // (the strip's auto-scroll-to-newest-chip behavior would otherwise leave the leading
+            // chip scrolled out of that fixed offset's reach) -- landing on the first ("in") chip.
+            val after = swipeSuggestion(index = 0, verticalDistancePx = -1500f)
+            check(after != before) { "Scrolling past the chip's alternatives did not commit the join: '$before'" }
+            check(after.trim() == "X into") { "Expected the joined word 'into', got '$after'" }
+            val device = androidx.test.uiautomator.UiDevice.getInstance(
+                androidx.test.InstrumentationRegistry.getInstrumentation(),
+            )
+            check(device.findObject(androidx.test.uiautomator.By.desc("Iaido suggestion 1")) == null) {
+                "Second source chip is still present after the join committed"
+            }
+        }
+    }
 }

@@ -62,6 +62,63 @@ class SessionCorrectionHistoryTest {
     }
 
     @Test
+    fun `joining two adjacent entries produces one entry with the combined span and text`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 2, "wh", listOf("wh"))
+        val second = history.record(3, 5, "at", listOf("at"))
+
+        val edit = history.join(first, second, "what")
+
+        assertEquals(0, edit?.start)
+        assertEquals(5, edit?.end)
+        assertEquals("wh", edit?.before)
+        assertEquals("what", edit?.after)
+        assertEquals(1, history.words().size)
+        val merged = history.words().single()
+        assertEquals(first, merged.id)
+        assertEquals(0, merged.start)
+        assertEquals(4, merged.end)
+        assertEquals("what", merged.current)
+        assertEquals(null, history.words().firstOrNull { it.id == second })
+    }
+
+    @Test
+    fun `joining shifts later entries' positions by the length delta`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 2, "wh", listOf("wh"))
+        val second = history.record(3, 5, "at", listOf("at"))
+        val later = history.record(6, 11, "world", listOf("world"))
+
+        history.join(first, second, "what")
+
+        // "wh"+"at" (span 0..5, i.e. "wh at") becomes "what" (length 4): delta = 4 - 5 = -1.
+        assertEquals(5, history.words().single { it.id == later }.start)
+        assertEquals(10, history.words().single { it.id == later }.end)
+    }
+
+    @Test
+    fun `joining non-adjacent ids returns null and changes nothing`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 2, "wh", listOf("wh"))
+        history.record(3, 5, "at", listOf("at"))
+        val third = history.record(6, 8, "hi", listOf("hi"))
+
+        assertNull(history.join(first, third, "whhi"))
+        assertEquals(3, history.words().size)
+    }
+
+    @Test
+    fun `joining an unknown id returns null`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 2, "wh", listOf("wh"))
+        history.record(3, 5, "at", listOf("at"))
+
+        assertNull(history.join(first, 999, "what"))
+        assertNull(history.join(999, first, "what"))
+        assertEquals(2, history.words().size)
+    }
+
+    @Test
     fun `deleting a range removes intersecting words and shifts later ranges`() {
         val history = SessionCorrectionHistory()
         history.record(0, 3, "one", listOf("one"))

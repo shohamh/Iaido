@@ -156,7 +156,7 @@ class IaidoInputMethodService : InputMethodService() {
             },
             pollSplitParts = splitController::pollParts,
             isSplitPending = splitController::isPending,
-            onReplacementOptionsChanged = { options -> replacementOptions.value = options },
+            onReplacementOptionsChanged = { options -> replacementOptions.value = mergedReplacementOptions(options) },
         )
     }
 
@@ -323,7 +323,7 @@ class IaidoInputMethodService : InputMethodService() {
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
                     onReplacementPreview = swipeTypingCoordinator::previewReplacement,
-                    onReplacementRelease = swipeTypingCoordinator::releaseReplacement,
+                    onReplacementRelease = ::releaseReplacementOption,
                     onReplacementCancel = swipeTypingCoordinator::cancelReplacement,
                     onBackspaceRepeat = {
                         swipeTypingCoordinator.onNonSwipeInput()
@@ -620,6 +620,36 @@ class IaidoInputMethodService : InputMethodService() {
                 id = word.id,
             )
         }
+        replacementOptions.value = mergedReplacementOptions(swipeTypingCoordinator.replacementOptions())
+    }
+
+    private fun mergedReplacementOptions(liveOptions: List<ReplacementOption>): List<ReplacementOption> =
+        (liveOptions + historyJoinCandidates(correctionHistory.aroundCursor(cursorPosition), activeDictionary()))
+            .distinctBy(ReplacementOption::id)
+
+    private fun joinSessionWords(firstId: Int, secondId: Int, replacement: String): Boolean {
+        val inputConnection = currentInputConnection ?: return false
+        val words = correctionHistory.words()
+        val first = words.firstOrNull { it.id == firstId } ?: return false
+        val second = words.firstOrNull { it.id == secondId } ?: return false
+        if (!inputConnection.setSelection(first.start, second.end)) return false
+        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(first.start, second.end, replacement)
+        if (!inputConnection.commitText(replacement, 1)) return false
+        correctionHistory.join(firstId, secondId, replacement)
+        cursorPosition = first.start + replacement.length
+        inputConnection.setSelection(cursorPosition, cursorPosition)
+        refreshSuggestionChips()
+        return true
+    }
+
+    private fun releaseReplacementOption(option: ReplacementOption): Boolean {
+        val historyMatch = correctionHistory.aroundCursor(cursorPosition).zipWithNext()
+            .firstOrNull { (first, second) -> listOf(first.current, second.current) == option.sourceWords }
+        if (historyMatch != null) {
+            val (first, second) = historyMatch
+            return joinSessionWords(first.id, second.id, option.replacementWords.joinToString(" "))
+        }
+        return swipeTypingCoordinator.releaseReplacement(option)
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
