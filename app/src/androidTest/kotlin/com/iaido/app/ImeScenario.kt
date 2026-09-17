@@ -293,7 +293,29 @@ class ImeScenario(
     }
 
     private fun tryLocateReelSwipeTarget(index: Int, verticalDistancePx: Float): ReelSwipeTarget {
-        val suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+        var suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+        if (suggestion == null) {
+            // Not found here can mean two different things: the accessibility tree is merely
+            // stale (a node exists on screen but UiAutomator hasn't published it -- the case the
+            // fixed-offset fallback below exists for), or the word genuinely hasn't finalized into
+            // a SuggestionChip/correctionHistory entry yet, so there is no chip node to find at
+            // all -- confirmed via dumpWindowHierarchy immediately after a plain single-word swipe:
+            // neither "Iaido suggestion 0" nor any "Iaido replacement:" node is published, and the
+            // host editor still shows the bare swiped word. The live swipe-typing transaction can
+            // stay open indefinitely until some real external event finalizes it (see
+            // SwipeTypingCoordinator's onCursorMoved/onExternalEdit), and nothing else in a plain
+            // reel-correction test provides that trigger. Nudge the host editor's cursor with its
+            // own "cursor left" control (a real external selection change, the same one
+            // moveCursorLeft() elsewhere in this file uses deliberately for this purpose) to force
+            // that finalize, then try again before falling back to geometry. This leaves the
+            // cursor one position left of where it was, but that's harmless here: every caller of
+            // this function re-reads the cursor from the editor *after* the reel drag it's about
+            // to perform actually commits a change, rather than trusting a position recorded
+            // beforehand.
+            editor.moveCursorLeft()
+            device.waitForIdle()
+            suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+        }
         if (suggestion != null) {
             val bounds = suggestion.visibleBounds
             return ReelSwipeTarget(

@@ -39,33 +39,31 @@ class ImeReelE2eTest {
     }
 
     /**
-     * Exercises the fix in realistic usage but does not definitively pin the two-word bug this
-     * scenario was originally aimed at. The fallback gesture in [swipeSuggestion] finalizes the
-     * swipe-typing transaction before the assertion runs, clearing replacementOptions regardless
-     * of whether the SuggestionStrip.kt early-return bug is present — so this test only confirms
-     * that a correction chip remains addressable (findable via its content description) after a
-     * single reel-based correction, in this specific single-word gesture sequence.
-     *
-     * A real two-word version (`swipeWord("there") -> tapSpace() -> swipeWord("world")`, asserting
-     * chip 0 stays visible) was tried and reliably reproduces the bug pre-fix, but does not reach
-     * green post-fix: investigation found the app's actual state (replacementOptions/sessionChips)
-     * updates correctly through all transitions, but the suggestion strip's accessibility-tree
-     * semantics description freezes on its first-ever value and never updates for the rest of the
-     * test — a separate bug, isolated to the strip's semantics subtree (the real editor text and
-     * the app's Compose state are both correct). Whether this is a genuine TalkBack-facing bug or
-     * an artifact of how UiAutomator observes an InputMethodService window's accessibility tree is
-     * not yet determined. Tracked as a follow-up; see SuggestionStrip.kt's ReplacementReelSlot/
-     * ReplacementReelGroup composables and their semantics {} blocks as the likely starting point.
+     * "Remains addressable" is verified by actually addressing it again -- dragging chip 0's own
+     * reel a second time and confirming the text changes once more -- rather than by asking
+     * UiAutomator whether an "Iaido suggestion 0" node exists. That direct lookup was tried first
+     * and is not reliable here: even with the transaction now correctly finalizing before the
+     * drag (see tryLocateReelSwipeTarget's own cursor nudge, kept for a real, separate
+     * landing-on-the-wrong-candidate bug it fixes in the geometric fallback) and the drag itself
+     * confirmed to commit a genuine single-word candidate, a dumpWindowHierarchy taken right after
+     * still shows the whole suggestion strip as a bare leaf with zero published children, and
+     * neither an extra settle delay nor a 15s/dozens-of-attempts poll loop changes that -- the
+     * same pre-existing accessibility-tree staleness already documented on
+     * stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords below. swipeSuggestion's own
+     * geometric fallback doesn't depend on that lookup succeeding (see
+     * correctionReelScrollsCommitsAndRemembersTheReleasedCandidate, which drags the same chip
+     * twice in a row and passes reliably), so reusing it here proves the chip is still there and
+     * responsive without hitting the broken lookup at all.
      */
     @Test
     fun correctionChipRemainsAddressableAfterAReelCorrection() {
-        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")
-            swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            device.waitForIdle()
-            check(device.findObject(By.desc("Iaido suggestion 0")) != null) {
-                "First word's correction chip disappeared while a later word's swipe reel is active"
+            val afterFirst = swipeSuggestion(index = 0, verticalDistancePx = -96f)
+            val afterSecond = swipeSuggestion(index = 0, verticalDistancePx = -96f)
+            check(afterSecond != afterFirst) {
+                "Correction chip did not respond to a second reel drag ('$afterFirst' -> " +
+                    "'$afterSecond'); it may have disappeared or stopped being addressable"
             }
         }
     }
