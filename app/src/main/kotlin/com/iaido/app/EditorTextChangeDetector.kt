@@ -38,12 +38,7 @@ class EditorTextChangeDetector {
         val edit = singleEdit(before.text, snapshot.text)
         val expectedEdit = expected
         expected = null
-        if (
-            expectedEdit != null &&
-            expectedEdit.start == before.offset + edit.start &&
-            expectedEdit.end == before.offset + edit.end &&
-            expectedEdit.replacement == edit.replacement
-        ) return null
+        if (expectedEdit != null && appliesTo(expectedEdit, before) == snapshot.text) return null
 
         val token = wordRangeAround(before.text, edit.start) ?: return null
         val original = before.text.substring(token.first, token.last + 1)
@@ -56,6 +51,21 @@ class EditorTextChangeDetector {
             original = original,
             replacement = replacement,
         )
+    }
+
+    /**
+     * Reconstructs the text [edit] would produce when applied to [before], or null if [edit]'s
+     * range doesn't fit inside [before]. Comparing the reconstructed string to the observed
+     * snapshot (rather than comparing [edit]'s bounds to [singleEdit]'s minimal diff region) is
+     * what lets this recognize an expected edit whose replacement shares a prefix or suffix with
+     * the text it replaces -- e.g. replacing "in" with "in to" -- since [singleEdit] trims that
+     * shared prefix/suffix and reports a smaller region than the one that was actually replaced.
+     */
+    private fun appliesTo(edit: ExpectedEdit, before: EditorSnapshot): String? {
+        val localStart = edit.start - before.offset
+        val localEnd = edit.end - before.offset
+        if (localStart < 0 || localEnd < localStart || localEnd > before.text.length) return null
+        return before.text.substring(0, localStart) + edit.replacement + before.text.substring(localEnd)
     }
 
     private data class TextEdit(val start: Int, val end: Int, val replacement: String)

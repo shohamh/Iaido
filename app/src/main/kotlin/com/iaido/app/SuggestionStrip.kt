@@ -288,9 +288,22 @@ private fun ReplacementReelGroup(
                         dragY += amount
                     },
                     onDragEnd = {
+                        // `previewIndex` above is a composable-scope `val`, recomputed only when
+                        // this function recomposes -- but this whole `pointerInput(stateKey,
+                        // selectedIndex)` block (and every lambda inside it, onDragEnd included)
+                        // is only re-created when those keys change, not on every recomposition
+                        // driven by `dragY` changing during the drag itself. So `previewIndex` as
+                        // captured here is stale: it reflects whatever it was when this gesture
+                        // detector was (re)established (typically 0, from before the drag ever
+                        // moved), not the index actually shown to the user at release time.
+                        // Recomputing it fresh from `dragY` (a live State read, unlike the `val`
+                        // above) is what makes the committed option match the previewed one --
+                        // mirroring the `rememberUpdatedState` pattern SuggestionChipView already
+                        // uses for the same reason (see its `latestDragOffset`).
+                        val releasePreviewIndex = displayedReelIndex(selectedIndex, dragY / stepPx, options.lastIndex)
                         val shouldCommit = abs(dragY) >= thresholdPx || options.size == 1
                         isDragging = false
-                        if (shouldCommit) onRelease(options[previewIndex]) else onCancel()
+                        if (shouldCommit) onRelease(options[releasePreviewIndex]) else onCancel()
                         dragY = 0f
                     },
                     onDragCancel = {

@@ -43,6 +43,14 @@ internal class ReplacementReelSelection(
     var isPreviewing: Boolean = false
         private set
 
+    // Snapshot of selectedOptionId from just before the *current* preview session started (taken
+    // once, on the first preview() call after isPreviewing was false) -- restored by cancel() so
+    // an abandoned drag leaves the reel showing whatever it showed before that drag began, rather
+    // than permanently remembering the highest index the (cancelled) drag happened to reach. A
+    // released drag intentionally does NOT restore this: committing IS meant to move the
+    // remembered selection forward.
+    private var idBeforePreview: String? = initialSelectedOptionId
+
     fun updateOptions(options: List<ReplacementOption>) {
         this.options = options
         if (selectedOptionId != null && options.none { it.id == selectedOptionId }) {
@@ -65,10 +73,12 @@ internal class ReplacementReelSelection(
         options.firstOrNull { it.id == option.id }?.also(::selectRelease)
 
     fun cancel() {
+        if (isPreviewing) selectedOptionId = idBeforePreview
         isPreviewing = false
     }
 
     private fun selectPreview(option: ReplacementOption) {
+        if (!isPreviewing) idBeforePreview = selectedOptionId
         selectedOptionId = option.id
         isPreviewing = true
     }

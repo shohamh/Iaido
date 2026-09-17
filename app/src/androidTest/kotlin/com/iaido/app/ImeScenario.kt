@@ -47,6 +47,9 @@ data class PathTransform(
     val cancelAfterPoint: Int? = null,
 )
 
+/** Mirrors SuggestionStrip.kt's private REEL_STEP_DP -- the reel's own per-candidate drag step. */
+private const val REPLACEMENT_REEL_STEP_DP = 36f
+
 class ImeScenario(
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
     private val autoSpaceFixture: ImeScenarioData.AutoSpaceFixture? = null,
@@ -56,6 +59,8 @@ class ImeScenario(
     private val system = ImeSystemController(instrumentation, device, automation)
     private val pointer = PointerInjector(automation)
     private val editor = ImeEditorDriver(device, pointer, instrumentation.targetContext.packageName)
+    private val density: Float
+        get() = instrumentation.targetContext.resources.displayMetrics.density
     private val trace = mutableListOf<ImeScenarioEvent>()
     private var pendingGestureSeed: Long? = null
     private var pendingPointerEvents: List<InjectedPointerEvent> = emptyList()
@@ -810,29 +815,67 @@ class ImeScenario(
         error("Timed out waiting for $description")
     }
 
+    /**
+     * Resolves the edge-anchored replacement reel's bounds, falling back to a fixed offset off
+     * the suggestion strip's own leading edge when the reel's own accessibility node isn't found
+     * -- this strip's LazyRow items, like suggestion chips (see [tryLocateReelSwipeTarget]), never
+     * publish to UiAutomator's accessibility tree before this reel is itself the thing being
+     * dragged (confirmed: neither a probe tap nor polling mid-drag via
+     * [By.descStartsWith] finds it -- the tree simply never gains this node until well after a
+     * completed gesture, if at all, so [By.descStartsWith] can't be used to locate or verify it
+     * at any point up to and including the drag itself). Both current call sites reach this while
+     * no suggestion chips exist yet (the replacement is still part of the live, uncommitted
+     * swipe-typing transaction), so the reel is always the strip's leading (and only) item -- the
+     * same fixed offset [tryLocateReelSwipeTarget] uses to reach a leading chip.
+     */
+    private fun locateReplacementReelBounds(targetDescription: String): android.graphics.Rect {
+        device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
+        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+            ?: error("Missing suggestion strip before previewing '$targetDescription'")
+        val stripBounds = strip.visibleBounds
+        return android.graphics.Rect(
+            (stripBounds.left + 20).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+            stripBounds.top + 10,
+            (stripBounds.left + 140).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+            stripBounds.top + 170,
+        )
+    }
+
     private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
         val targetDescription = "Iaido replacement: $sourceWords source " +
             (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
             (if (replacementWords == 1) "word" else "words")
-        waitUntil("replacement reel before previewing '$targetDescription'") {
-            device.findObject(By.descStartsWith("Iaido replacement:")) != null
-        }
-        val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
-            ?: error("Missing replacement reel before previewing '$targetDescription'")
-        val bounds = reel.visibleBounds
+        val bounds = locateReplacementReelBounds(targetDescription)
+        // Both current call sites want the reel to move exactly one step from its resting
+        // position (index 0, the top/identity candidate) to index 1 -- the alternative right next
+        // to it, whatever that alternative's shape (a fixture can offer more than just an
+        // identity/target pair, e.g. SPLIT_REEL's "inthe"/"in the"/"the"/"in", so overshooting
+        // even one extra step lands on the wrong one). A fixed pixel offset (as this used before)
+        // doesn't reliably clear ReplacementReelGroup's own DRAG_THRESHOLD_DP touch-slop-like
+        // consumption while also staying under two full REEL_STEP_DP steps, so this computes the
+        // distance from the reel's own step size directly -- comfortably past one step's worth of
+        // travel (>0.5 steps) while well short of two (<1.5 steps) once slop is consumed.
+        val stepPx = REPLACEMENT_REEL_STEP_DP * density
+        val dragDistancePx = stepPx * 1.25f
         val points = listOf(
             PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
-            PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 88f),
+            PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f - dragDistancePx),
         )
         pendingPointerEvents = pointer.injectScreenSwipe(
             points = points,
             cancel = cancel,
             holdBeforeMoveMs = 520L,
             onEvent = { event ->
+                // This reel's own accessibility node -- like a suggestion chip's (see
+                // locateReplacementReelBounds/tryLocateReelSwipeTarget) -- never publishes to
+                // UiAutomator's tree, even while it's the one actively being dragged (confirmed:
+                // polling `By.descStartsWith("Iaido replacement:")` mid-drag here returns null for
+                // the whole gesture), so this only gives Compose a moment to process the move
+                // before the gesture continues, rather than confirming the preview via the a11y
+                // tree. The caller verifies the actual outcome afterward via the committed text.
                 if (event.action == android.view.MotionEvent.ACTION_MOVE) {
-                    waitUntil("replacement reel '$targetDescription'") {
-                        device.findObject(By.descStartsWith(targetDescription)) != null
-                    }
+                    device.waitForIdle()
+                    SystemClock.sleep(150L)
                 }
             },
         )
