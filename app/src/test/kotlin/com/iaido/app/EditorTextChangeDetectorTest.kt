@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
@@ -25,5 +26,25 @@ class EditorTextChangeDetectorTest {
         detector.expectOwnEdit(start = 5, end = 5, replacement = " world")
 
         assertNull(detector.observe(EditorSnapshot("hello world", selectionStart = 11, selectionEnd = 11)))
+    }
+
+    @Test
+    fun `own edit whose replacement shares a prefix with the replaced text is still consumed without producing a candidate`() {
+        val detector = EditorTextChangeDetector()
+        detector.reset(EditorSnapshot("X in", selectionStart = 4, selectionEnd = 4))
+        detector.expectOwnEdit(start = 2, end = 4, replacement = "in to")
+
+        assertNull(detector.observe(EditorSnapshot("X in to", selectionStart = 7, selectionEnd = 7)))
+    }
+
+    @Test
+    fun `a genuine external edit after a same-length own edit is still detected`() {
+        val detector = EditorTextChangeDetector()
+        detector.reset(EditorSnapshot("X in", selectionStart = 4, selectionEnd = 4))
+        detector.expectOwnEdit(start = 2, end = 4, replacement = "in to")
+
+        val candidate = detector.observe(EditorSnapshot("X to", selectionStart = 4, selectionEnd = 4))
+
+        assertNotNull(candidate)
     }
 }

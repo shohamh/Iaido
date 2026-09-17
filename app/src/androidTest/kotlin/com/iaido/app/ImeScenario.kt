@@ -845,22 +845,38 @@ class ImeScenario(
      * dragged (confirmed: neither a probe tap nor polling mid-drag via
      * [By.descStartsWith] finds it -- the tree simply never gains this node until well after a
      * completed gesture, if at all, so [By.descStartsWith] can't be used to locate or verify it
-     * at any point up to and including the drag itself). Both current call sites reach this while
-     * no suggestion chips exist yet (the replacement is still part of the live, uncommitted
-     * swipe-typing transaction), so the reel is always the strip's leading (and only) item -- the
-     * same fixed offset [tryLocateReelSwipeTarget] uses to reach a leading chip.
+     * at any point up to and including the drag itself). The fixed-offset fallback assumes the
+     * reel is the strip's leading (and only) item, which is only true while no suggestion chips
+     * exist yet -- a live join can coexist with chips (see the round-2 investigation that added
+     * the liveReplacementOptionIds filter), and under RTL the reel renders as the strip's
+     * *trailing* item, not leading. So this actively checks for a leading chip (not just assumes
+     * its absence) and fails loudly, naming what it did and didn't find, rather than silently
+     * dragging the wrong element and producing a confusing text-mismatch failure downstream.
      */
     private fun locateReplacementReelBounds(targetDescription: String): android.graphics.Rect {
-        device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
-        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
-            ?: error("Missing suggestion strip before previewing '$targetDescription'")
-        val stripBounds = strip.visibleBounds
-        return android.graphics.Rect(
-            (stripBounds.left + 20).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
-            stripBounds.top + 10,
-            (stripBounds.left + 140).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
-            stripBounds.top + 170,
-        )
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (true) {
+            device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
+            val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+            val leadingChipExists = device.findObject(By.desc("Iaido suggestion 0")) != null
+            if (strip != null && !leadingChipExists) {
+                val stripBounds = strip.visibleBounds
+                return android.graphics.Rect(
+                    (stripBounds.left + 20).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+                    stripBounds.top + 10,
+                    (stripBounds.left + 140).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+                    stripBounds.top + 170,
+                )
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                error(
+                    "Timed out waiting for replacement reel before previewing '$targetDescription' " +
+                        "(strip found=${strip != null}, leading chip present=$leadingChipExists)",
+                )
+            }
+            device.waitForIdle()
+            SystemClock.sleep(50L)
+        }
     }
 
     private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
