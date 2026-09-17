@@ -60,6 +60,12 @@ class IaidoInputMethodService : InputMethodService() {
     private val editorTextChangeDetector = EditorTextChangeDetector()
     private var textObservationEnabled = false
     private var visibleWordIds: List<Int> = emptyList()
+    // Recomputed only when correctionHistory actually changes (inside refreshSuggestionChips()),
+    // not on every mergedReplacementOptions() call -- a live reel-drag preview fires
+    // onReplacementOptionsChanged on every frame but never touches correctionHistory, so
+    // recomputing this (a full activeDictionary() rebuild plus a fresh lowercase index) on every
+    // preview frame would be a hot-path regression with no correctness benefit.
+    private var cachedHistoryJoinCandidates: List<ReplacementOption> = emptyList()
     private var cursorPosition = 0
     private var pendingCandidates: List<String>? = null
     private var lastDeletedWord: String? = null
@@ -620,12 +626,12 @@ class IaidoInputMethodService : InputMethodService() {
                 id = word.id,
             )
         }
+        cachedHistoryJoinCandidates = historyJoinCandidates(words, activeDictionary())
         replacementOptions.value = mergedReplacementOptions(swipeTypingCoordinator.replacementOptions())
     }
 
     private fun mergedReplacementOptions(liveOptions: List<ReplacementOption>): List<ReplacementOption> =
-        (liveOptions + historyJoinCandidates(correctionHistory.aroundCursor(cursorPosition), activeDictionary()))
-            .distinctBy(ReplacementOption::id)
+        (liveOptions + cachedHistoryJoinCandidates).distinctBy(ReplacementOption::id)
 
     private fun joinSessionWords(firstId: Int, secondId: Int, replacement: String): Boolean {
         val inputConnection = currentInputConnection ?: return false
