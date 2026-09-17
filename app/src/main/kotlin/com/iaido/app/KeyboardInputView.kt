@@ -105,6 +105,7 @@ fun KeyboardInputView(
         val columnCount = if (language == Language.HEBREW) 11 else KEYBOARD_COLUMN_COUNT
         val keySizePx = widthPx / columnCount
         val keySize = with(density) { keySizePx.toDp() }
+        val keyHeight = with(density) { keyboardKeyHeightPx(keySizePx).toDp() }
         val bottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
         val surfaceHeightPx = keyboardSurfaceHeightPx(keySizePx)
         val contentHeightPx = imeContentHeightPx(keySizePx, bottomInsetPx)
@@ -425,11 +426,11 @@ fun KeyboardInputView(
                         letters = row,
                         offset = keySize * keyboardRowOffsetUnits(row.length, columnCount),
                         y = keySize * index,
-                        keySize = keySize,
+                        keySize = keyHeight,
                         pressedKey = startKey,
                     )
                 }
-                KeyboardBottomRow(keySize, language, pressedKey = startKey)
+                KeyboardBottomRow(keyHeight, language, pressedKey = startKey)
                 val trailColor = MaterialTheme.colorScheme.primary
                 Canvas(modifier = Modifier.fillMaxWidth().height(keySize * KEYBOARD_ROW_COUNT)) {
                     drawSwipeTrail(trailPoints, trailColor)
@@ -457,7 +458,7 @@ private fun KeyboardRow(
             KeyboardKey(
                 label = letter.toString().uppercase(),
                 width = keySize - gap,
-                height = keySize - gap,
+                height = keySize,
                 pressed = pressedKey == letter.toString(),
                 number = numberFor(letter),
                 testKey = letter.toString(),

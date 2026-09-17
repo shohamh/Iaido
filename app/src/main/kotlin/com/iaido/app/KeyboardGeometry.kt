@@ -9,7 +9,7 @@ internal fun keyboardRowOffsetUnits(rowLength: Int, columnCount: Int = KEYBOARD_
 internal fun keyboardSurfaceHeightPx(keySizePx: Float, rowCount: Int = KEYBOARD_ROW_COUNT): Float =
     keySizePx * rowCount
 
-internal fun keyboardRowHeightPx(keySizePx: Float): Float = keySizePx
+internal fun keyboardKeyHeightPx(keySizePx: Float): Float = keySizePx
 
 internal fun imeContentHeightPx(keySizePx: Float, bottomInsetPx: Float): Float =
     keyboardSurfaceHeightPx(keySizePx) + bottomInsetPx.coerceAtLeast(0f)
