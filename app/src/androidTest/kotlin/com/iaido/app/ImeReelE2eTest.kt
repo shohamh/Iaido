@@ -156,4 +156,42 @@ class ImeReelE2eTest {
             }
         }
     }
+
+    @Ignore(
+        "The core premise of this test can't be automated with the current harness: LazyRow items " +
+            "in this strip only publish to the accessibility tree when directly touched, never from " +
+            "touching a sibling (confirmed via UiDevice.dumpWindowHierarchy after dragging an " +
+            "unrelated chip to a real alternative -- only that chip's own subtree appeared; neither " +
+            "the untouched 'wh'/'at' chips nor the replacement-slot item showed up anywhere in the " +
+            "tree, even after a 10s/40-attempt poll). Asserting the edge slot's *absence* here would " +
+            "require touching that very node first (as dragReplacement/previewReplacementThenCancel " +
+            "already do for the pre-existing split/join edge-slot tests), which is circular for a " +
+            "negative assertion, and no 'touch without changing the word' primitive exists for a " +
+            "chip's own reel (swipeSuggestion blocks until the editor text changes, and this " +
+            "fixture's chip has only two alternatives -- itself and the join -- so there is no safe " +
+            "landing spot that leaves the wh/at join pairing intact). Manually verified instead " +
+            "(before/after screenshots): before the SuggestionStrip.kt fix, the edge slot shows the " +
+            "join for two already-committed chips; after the fix, it does not. See the Task 9 report " +
+            "(.superpowers/sdd/2026-09-16-suggestion-reel-redesign/task-9-report.md) for the " +
+            "screenshots and full diagnosis. " +
+            "ImeInferenceE2eTest.inferenceOffersJoinedReelThenCommitsItOnReleaseAndKeepsCursorAtTheEnd " +
+            "is the real, automated regression coverage for this behavior's other half (a still-live " +
+            "join must stay in the edge slot) -- it drives the edge slot node directly, so it isn't " +
+            "affected by this staleness limitation.",
+    )
+    @Test
+    fun theEdgeAnchoredReplacementSlotNoLongerAppearsForAJoinCandidate() {
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("wh")
+            tapSpace()
+            swipeWord("at")
+            val device = androidx.test.uiautomator.UiDevice.getInstance(
+                androidx.test.InstrumentationRegistry.getInstrumentation(),
+            )
+            device.waitForIdle()
+            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido replacement:")) == null) {
+                "The old edge-anchored replacement slot is still rendered for a join candidate"
+            }
+        }
+    }
 }

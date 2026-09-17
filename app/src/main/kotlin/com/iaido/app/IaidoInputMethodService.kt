@@ -55,6 +55,11 @@ class IaidoInputMethodService : InputMethodService() {
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
+    // Ids of replacement options currently produced by the live SwipeTypingCoordinator
+    // transaction, as opposed to history-derived joins -- used only to decide whether a
+    // join-shaped option still belongs in the edge-anchored ReplacementReelSlot (a still-live join
+    // must stay there even once a matching chip pair also exists; see SuggestionStrip.kt).
+    private val liveReplacementOptionIds = mutableStateOf<Set<String>>(emptySet())
     private val splitPreview = mutableStateOf<String?>(null)
     private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
     private val editorTextChangeDetector = EditorTextChangeDetector()
@@ -162,7 +167,10 @@ class IaidoInputMethodService : InputMethodService() {
             },
             pollSplitParts = splitController::pollParts,
             isSplitPending = splitController::isPending,
-            onReplacementOptionsChanged = { options -> replacementOptions.value = mergedReplacementOptions(options) },
+            onReplacementOptionsChanged = { options ->
+                liveReplacementOptionIds.value = options.map { it.id }.toSet()
+                replacementOptions.value = mergedReplacementOptions(options)
+            },
         )
     }
 
@@ -326,6 +334,7 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     suggestionChips = sessionChips.value,
                     replacementOptions = replacementOptions.value,
+                    liveReplacementOptionIds = liveReplacementOptionIds.value,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
                     onReplacementPreview = swipeTypingCoordinator::previewReplacement,
@@ -627,7 +636,9 @@ class IaidoInputMethodService : InputMethodService() {
             )
         }
         cachedHistoryJoinCandidates = historyJoinCandidates(words, activeDictionary())
-        replacementOptions.value = mergedReplacementOptions(swipeTypingCoordinator.replacementOptions())
+        val live = swipeTypingCoordinator.replacementOptions()
+        liveReplacementOptionIds.value = live.map { it.id }.toSet()
+        replacementOptions.value = mergedReplacementOptions(live)
     }
 
     private fun mergedReplacementOptions(liveOptions: List<ReplacementOption>): List<ReplacementOption> =

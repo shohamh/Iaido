@@ -59,6 +59,7 @@ fun SuggestionStrip(
     chips: List<SuggestionChip>,
     rtl: Boolean,
     replacementOptions: List<ReplacementOption> = emptyList(),
+    liveReplacementOptionIds: Set<String> = emptySet(),
     onRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onUndo: (chipIndex: Int) -> Unit = {},
     onReplacementPreview: (ReplacementOption) -> Unit = {},
@@ -68,7 +69,24 @@ fun SuggestionStrip(
     val ordered = if (rtl) chips.asReversed() else chips
     val chipSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
         ?: reelVisibleSlotCount(0)
-    val replacementSlotCount = if (replacementOptions.isEmpty()) 0 else reelVisibleSlotCount(replacementOptions.size)
+    // The edge-anchored slot only ever hides a join-shaped option once it is no longer part of
+    // the live SwipeTypingCoordinator transaction (a history-derived join, or a live join whose
+    // transaction has since moved on) -- Task 8's per-chip reel takes over showing it there. A
+    // still-live join stays visible here even once a matching chip pair also exists (chips can
+    // populate earlier than the transaction resolves; provenance, not chip-attachment, is what
+    // distinguishes the two cases -- see SuggestionStrip.kt task 9 report for why a chip-match
+    // based filter doesn't work).
+    val splitOrLiveReplacementOptions = remember(replacementOptions, liveReplacementOptionIds) {
+        replacementOptions.filterNot { option ->
+            option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
+                option.id !in liveReplacementOptionIds
+        }
+    }
+    val replacementSlotCount = if (splitOrLiveReplacementOptions.isEmpty()) {
+        0
+    } else {
+        reelVisibleSlotCount(splitOrLiveReplacementOptions.size)
+    }
     val visibleSlotCount = maxOf(chipSlotCount, replacementSlotCount)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     // The outer strip's height is pinned to the maximum possible slot count so the strip
@@ -85,7 +103,7 @@ fun SuggestionStrip(
 
     LaunchedEffect(ordered.map { it.id }, rtl) {
         if (ordered.isEmpty()) return@LaunchedEffect
-        val leadingExtraItem = replacementOptions.isNotEmpty() && rtl
+        val leadingExtraItem = splitOrLiveReplacementOptions.isNotEmpty() && rtl
         val targetIndex = (if (leadingExtraItem) 1 else 0) + autoScrollTargetIndex(ordered.size, rtl)
         listState.animateScrollToItem(targetIndex)
     }
@@ -113,10 +131,10 @@ fun SuggestionStrip(
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
         horizontalArrangement = Arrangement.spacedBy(REEL_ITEM_SPACING_DP.dp),
     ) {
-        if (replacementOptions.isNotEmpty() && rtl) {
+        if (splitOrLiveReplacementOptions.isNotEmpty() && rtl) {
             item(key = "replacement-slot") {
                 ReplacementReelSlot(
-                    options = replacementOptions,
+                    options = splitOrLiveReplacementOptions,
                     rtl = rtl,
                     viewportHeight = viewportHeight,
                     onPreview = onReplacementPreview,
@@ -166,10 +184,10 @@ fun SuggestionStrip(
                 onReplacementCancel = onReplacementCancel,
             )
         }
-        if (replacementOptions.isNotEmpty() && !rtl) {
+        if (splitOrLiveReplacementOptions.isNotEmpty() && !rtl) {
             item(key = "replacement-slot") {
                 ReplacementReelSlot(
-                    options = replacementOptions,
+                    options = splitOrLiveReplacementOptions,
                     rtl = rtl,
                     viewportHeight = viewportHeight,
                     onPreview = onReplacementPreview,
