@@ -562,5 +562,5 @@ private fun Modifier.overflowGrow(
         }
     }
 
-private const val REEL_STEP_DP = 36f
+private const val REEL_STEP_DP = 28f
 private const val DRAG_THRESHOLD_DP = 12f

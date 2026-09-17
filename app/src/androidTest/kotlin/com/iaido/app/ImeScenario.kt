@@ -48,7 +48,7 @@ data class PathTransform(
 )
 
 /** Mirrors SuggestionStrip.kt's private REEL_STEP_DP -- the reel's own per-candidate drag step. */
-private const val REPLACEMENT_REEL_STEP_DP = 36f
+private const val REPLACEMENT_REEL_STEP_DP = 28f
 
 class ImeScenario(
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
@@ -362,7 +362,7 @@ class ImeScenario(
         // alternatives into an appended join candidate.
         val point = PointF(
             (stripBounds.left + 80f).coerceIn(stripBounds.left + 1f, stripBounds.right - 1f),
-            stripBounds.top + 90f,
+            stripBounds.top + (4f + REPLACEMENT_REEL_STEP_DP - 8f) * density,
         )
         val safeDistance = verticalDistancePx.coerceIn(
             rootBounds.top.toFloat() - point.y,
