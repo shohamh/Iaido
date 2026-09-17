@@ -91,7 +91,16 @@ try {
     $gradleExitCode = 1
 } finally {
     New-Item -ItemType Directory -Force -Path $artifactDestination | Out-Null
-    & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") -DeviceSerial $DeviceSerial -Destination $artifactDestination
+    if ($gradleExitCode -ne 0) {
+        & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
+            -DeviceSerial $DeviceSerial `
+            -Destination $artifactDestination `
+            -ExpectArtifacts
+    } else {
+        & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
+            -DeviceSerial $DeviceSerial `
+            -Destination $artifactDestination
+    }
     if ($previousAndroidSerial) { $env:ANDROID_SERIAL = $previousAndroidSerial } else { Remove-Item Env:ANDROID_SERIAL -ErrorAction SilentlyContinue }
     if ($startedProcess -and -not $KeepArtifacts) {
         Write-Host "Leaving emulator process $($startedProcess.Id) running; use emulator controls to stop it."

@@ -4,7 +4,9 @@ param(
     [string]$DeviceSerial,
 
     [Parameter(Mandatory = $true)]
-    [string]$Destination
+    [string]$Destination,
+
+    [switch]$ExpectArtifacts
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,8 +23,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $remotePath = "/sdcard/Android/data/com.iaido.app/files/ime-e2e"
+& adb -s $DeviceSerial shell test -d $remotePath
+$remoteExists = $LASTEXITCODE -eq 0
+if (-not $remoteExists) {
+    if ($ExpectArtifacts) {
+        Write-Warning "No IME artifact directory was available at $remotePath"
+    }
+    exit 0
+}
+
 & adb -s $DeviceSerial pull $remotePath $destinationPath
-if ($LASTEXITCODE -ne 0) {
+if ($LASTEXITCODE -ne 0 -and $ExpectArtifacts) {
     Write-Warning "No IME artifact directory was available at $remotePath"
 }
 
