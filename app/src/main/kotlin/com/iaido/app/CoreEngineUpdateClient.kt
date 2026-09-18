@@ -12,12 +12,18 @@ import org.json.JSONObject
 private const val MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 private const val UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
 
+internal fun parseInstalledAppVersion(versionName: String?): SemanticVersion? =
+    versionName
+        ?.substringBefore('-')
+        ?.takeIf { it.isNotBlank() }
+        ?.let { value -> runCatching { SemanticVersion.parse(value) }.getOrNull() }
+
 /** Fetches, verifies, and stages a newer signed core-engine release. */
 class CoreEngineUpdateClient(
     private val context: Context,
     private val manifestUrl: URL = URL(CoreEngineUpdateConfig.MANIFEST_URL),
-    private val installedVersion: SemanticVersion = SemanticVersion.parse(
-        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0",
+    private val installedVersion: SemanticVersion? = parseInstalledAppVersion(
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName,
     ),
     private val store: CoreEngineUpdateStore = CoreEngineUpdateStore(
         FilePaths.coreEngineUpdateDirectory(context),
@@ -32,7 +38,10 @@ class CoreEngineUpdateClient(
         preferences.edit().putLong(LAST_CHECK_KEY, now).apply()
         return runCatching {
         val manifest = parseManifest(readText(manifestUrl))
-        val currentVersion = store.currentVersion()?.let(SemanticVersion::parse) ?: installedVersion
+        val currentVersion = store.currentVersion()
+            ?.let { value -> runCatching { SemanticVersion.parse(value) }.getOrNull() }
+            ?: installedVersion
+        if (currentVersion == null) return@runCatching false
         if (manifest.artifact != "core-engine.jar") return false
         if (!CoreEngineReleaseVerifier.isEligible(manifest, currentVersion)) return false
 
