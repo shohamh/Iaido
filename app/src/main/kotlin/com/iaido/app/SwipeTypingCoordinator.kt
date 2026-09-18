@@ -89,8 +89,16 @@ class SwipeTypingCoordinator(
     /** Complete structured candidates for the active inference span. */
     fun replacementOptions(): List<ReplacementOption> {
         val selection = replacementSelection ?: activeReplacementSelection() ?: return emptyList()
+        // The option identity must remain anchored to the original source span so release still
+        // matches the coordinator selection, but the reel must display the words currently in the
+        // editor after a preview. Otherwise a selected replacement such as "in the" keeps
+        // rendering reels for the stale source "inthe" and poisons the next refresh.
+        val displayedSourceWords = transaction.currentWords.ifEmpty { selection.sourceWords }
         return selection.alternatives
-            .map { option -> ReplacementOption(selection.sourceWords, option.words, option.score) }
+            .map { option ->
+                val stableId = ReplacementOption(selection.sourceWords, option.words, option.score).id
+                ReplacementOption(displayedSourceWords, option.words, option.score, stableId)
+            }
             .distinctBy(ReplacementOption::id)
     }
 

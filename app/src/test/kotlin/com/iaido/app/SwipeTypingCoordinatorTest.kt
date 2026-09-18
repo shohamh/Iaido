@@ -83,6 +83,12 @@ class SwipeTypingCoordinatorTest {
         assertTrue(coordinator.previewReplacement(split))
         assertEquals("in the", editor.text)
         assertEquals(6, editor.cursor())
+        assertEquals(
+            listOf("in", "the"),
+            coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }.sourceWords,
+        )
+        val previewedSplit = coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }
+        assertEquals(split.id, previewedSplit.id)
 
         coordinator.cancelReplacement()
 
