@@ -8,6 +8,35 @@ import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 
+data class ImeEditorSnapshot(
+    val text: String,
+    val selection: IntRange,
+    val reportedLength: Int,
+    val hostGeneration: Long?,
+    val resetRequestId: Long?,
+) {
+    companion object {
+        private val LENGTH_REGEX = Regex("length=(\\d+)")
+        private val SELECTION_REGEX = Regex("selection=(\\d+):(\\d+)")
+        private val GENERATION_REGEX = Regex("generation=(\\d+)")
+        private val RESET_REGEX = Regex("reset=(-?\\d+)")
+
+        fun fromStatus(status: String): ImeEditorSnapshot? {
+            val length = LENGTH_REGEX.find(status)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+            val selectionMatch = SELECTION_REGEX.find(status) ?: return null
+            val start = selectionMatch.groupValues[1].toIntOrNull() ?: return null
+            val end = selectionMatch.groupValues[2].toIntOrNull() ?: return null
+            return ImeEditorSnapshot(
+                text = "",
+                selection = start..end,
+                reportedLength = length,
+                hostGeneration = GENERATION_REGEX.find(status)?.groupValues?.get(1)?.toLongOrNull(),
+                resetRequestId = RESET_REGEX.find(status)?.groupValues?.get(1)?.toLongOrNull(),
+            )
+        }
+    }
+}
+
 class ImeEditorDriver(
     private val device: UiDevice,
     private val pointerInjector: PointerInjector,
@@ -23,34 +52,31 @@ class ImeEditorDriver(
 
     fun clear() {
         setMarkedText("ime_test_editor", "")
-        if (readMarked("ime_test_editor") { it.text.orEmpty() }.isEmpty()) return
+        if (snapshot().text.isEmpty()) return
         waitForText("")
     }
 
-    fun text(): String {
-        if (length() == 0) return ""
-        return readMarked("ime_test_editor") { it.text.orEmpty() }
+    fun snapshot(): ImeEditorSnapshot {
+        repeat(SNAPSHOT_READ_ATTEMPTS) {
+            val status = readMarked("ime_test_status") {
+                it.contentDescription.orEmpty() + " " + it.text.orEmpty()
+            }
+            val parsed = ImeEditorSnapshot.fromStatus(status)
+                ?: error("Host status did not expose length/selection: '$status'")
+            val text = if (parsed.reportedLength == 0) {
+                ""
+            } else {
+                readMarked("ime_test_editor") { it.text.orEmpty() }
+            }
+            if (text.length == parsed.reportedLength) return parsed.copy(text = text)
+            SystemClock.sleep(SNAPSHOT_RETRY_DELAY_MS)
+        }
+        error("Host editor text and status length did not settle together")
     }
 
-    private fun length(): Int {
-        val status = readMarked("ime_test_status") {
-            it.contentDescription.orEmpty() + " " + it.text.orEmpty()
-        }
-        val match = LENGTH_REGEX.find(status)
-            ?: error("Host status did not expose length: '$status'")
-        return match.groupValues[1].toInt()
-    }
+    fun text(): String = snapshot().text
 
-    fun selection(): IntRange {
-        val status = readMarked("ime_test_status") {
-            it.contentDescription.orEmpty() + " " + it.text.orEmpty()
-        }
-        val match = SELECTION_REGEX.find(status)
-            ?: error("Host status did not expose selection: '$status'")
-        val start = match.groupValues[1].toInt()
-        val end = match.groupValues[2].toInt()
-        return start..end
-    }
+    fun selection(): IntRange = snapshot().selection
 
     fun pressBackspace(count: Int = 1) {
         require(count >= 0) { "Backspace count cannot be negative" }
@@ -75,14 +101,18 @@ class ImeEditorDriver(
     }
 
     fun waitForText(expected: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): String {
+        return waitForSnapshot(expected, timeoutMs).text
+    }
+
+    fun waitForSnapshot(expected: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): ImeEditorSnapshot {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         do {
-            val current = text()
-            if (current == expected) return current
+            val current = snapshot()
+            if (current.text == expected) return current
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
         check(false) {
-            "Expected editor text '$expected', observed '${text()}'"
+            "Expected editor text '$expected', observed '${snapshot().text}'"
         }
         error("Unreachable")
     }
@@ -90,7 +120,7 @@ class ImeEditorDriver(
     fun waitForTextChange(previous: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): String {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         do {
-            val current = text()
+            val current = snapshot().text
             if (current != previous) return current
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
@@ -161,7 +191,7 @@ class ImeEditorDriver(
     private fun resourceId(id: String) = "$packageName:id/$id"
 
     private companion object {
-        val LENGTH_REGEX = Regex("length=(\\d+)")
-        val SELECTION_REGEX = Regex("selection=(\\d+):(\\d+)")
+        const val SNAPSHOT_READ_ATTEMPTS = 3
+        const val SNAPSHOT_RETRY_DELAY_MS = 25L
     }
 }

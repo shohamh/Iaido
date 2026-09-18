@@ -14,14 +14,14 @@ import android.widget.TextView
 class ImeTestHostActivity : Activity() {
     private lateinit var editor: EditText
     private lateinit var status: TextView
+    private var hostGeneration: Long = 0L
+    private var resetRequestId: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val fixture = intent.getStringExtra(DebugAutoSpaceFixtures.EXTRA_FIXTURE)
-        getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE).edit().apply {
-            if (fixture.isNullOrBlank()) remove(DebugAutoSpaceFixtures.FIXTURE_KEY)
-            else putString(DebugAutoSpaceFixtures.FIXTURE_KEY, fixture)
-        }.commit()
+        val preferences = getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+        hostGeneration = preferences.getLong(DebugAutoSpaceFixtures.HOST_GENERATION_KEY, 0L) + 1L
+        preferences.edit().putLong(DebugAutoSpaceFixtures.HOST_GENERATION_KEY, hostGeneration).commit()
         setContentView(R.layout.ime_test_host)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         editor = findViewById(R.id.ime_test_editor)
@@ -45,6 +45,7 @@ class ImeTestHostActivity : Activity() {
         editor.setOnFocusChangeListener { _, _ -> updateStatus() }
         restoreEditorState()
         updateStatus()
+        activeInstance = this
     }
 
     override fun onResume() {
@@ -64,9 +65,23 @@ class ImeTestHostActivity : Activity() {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
+        super.onDestroy()
+    }
+
+    internal fun resetEditorFromTest(requestId: Long) {
+        if (!::editor.isInitialized) return
+        editor.setText("")
+        editor.setSelection(0)
+        resetRequestId = requestId
+        updateStatus()
+    }
+
     private fun updateStatus() {
         if (!::editor.isInitialized || !::status.isInitialized) return
-        val value = "length=${editor.text.length} selection=${editor.selectionStart}:${editor.selectionEnd}"
+        val value = "length=${editor.text.length} selection=${editor.selectionStart}:${editor.selectionEnd} " +
+            "generation=$hostGeneration reset=${resetRequestId ?: -1L}"
         status.text = value
         status.contentDescription = value
     }
@@ -87,8 +102,11 @@ class ImeTestHostActivity : Activity() {
         editor.setSelection(selection.coerceIn(0, text.length))
     }
 
-    private companion object {
+    internal companion object {
         const val EDITOR_TEXT = "editor_text"
         const val EDITOR_SELECTION = "editor_selection"
+        var activeInstance: ImeTestHostActivity? = null
+
+        fun activeInstance(): ImeTestHostActivity? = activeInstance
     }
 }

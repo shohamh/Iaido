@@ -68,6 +68,7 @@ internal object DebugAutoSpaceFixtures {
     const val STATE_REQUEST_JSON_KEY = "state_request_json"
     const val STATE_RESPONSE_ID_KEY = "state_response_id"
     const val STATE_RESPONSE_ERROR_KEY = "state_response_error"
+    const val HOST_GENERATION_KEY = "host_generation"
     const val EXTRA_FIXTURE = "com.iaido.app.extra.AUTO_SPACE_FIXTURE"
 
     private const val ASSET_NAME = "auto-space-fixtures.txt"

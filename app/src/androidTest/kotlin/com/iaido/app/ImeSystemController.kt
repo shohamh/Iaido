@@ -4,6 +4,7 @@ import android.app.Instrumentation
 import android.app.UiAutomation
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.Settings
@@ -22,6 +23,7 @@ class ImeSystemController(
     private val automation: UiAutomation,
 ) {
     private val packageName = instrumentation.targetContext.packageName
+    private var nextEditorResetRequestId = 0L
 
     val iaidoImeId: String = ComponentName(packageName, "$packageName.IaidoInputMethodService").flattenToShortString()
     val referenceImeId: String = ComponentName(packageName, "$packageName.ReferenceInputMethodService").flattenToShortString()
@@ -30,6 +32,7 @@ class ImeSystemController(
         val startedAtMs = SystemClock.elapsedRealtime()
         val component = ComponentName(packageName, "$packageName.ImeTestHostActivity").flattenToShortString()
         val fixtureArgument = autoSpaceFixture?.let { " --es ${DebugAutoSpaceFixtures.EXTRA_FIXTURE} $it" }.orEmpty()
+        setAutoSpaceFixture(autoSpaceFixture)
         repeat(HOST_LAUNCH_ATTEMPTS) { attempt ->
             shell("am start -n $component -f 0x14000000$fixtureArgument")
             if (device.wait(Until.hasObject(By.res("$packageName:id/ime_test_editor")), DEFAULT_TIMEOUT_MS)) {
@@ -59,8 +62,48 @@ class ImeSystemController(
 
     fun ensureHostVisible(autoSpaceFixture: String? = null) {
         val editorSelector = By.res("$packageName:id/ime_test_editor")
-        if (device.findObject(editorSelector) != null) return
+        val startedAtMs = SystemClock.elapsedRealtime()
+        if (device.wait(Until.hasObject(editorSelector), HOST_REUSE_GRACE_MS)) {
+            logPerf("host_reuse", startedAtMs, "fixture=${autoSpaceFixture ?: "none"}")
+            return
+        }
         launchHost(autoSpaceFixture)
+    }
+
+    fun resetEditor(editor: ImeEditorDriver) {
+        val startedAtMs = SystemClock.elapsedRealtime()
+        val requestId = ++nextEditorResetRequestId
+        instrumentation.targetContext.sendBroadcast(
+            Intent(ImeHostResetProtocol.ACTION_RESET_EDITOR)
+                .setPackage(packageName)
+                .putExtra(ImeHostResetProtocol.EXTRA_REQUEST_ID, requestId),
+        )
+        val deadline = SystemClock.elapsedRealtime() + EDITOR_RESET_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val observed = runCatching { editor.snapshot() }.getOrNull()
+            if (observed != null && ImeHostResetProtocol.isAcknowledged(
+                    requestId,
+                    observed.resetRequestId,
+                    observed.reportedLength,
+                    observed.selection,
+                )
+            ) {
+                    logPerf("editor_reset", startedAtMs, "fast=true")
+                    return
+            }
+            SystemClock.sleep(25L)
+        }
+        editor.clear()
+        check(editor.text().isEmpty() && editor.selection() == 0..0) {
+            "Atomic editor reset was not acknowledged and fallback clear did not settle"
+        }
+        logPerf("editor_reset", startedAtMs, "fast=false fallback=true")
+    }
+
+    fun hostGenerationOrNull(): Long? {
+        val status = device.findObject(By.res("$packageName:id/ime_test_status")) ?: return null
+        val value = status.contentDescription?.toString().orEmpty() + " " + status.text.orEmpty()
+        return HOST_GENERATION_REGEX.find(value)?.groupValues?.get(1)?.toLongOrNull()
     }
 
     fun waitForSpacingMode(mode: SpacingMode) {
@@ -177,5 +220,8 @@ class ImeSystemController(
         const val DEFAULT_TIMEOUT_MS = 15_000L
         private const val IME_HANDOFF_TIMEOUT_MS = 1_500L
         private const val HOST_LAUNCH_ATTEMPTS = 2
+        private const val HOST_REUSE_GRACE_MS = 300L
+        private const val EDITOR_RESET_TIMEOUT_MS = 750L
+        private val HOST_GENERATION_REGEX = Regex("generation=(\\d+)")
     }
 }

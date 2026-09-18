@@ -5,8 +5,17 @@
             android:name=".ImeTestHostActivity"
             android:exported="true"
             android:label="Iaido IME Test Host"
+            android:process=":ime_test_host"
             android:theme="@style/ImeTestHostTheme"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize" />
+        <receiver
+            android:name=".ImeTestHostResetReceiver"
+            android:exported="true"
+            android:process=":ime_test_host">
+            <intent-filter>
+                <action android:name="com.iaido.app.action.RESET_EDITOR" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".ReferenceInputMethodService"
             android:exported="true"

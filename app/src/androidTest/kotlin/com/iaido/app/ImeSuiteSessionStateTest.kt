@@ -12,10 +12,13 @@ class ImeSuiteSessionStateTest {
         val state = ImeSuiteSessionState()
 
         assertTrue(state.needsBootstrap("fixture-a"))
-        state.markReady("fixture-a")
+        state.markReady("fixture-a", hostGeneration = 7L)
 
         assertFalse(state.needsBootstrap("fixture-a"))
-        assertFalse(state.needsBootstrap("fixture-b"))
+        assertTrue(state.needsBootstrap("fixture-b"))
+        assertTrue(state.canReuseHost("fixture-a", 7L))
+        assertFalse(state.canReuseHost("fixture-a", 8L))
+        assertFalse(state.canReuseHost("fixture-b", 7L))
     }
 
     @Test
@@ -47,5 +50,16 @@ class ImeSuiteSessionStateTest {
         state.setBaseline("baseline-1")
 
         assertEquals("baseline-1", state.baselineOrNull())
+    }
+
+    @Test
+    fun invalidatingHostLeasePreservesNoReusableGeneration() {
+        val state = ImeSuiteSessionState()
+        state.markReady("fixture-a", hostGeneration = 7L)
+
+        state.invalidateHostLease()
+
+        assertFalse(state.canReuseHost("fixture-a", 7L))
+        assertEquals(null, state.hostGenerationOrNull())
     }
 }

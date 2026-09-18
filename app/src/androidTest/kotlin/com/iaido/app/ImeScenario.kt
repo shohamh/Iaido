@@ -90,6 +90,7 @@ class ImeScenario(
                 autoSpaceFixture?.preferenceValue,
                 expectedIme,
                 expectedLanguage,
+                system.hostGenerationOrNull(),
             )
             succeeded = true
         } finally {
@@ -744,7 +745,7 @@ class ImeScenario(
     private fun setup() {
         val setupStartedAtMs = SystemClock.elapsedRealtime()
         val fixture = autoSpaceFixture?.preferenceValue
-        val bootstrap = suiteState.needsBootstrap()
+        val bootstrap = suiteState.needsBootstrap(fixture)
         val needsImeSelection = suiteState.needsImeSelection(system.iaidoImeId)
         val spacingModeChanged = false
         if (bootstrap) {
@@ -768,7 +769,7 @@ class ImeScenario(
         val baselineId = suiteState.baselineOrNull() ?: stateAdapter.saveBaseline().also(suiteState::setBaseline)
         stateAdapter.restoreBaseline(baselineId)
         val clearStartedAtMs = SystemClock.elapsedRealtime()
-        editor.clear()
+        system.resetEditor(editor)
         Log.i(
             "E2E-PERF",
             "phase=editor_clear durationMs=${SystemClock.elapsedRealtime() - clearStartedAtMs}",
@@ -777,7 +778,12 @@ class ImeScenario(
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH
         checkpoint("setup", verifyEnvironment = bootstrap)
-        suiteState.markReady(fixture, expectedIme, expectedLanguage)
+        suiteState.markReady(
+            fixture,
+            expectedIme,
+            expectedLanguage,
+            system.hostGenerationOrNull(),
+        )
         Log.i(
             "E2E-PERF",
             "phase=scenario_setup durationMs=${SystemClock.elapsedRealtime() - setupStartedAtMs} " +
@@ -987,8 +993,9 @@ class ImeScenario(
 
     private fun checkpoint(action: String, verifyEnvironment: Boolean = false) {
         val checkpointStartedAtMs = SystemClock.elapsedRealtime()
-        val observedText = editor.waitForText(expectedText)
-        val observedSelection = editor.selection()
+        val observedSnapshot = editor.waitForSnapshot(expectedText)
+        val observedText = observedSnapshot.text
+        val observedSelection = observedSnapshot.selection
         val observedIme = if (verifyEnvironment) system.selectedInputMethodId() else expectedIme
         val observedLanguage = if (verifyEnvironment && expectedIme == system.iaidoImeId) {
             system.waitForImeVisible(expectedIme)
