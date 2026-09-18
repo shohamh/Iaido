@@ -30,6 +30,8 @@ fun appUpdateStatusLabel(state: AppUpdateUiState): String = when (state) {
     is AppUpdateUiState.Failed -> when (state.message) {
         APP_UPDATE_SIGNING_MISMATCH_REASON ->
             "Update failed: This release is signed for the production app. Uninstall the debug Iaido app, then install this update."
+        APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON ->
+            "Nightly is not available yet. Try again after the nightly build finishes."
         else -> "Update failed: ${state.message}"
     }
 }

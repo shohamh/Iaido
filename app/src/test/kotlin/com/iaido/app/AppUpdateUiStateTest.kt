@@ -43,4 +43,12 @@ class AppUpdateUiStateTest {
             appUpdateStatusLabel(AppUpdateUiState.Failed(APP_UPDATE_SIGNING_MISMATCH_REASON)),
         )
     }
+
+    @Test
+    fun `missing nightly release explains that the build is still publishing`() {
+        assertEquals(
+            "Nightly is not available yet. Try again after the nightly build finishes.",
+            appUpdateStatusLabel(AppUpdateUiState.Failed(APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON)),
+        )
+    }
 }

@@ -18,6 +18,8 @@ import org.json.JSONObject
 internal const val MAX_APP_UPDATE_BYTES = 100L * 1024L * 1024L
 internal const val APP_UPDATE_SIGNING_MISMATCH_REASON =
     "APK signing certificate does not match the installed app"
+internal const val APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON =
+    "No nightly release is available yet. Try again after the nightly build finishes."
 
 data class AppArchiveInfo(
     val packageName: String,
@@ -175,12 +177,20 @@ class AppUpdateClient(
         return signatures.map { signature -> sha256(signature.toByteArray()) }.toSet()
     }
 
-    private fun readText(url: URL): String = readBytes(url, MAX_METADATA_BYTES).toString(Charsets.UTF_8)
+    private fun readText(url: URL): String = readBytes(
+        url,
+        MAX_METADATA_BYTES,
+        missingResourceMessage = if (channel == UpdateChannel.NIGHTLY) {
+            APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON
+        } else {
+            null
+        },
+    ).toString(Charsets.UTF_8)
 
-    private fun readBytes(url: URL, maxBytes: Long): ByteArray {
+    private fun readBytes(url: URL, maxBytes: Long, missingResourceMessage: String? = null): ByteArray {
         val connection = openConnection(url)
         return try {
-            checkResponse(connection)
+            checkResponse(connection, missingResourceMessage)
             val contentLength = connection.contentLengthLong
             if (contentLength > maxBytes) error("Update metadata is too large")
             connection.inputStream.use { stream ->
@@ -230,8 +240,11 @@ class AppUpdateClient(
         setRequestProperty("User-Agent", "Iaido-App-Updater")
     }
 
-    private fun checkResponse(connection: HttpURLConnection) {
+    private fun checkResponse(connection: HttpURLConnection, missingResourceMessage: String? = null) {
         if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+            if (connection.responseCode == HttpURLConnection.HTTP_NOT_FOUND && missingResourceMessage != null) {
+                error(missingResourceMessage)
+            }
             error("Update request failed: ${connection.responseCode}")
         }
     }

@@ -77,11 +77,17 @@ jobs:
             gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/release/app-release.apk --verify-tag --generate-notes
           else
             if gh release view nightly >/dev/null 2>&1; then
-              gh release delete nightly --yes --cleanup-tag
+              gh release upload nightly app/build/outputs/apk/release/app-release.apk --clobber
+              gh release edit nightly \
+                --target "$GITHUB_SHA" \
+                --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
+                --notes "Automated nightly build from main commit $GITHUB_SHA." \
+                --prerelease
+            else
+              gh release create nightly app/build/outputs/apk/release/app-release.apk \
+                --target "$GITHUB_SHA" \
+                --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
+                --prerelease \
+                --notes "Automated nightly build from main commit $GITHUB_SHA."
             fi
-            gh release create nightly app/build/outputs/apk/release/app-release.apk \
-              --target "$GITHUB_SHA" \
-              --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
-              --prerelease \
-              --notes "Automated nightly build from main commit $GITHUB_SHA."
           fi
