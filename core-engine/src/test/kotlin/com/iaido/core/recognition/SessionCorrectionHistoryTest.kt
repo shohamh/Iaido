@@ -131,4 +131,19 @@ class SessionCorrectionHistoryTest {
         assertEquals(5, history.words().single { it.id == later }.start)
         assertEquals(9, history.words().single { it.id == later }.end)
     }
+
+    @Test
+    fun `snapshot preserves corrected entries and next id allocation`() {
+        val history = SessionCorrectionHistory()
+        val first = history.record(0, 3, "teh", listOf("teh", "the"))
+        history.record(4, 9, "world", listOf("world"))
+        history.replace(first, "the")
+
+        val snapshot = history.snapshot()
+        val restored = SessionCorrectionHistory()
+        restored.restore(snapshot)
+
+        assertEquals(snapshot, restored.snapshot())
+        assertEquals(first + 2, restored.record(10, 13, "new", listOf("new")))
+    }
 }

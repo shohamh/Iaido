@@ -14,9 +14,11 @@ class PersonalDictionary(
     private val wordOverrides = mutableMapOf<String, OverrideState>()
     private val ngramOverrides = mutableMapOf<Pair<String, String>, OverrideState>()
     private val customWords = mutableSetOf<String>()
+    private var cachedEntries: List<WordEntry>? = null
 
     fun reinforce(word: String, amount: Double = 1.0) {
         require(amount > 0.0)
+        cachedEntries = null
         val normalizedWord = normalizeWord(word)
         decayWordsExcept(normalizedWord)
         increase(wordOverrides, normalizedWord, amount)
@@ -38,7 +40,10 @@ class PersonalDictionary(
         ) {
             decrease(wordOverrides, normalizedOriginal)
         }
-        if (signal == LearningSignal.EXPLICIT_ADD) customWords += normalizedReplacement
+        if (signal == LearningSignal.EXPLICIT_ADD) {
+            customWords += normalizedReplacement
+            cachedEntries = null
+        }
         if (signal == LearningSignal.DELETE_RETYPE) {
             previousWord?.let { reinforceNgram(normalizeWord(it), normalizedReplacement) }
             nextWord?.let { reinforceNgram(normalizedReplacement, normalizeWord(it)) }
@@ -46,6 +51,7 @@ class PersonalDictionary(
     }
 
     fun forget(word: String) {
+        cachedEntries = null
         val normalizedWord = normalizeWord(word)
         wordOverrides.remove(normalizedWord)
         customWords.remove(normalizedWord)
@@ -53,6 +59,7 @@ class PersonalDictionary(
     }
 
     fun reset() {
+        cachedEntries = null
         wordOverrides.clear()
         ngramOverrides.clear()
         customWords.clear()
@@ -66,7 +73,41 @@ class PersonalDictionary(
     fun ngramOverrides(): Map<Pair<String, String>, Double> =
         ngramOverrides.mapValues { (_, state) -> state.boost }
 
+    fun snapshot(): PersonalDictionarySnapshot = PersonalDictionarySnapshot(
+        wordOverrides = wordOverrides
+            .entries
+            .sortedBy { it.key }
+            .map { (word, state) -> WordOverrideSnapshot(word, state.boost, state.uses) },
+        ngramOverrides = ngramOverrides
+            .entries
+            .sortedWith(compareBy({ it.key.first }, { it.key.second }))
+            .map { (key, state) -> NgramOverrideSnapshot(key.first, key.second, state.boost, state.uses) },
+        customWords = customWords.sorted(),
+    )
+
+    fun restore(snapshot: PersonalDictionarySnapshot) {
+        require(snapshot.wordOverrides.all { it.boost <= maxBoost }) {
+            "Dictionary snapshot contains a word boost above this dictionary's maximum"
+        }
+        require(snapshot.ngramOverrides.all { it.boost <= maxBoost }) {
+            "Dictionary snapshot contains an n-gram boost above this dictionary's maximum"
+        }
+        wordOverrides.clear()
+        ngramOverrides.clear()
+        customWords.clear()
+        snapshot.wordOverrides.forEach { override ->
+            wordOverrides[override.word] = OverrideState(override.boost, override.uses)
+        }
+        snapshot.ngramOverrides.forEach { override ->
+            ngramOverrides[override.previousWord to override.nextWord] =
+                OverrideState(override.boost, override.uses)
+        }
+        customWords += snapshot.customWords
+        cachedEntries = null
+    }
+
     fun restore(entries: List<WordEntry>) {
+        cachedEntries = null
         entries.forEach { entry ->
             val word = normalizeWord(entry.word)
             val baseFrequency = baseByWord[word]?.frequency
@@ -80,9 +121,11 @@ class PersonalDictionary(
         }
     }
 
-    fun entries(): List<WordEntry> = (base.map { normalizeWord(it.word) } + customWords).distinct().map { word ->
-        val baseFrequency = baseByWord[word]?.frequency ?: ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
-        WordEntry(word, baseFrequency * (wordOverrides[word]?.boost ?: 1.0))
+    fun entries(): List<WordEntry> {
+        return cachedEntries ?: (base.map { normalizeWord(it.word) } + customWords).distinct().map { word ->
+            val baseFrequency = baseByWord[word]?.frequency ?: ScoringConstants.PERSONAL_WORD_BASE_FREQUENCY
+            WordEntry(word, baseFrequency * (wordOverrides[word]?.boost ?: 1.0))
+        }.also { cachedEntries = it }
     }
 
     private fun reinforceNgram(previousWord: String, nextWord: String) {

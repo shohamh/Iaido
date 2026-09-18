@@ -1,10 +1,24 @@
 package com.iaido.core.dictionary
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PersonalDictionaryTest {
+    @Test
+    fun `reuses the immutable entry snapshot until learning changes`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0)))
+
+        val first = dictionary.entries()
+        val second = dictionary.entries()
+        assertSame(first, second)
+
+        dictionary.reinforce("hello")
+        assertEquals(2.0, dictionary.entries().single().frequency)
+    }
+
     @Test
     fun `reinforcing a word raises its effective frequency`() {
         val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0), WordEntry("help", 2.0)))
@@ -117,5 +131,39 @@ class PersonalDictionaryTest {
         dictionary.restore(listOf(WordEntry("There", 2.0)))
 
         assertEquals(listOf("there"), dictionary.entries().map { it.word })
+    }
+
+    @Test
+    fun `snapshot preserves exact word and ngram learning state`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0)))
+        dictionary.record(
+            signal = LearningSignal.DELETE_RETYPE,
+            original = "old",
+            replacement = "ninjacode",
+            previousWord = "write",
+            nextWord = "today",
+        )
+
+        val snapshot = dictionary.snapshot()
+        val restored = PersonalDictionary(listOf(WordEntry("hello", 1.0)))
+        restored.restore(snapshot)
+
+        assertEquals(snapshot, restored.snapshot())
+        assertEquals(dictionary.entries(), restored.entries())
+        assertEquals(dictionary.ngramBoost("write", "ninjacode"), restored.ngramBoost("write", "ninjacode"))
+        assertEquals(dictionary.ngramBoost("ninjacode", "today"), restored.ngramBoost("ninjacode", "today"))
+    }
+
+    @Test
+    fun `rejecting an over-cap snapshot leaves existing learning unchanged`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0)), maxBoost = 2.0)
+        dictionary.reinforce("hello")
+        val before = dictionary.snapshot()
+        val invalid = PersonalDictionarySnapshot(
+            wordOverrides = listOf(WordOverrideSnapshot("hello", 3.0, 1)),
+        )
+
+        assertThrows(IllegalArgumentException::class.java) { dictionary.restore(invalid) }
+        assertEquals(before, dictionary.snapshot())
     }
 }

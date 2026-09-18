@@ -41,6 +41,17 @@ class SessionCorrectionHistory {
 
     fun words(): List<SessionWord> = entries.toList()
 
+    fun snapshot(): SessionCorrectionHistorySnapshot = SessionCorrectionHistorySnapshot(
+        nextId = nextId,
+        entries = entries.toList(),
+    )
+
+    fun restore(snapshot: SessionCorrectionHistorySnapshot) {
+        entries.clear()
+        entries += snapshot.entries
+        nextId = snapshot.nextId
+    }
+
     fun aroundCursor(cursor: Int, maxWords: Int = 3): List<SessionWord> {
         require(maxWords > 0) { "maxWords must be positive" }
         val containing = entries.filter { cursor in it.start until it.end }
