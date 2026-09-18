@@ -16,14 +16,21 @@ class AppUpdateUiStateTest {
     fun `ready state offers installation`() {
         val state = AppUpdateUiState.ReadyToInstall(File("/tmp/update.apk"), 5L)
 
-        assertEquals("Install update", appUpdateButtonLabel(state))
+        assertEquals("Check for updates", appUpdateButtonLabel(state))
+        assertEquals(true, appUpdateInstallButtonEnabled(state))
         assertEquals("Update downloaded. Tap Install update to continue.", appUpdateStatusLabel(state))
+    }
+
+    @Test
+    fun `pending release is shown while the GitHub action is running`() {
+        assertEquals("Release pending — check again in a few minutes.", appUpdateStatusLabel(AppUpdateUiState.PendingRelease))
+        assertEquals(false, appUpdateInstallButtonEnabled(AppUpdateUiState.PendingRelease))
     }
 
     @Test
     fun `permission state explains the Android action`() {
         assertEquals(
-            "Allow Iaido to install updates, then press Update app again.",
+            "Allow Iaido to install updates, then press Check for updates again.",
             appUpdateStatusLabel(AppUpdateUiState.PermissionRequired),
         )
     }

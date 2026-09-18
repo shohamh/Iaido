@@ -45,9 +45,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import com.iaido.core.typing.SpacingMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000L
 
 class SettingsActivity : ComponentActivity() {
     private val settingsStore get() = applicationContext.settingsStore
@@ -70,6 +74,7 @@ class SettingsActivity : ComponentActivity() {
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
         var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
+        var settingsLoaded by remember { mutableStateOf(false) }
         var notificationsEnabled by remember { mutableStateOf(updateNotificationsEnabled()) }
         val appUpdateClient = remember(updateChannel) {
             AppUpdateClient(this@SettingsActivity, channel = updateChannel)
@@ -109,6 +114,46 @@ class SettingsActivity : ComponentActivity() {
             graceWindowMs = preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS
             spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey])
             updateChannel = updateChannelFromStoredValue(preferences[updateChannelKey], installedVersionName)
+            settingsLoaded = true
+        }
+
+        suspend fun checkForUpdates(openInstallPermission: Boolean) {
+            appUpdateState = AppUpdateUiState.Checking
+            val workflowStatus = withContext(Dispatchers.IO) {
+                GitHubReleaseMonitorClient().releaseWorkflowStatus()
+            }
+            if (workflowStatus is ReleaseWorkflowStatus.Running) {
+                appUpdateState = AppUpdateUiState.PendingRelease
+                return
+            }
+
+            appUpdateState = AppUpdateUiState.Downloading
+            val result = withContext(Dispatchers.IO) { appUpdateClient.update() }
+            appUpdateState = when (result) {
+                AppUpdateResult.UpToDate -> AppUpdateUiState.UpToDate
+                is AppUpdateResult.ReadyToInstall ->
+                    AppUpdateUiState.ReadyToInstall(result.apk, result.versionCode, result.versionName)
+                is AppUpdateResult.InstallPermissionRequired -> {
+                    if (openInstallPermission) {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:$packageName"),
+                            ),
+                        )
+                    }
+                    AppUpdateUiState.PermissionRequired
+                }
+                is AppUpdateResult.Failed -> AppUpdateUiState.Failed(result.message)
+            }
+        }
+
+        LaunchedEffect(updateChannel, settingsLoaded) {
+            if (!settingsLoaded) return@LaunchedEffect
+            while (isActive) {
+                checkForUpdates(openInstallPermission = false)
+                delay(UPDATE_CHECK_INTERVAL_MS)
+            }
         }
 
         Surface(
@@ -160,40 +205,21 @@ class SettingsActivity : ComponentActivity() {
                 Text("Enable notifications so Iaido can tell you when a new release is ready.")
             }
             Text("A release APK cannot update a debug build. If you installed Iaido from Android Studio, uninstall that build first; your settings and learned words will be removed.")
-            Button(
-                enabled = appUpdateButtonEnabled(appUpdateState),
-                onClick = {
-                    val ready = appUpdateState as? AppUpdateUiState.ReadyToInstall
-                    if (ready != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    enabled = appUpdateButtonEnabled(appUpdateState),
+                    onClick = {
+                        lifecycleScope.launch { checkForUpdates(openInstallPermission = true) }
+                    },
+                ) { Text(appUpdateButtonLabel(appUpdateState)) }
+                Button(
+                    enabled = appUpdateInstallButtonEnabled(appUpdateState),
+                    onClick = {
+                        val ready = appUpdateState as? AppUpdateUiState.ReadyToInstall ?: return@Button
                         startActivity(appUpdateClient.installIntent(ready.apk))
-                    } else {
-                        lifecycleScope.launch {
-                            appUpdateState = AppUpdateUiState.Checking
-                            val result = withContext(Dispatchers.IO) {
-                                appUpdateClient.update {
-                                    lifecycleScope.launch(Dispatchers.Main) {
-                                        appUpdateState = AppUpdateUiState.Downloading
-                                    }
-                                }
-                            }
-                            appUpdateState = when (result) {
-                                AppUpdateResult.UpToDate -> AppUpdateUiState.UpToDate
-                                is AppUpdateResult.ReadyToInstall -> AppUpdateUiState.ReadyToInstall(result.apk, result.versionCode, result.versionName)
-                                is AppUpdateResult.InstallPermissionRequired -> {
-                                    startActivity(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                            Uri.parse("package:$packageName"),
-                                        ),
-                                    )
-                                    AppUpdateUiState.PermissionRequired
-                                }
-                                is AppUpdateResult.Failed -> AppUpdateUiState.Failed(result.message)
-                            }
-                        }
-                    }
-                },
-            ) { Text(appUpdateButtonLabel(appUpdateState)) }
+                    },
+                ) { Text("Install update") }
+            }
             Text(
                 appUpdateStatusLabel(appUpdateState),
                 color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
