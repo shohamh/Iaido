@@ -3,6 +3,7 @@ package com.iaido.app
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -28,6 +29,16 @@ internal val graceWindowKey = intPreferencesKey("split_grace_window_ms")
 internal val spacingModeKey = stringPreferencesKey("spacing_mode")
 internal val preferredLanguageKey = stringPreferencesKey("preferred_language")
 internal val showCandidateScoresKey = booleanPreferencesKey("show_candidate_scores")
+internal val diagnosticsConsentKey = booleanPreferencesKey("diagnostics_enabled")
+internal val diagnosticsConsentVersionKey = intPreferencesKey("diagnostics_consent_version")
+internal val diagnosticsAcceptedAtMsKey = longPreferencesKey("diagnostics_accepted_at_ms")
+internal val diagnosticsRevokedAtMsKey = longPreferencesKey("diagnostics_revoked_at_ms")
+internal val diagnosticsPolicyDigestKey = stringPreferencesKey("diagnostics_policy_digest")
+internal val researchConsentKey = booleanPreferencesKey("research_enabled")
+internal val researchConsentVersionKey = intPreferencesKey("research_consent_version")
+internal val researchAcceptedAtMsKey = longPreferencesKey("research_accepted_at_ms")
+internal val researchRevokedAtMsKey = longPreferencesKey("research_revoked_at_ms")
+internal val researchPolicyDigestKey = stringPreferencesKey("research_policy_digest")
 
 internal val Context.settingsStore by preferencesDataStore(name = "settings")
 
