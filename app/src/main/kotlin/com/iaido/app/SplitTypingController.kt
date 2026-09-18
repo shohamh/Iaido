@@ -10,9 +10,15 @@ import com.iaido.core.recognition.SplitWordMerger
 class SplitTypingController(
     private val dictionary: () -> List<WordEntry>,
     private val commitText: (String) -> Unit,
-    private val session: SplitGestureSession = SplitGestureSession(),
-    private val merger: SplitWordMerger = SplitWordMerger(),
+    graceWindowMs: Long = 350L,
+    private val session: SplitGestureSession = SplitGestureSession(graceWindowMs),
+    private val merger: SplitWordMerger = SplitWordMerger(graceWindowMs),
 ) {
+    fun updateGraceWindowMs(value: Long) {
+        session.setGraceWindowMs(value)
+        merger.setGraceWindowMs(value)
+    }
+
     fun begin(pointerId: Int, point: GesturePoint, atMs: Long) = session.begin(pointerId, point, atMs)
 
     fun move(pointerId: Int, point: GesturePoint) = session.move(pointerId, point)

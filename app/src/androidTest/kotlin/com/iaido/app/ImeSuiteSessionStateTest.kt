@@ -32,9 +32,20 @@ class ImeSuiteSessionStateTest {
     fun invalidatingStateForcesTheNextScenarioToBootstrap() {
         val state = ImeSuiteSessionState()
         state.markReady(null)
+        state.setBaseline("baseline")
 
         state.invalidate()
 
         assertTrue(state.needsBootstrap(null))
+        assertEquals(null, state.baselineOrNull())
+    }
+
+    @Test
+    fun storesTheBaselineForTheCurrentSuiteGeneration() {
+        val state = ImeSuiteSessionState()
+
+        state.setBaseline("baseline-1")
+
+        assertEquals("baseline-1", state.baselineOrNull())
     }
 }

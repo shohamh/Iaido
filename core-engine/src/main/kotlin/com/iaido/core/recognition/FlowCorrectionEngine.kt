@@ -7,8 +7,13 @@ data class FlowCorrectionResult(val words: List<String>, val corrections: List<W
 class FlowCorrectionEngine(
     private val contextScorer: NgramContextScorer,
     private val margin: Double = 1.0,
-    private val maxCascadeDepth: Int = 2,
+    private var maxCascadeDepth: Int = 2,
 ) {
+    fun setMaxCascadeDepth(depth: Int) {
+        require(depth >= 0) { "Maximum cascade depth must not be negative" }
+        maxCascadeDepth = depth
+    }
+
     fun correct(words: List<FlowWord>, previousWords: List<String>): FlowCorrectionResult {
         val corrected = words.map { it.current }.toMutableList()
         val changes = mutableListOf<WordCorrection>()

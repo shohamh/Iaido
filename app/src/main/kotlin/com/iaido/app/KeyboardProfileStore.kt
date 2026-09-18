@@ -59,11 +59,9 @@ internal class RoomPersonalDictionarySnapshotDataSource(
     override fun read(): PersonalDictionarySnapshot {
         val words = dao.all()
             .map { row -> WordOverrideSnapshot(row.word.lowercase(), row.boost, row.uses) }
-            .distinctBy { it.word }
             .sortedBy { it.word }
         val ngrams = dao.allNgrams()
             .map { row -> NgramOverrideSnapshot(row.previousWord.lowercase(), row.nextWord.lowercase(), row.boost, row.uses) }
-            .distinctBy { it.previousWord to it.nextWord }
             .sortedWith(compareBy({ it.previousWord }, { it.nextWord }))
         return PersonalDictionarySnapshot(
             wordOverrides = words,

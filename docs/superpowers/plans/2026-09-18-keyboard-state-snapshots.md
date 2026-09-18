@@ -6,7 +6,7 @@
 
 **Architecture:** Pure Kotlin snapshot models own validation and round-trip semantics. Android adapters translate DataStore/Room/runtime state into those models, apply a complete snapshot transactionally, and publish a monotonic readiness revision after rebinding the IME. The E2E runner consumes that readiness seam; it does not infer lifecycle state from accessibility nodes.
 
-**Tech Stack:** Kotlin/JVM, Android Kotlin, DataStore Preferences, Room, `org.json`, JUnit 5 core tests, Android instrumentation tests, existing UiAutomator harness.
+**Tech Stack:** Kotlin/JVM, Android Kotlin, DataStore Preferences, Room, kotlinx.serialization JSON, JUnit 5 core tests, Android instrumentation tests, existing UiAutomator harness.
 
 **Spec:** `docs/superpowers/specs/2026-09-18-keyboard-state-snapshots-design.md`
 

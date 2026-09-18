@@ -634,15 +634,9 @@ class ImeScenario(
                 preferences[spacingModeKey] = spacingModeStoredValue(mode)
             }
         }
-        // Selecting the same IME can be a no-op on Android and leave its in-memory spacing mode
-        // unchanged. A short round trip through the reference IME forces Iaido's input service to
-        // receive a fresh onStartInput and reload the persisted mode.
-        system.enableAndSelect(system.referenceImeId)
-        system.waitForImeVisible(system.referenceImeId)
-        system.enableAndSelect(system.iaidoImeId)
-        system.waitForImeVisible(system.iaidoImeId)
+        system.waitForSpacingMode(mode)
         editor.focus()
-        checkpoint("reloadSpacingModeForBehaviorTest", verifyEnvironment = true)
+        checkpoint("reloadSpacingModeForBehaviorTest")
     }
 
     fun previewReplacementThenCancel(sourceWords: Int, replacementWords: Int) {
@@ -752,7 +746,6 @@ class ImeScenario(
         val fixture = autoSpaceFixture?.preferenceValue
         val bootstrap = suiteState.needsBootstrap(fixture)
         val needsImeSelection = suiteState.needsImeSelection(system.iaidoImeId)
-        val knownLanguage = suiteState.languageOrNull()
         val spacingModeChanged = system.ensureManualSpacingMode()
         if (bootstrap) {
             system.launchHost(fixture)
@@ -768,11 +761,14 @@ class ImeScenario(
         if (bootstrap || spacingModeChanged || needsImeSelection) {
             system.waitForImeVisible(system.iaidoImeId)
         }
+        val stateAdapter = DebugKeyboardStateAdapter(instrumentation.targetContext)
+        val baselineId = suiteState.baselineOrNull() ?: stateAdapter.saveBaseline().also(suiteState::setBaseline)
+        val baselineRevision = stateAdapter.restoreBaseline(baselineId)
+        system.waitForRuntimeReady(baselineRevision)
         editor.clear()
         expectedText = ""
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH
-        resetLanguage(knownLanguage)
         checkpoint("setup", verifyEnvironment = bootstrap)
         suiteState.markReady(fixture, expectedIme, expectedLanguage)
         Log.i(
@@ -781,14 +777,6 @@ class ImeScenario(
                 "bootstrap=$bootstrap fixture=${fixture ?: "none"} imeSelection=$needsImeSelection " +
                 "spacingReset=$spacingModeChanged",
         )
-    }
-
-    private fun resetLanguage(knownLanguage: Language?) {
-        val current = knownLanguage ?: keyboard().language
-        if (current == Language.HEBREW) {
-            editor.tapMarkedKey(keyDescription("globe"))
-            check(keyboard().language == Language.ENGLISH) { "Could not reset Iaido to English" }
-        }
     }
 
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)

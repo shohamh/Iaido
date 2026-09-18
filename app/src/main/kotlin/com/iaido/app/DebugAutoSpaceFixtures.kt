@@ -62,6 +62,12 @@ internal object DebugAutoSpaceFixtures {
 
     const val PREFERENCES = "debug_auto_space_fixtures"
     const val FIXTURE_KEY = "selected_fixture"
+    const val ACTIVE_SPACING_MODE_KEY = "active_spacing_mode"
+    const val RUNTIME_READY_REVISION_KEY = "runtime_ready_revision"
+    const val STATE_REQUEST_ID_KEY = "state_request_id"
+    const val STATE_REQUEST_JSON_KEY = "state_request_json"
+    const val STATE_RESPONSE_ID_KEY = "state_response_id"
+    const val STATE_RESPONSE_ERROR_KEY = "state_response_error"
     const val EXTRA_FIXTURE = "com.iaido.app.extra.AUTO_SPACE_FIXTURE"
 
     private const val ASSET_NAME = "auto-space-fixtures.txt"

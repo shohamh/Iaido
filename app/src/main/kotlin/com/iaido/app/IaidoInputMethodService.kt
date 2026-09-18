@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import android.inputmethodservice.InputMethodService
+import android.content.pm.ApplicationInfo
 import android.text.InputType
 import android.os.Handler
 import android.os.Looper
@@ -36,10 +37,19 @@ import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SegmentationOption
 import com.iaido.core.recognition.SessionCorrectionHistory
+import com.iaido.core.recognition.SessionCorrectionHistorySnapshot
 import com.iaido.core.recognition.SuggestionChip
+import com.iaido.core.state.TypingSessionSnapshot
 import com.iaido.core.typing.SpacingMode
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 class IaidoInputMethodService : InputMethodService() {
@@ -50,8 +60,10 @@ class IaidoInputMethodService : InputMethodService() {
     private var activeLanguage = Language.ENGLISH
     internal var spacingModeForTypingCoordinator = SpacingMode.INFER_SPACES
         private set
+    private var splitGraceWindowMs = SettingsDefaults.GRACE_WINDOW_MS.toLong()
+    private val commandBindings = CommandBindingSet()
     private val commandMode = CommandModeController(::executeCommand)
-    private val commandDispatcher = CommandGestureDispatcher(CommandBindingSet(), ::executeCommand)
+    private val commandDispatcher = CommandGestureDispatcher(commandBindings, ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
@@ -79,8 +91,13 @@ class IaidoInputMethodService : InputMethodService() {
     private var backspaceSwipeDeletedCount = 0
     private val inferenceSelectionGuard = InferenceSelectionGuard()
     private val correctionExecutor = Executors.newSingleThreadExecutor()
+    private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
+    private val runtimeState = KeyboardRuntimeState()
+    private val runtimeReadiness = KeyboardRuntimeReadiness()
+    private var activeRuntimeRevision: Long? = null
+    private var pendingDebugRestoreId: Long? = null
     private val runtimeCandidateRanker by lazy {
         RuntimeCandidateRanker(
             CoreEngineDexLoader(
@@ -185,7 +202,8 @@ class IaidoInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         inputMethodLifecycleOwner.onCreate()
-        loadSpacingMode()
+        observeKeyboardSettings()
+        if (isDebugBuild()) observeDebugStateRequests()
         correctionExecutor.execute {
             val persisted = learningRepository.entries()
             mainHandler.post { learningDictionary.restore(persisted) }
@@ -198,8 +216,8 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
-        loadSpacingMode()
         return ComposeView(this).also { view ->
+            if (activeRuntimeRevision == null) beginRuntimeRevision()
             inputMethodLifecycleOwner.onStartInputView()
             view.setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
             view.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
@@ -211,7 +229,8 @@ class IaidoInputMethodService : InputMethodService() {
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         swipeTypingCoordinator.onNonSwipeInput()
         super.onStartInputView(info, restarting)
-        loadSpacingMode()
+        val runtimeRevision = beginRuntimeRevision()
+        if (currentInputConnection != null) runtimeReadiness.markInputConnectionBound(runtimeRevision)
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
         correctionHistory.clear()
@@ -249,6 +268,7 @@ class IaidoInputMethodService : InputMethodService() {
         splitGraceHandler.removeCallbacksAndMessages(null)
         inferenceSelectionGuard.clear()
         textObservationEnabled = false
+        invalidateRuntimeReadiness()
     }
 
     override fun onUpdateSelection(
@@ -280,10 +300,12 @@ class IaidoInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         inputMethodLifecycleOwner.onDestroy()
+        settingsScope.cancel()
         correctionExecutor.shutdownNow()
         learningDatabase.value.close()
         splitGraceHandler.removeCallbacksAndMessages(null)
         composeInputView = null
+        invalidateRuntimeReadiness()
         super.onDestroy()
     }
 
@@ -408,13 +430,136 @@ class IaidoInputMethodService : InputMethodService() {
                 )
             }
         }
+        activeRuntimeRevision?.let { revision ->
+            view.post {
+                runtimeReadiness.markInputViewRendered(revision)
+                publishRuntimeReadyIfComplete(revision)
+            }
+        }
     }
 
-    private fun loadSpacingMode() {
-        correctionExecutor.execute {
-            val storedValue = runBlocking { applicationContext.settingsStore.data.first()[spacingModeKey] }
-            val resolvedMode = spacingModeFromStoredValue(storedValue)
-            mainHandler.post { spacingModeForTypingCoordinator = resolvedMode }
+    private fun beginRuntimeRevision(): Long {
+        val revision = runtimeReadiness.beginRestore()
+        activeRuntimeRevision = revision
+        applicationContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .remove(DebugAutoSpaceFixtures.RUNTIME_READY_REVISION_KEY)
+            .commit()
+        return revision
+    }
+
+    private fun publishRuntimeReadyIfComplete(revision: Long) {
+        if (!runtimeReadiness.isReady(revision)) return
+        val preferences = applicationContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+        preferences.edit().putLong(DebugAutoSpaceFixtures.RUNTIME_READY_REVISION_KEY, revision).apply()
+        pendingDebugRestoreId?.let { requestId ->
+            preferences.edit()
+                .putLong(DebugAutoSpaceFixtures.STATE_RESPONSE_ID_KEY, requestId)
+                .remove(DebugAutoSpaceFixtures.STATE_RESPONSE_ERROR_KEY)
+                .commit()
+            pendingDebugRestoreId = null
+        }
+    }
+
+    private fun invalidateRuntimeReadiness() {
+        runtimeReadiness.invalidate()
+        activeRuntimeRevision = null
+        applicationContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .remove(DebugAutoSpaceFixtures.RUNTIME_READY_REVISION_KEY)
+            .commit()
+    }
+
+    private fun observeDebugStateRequests() {
+        settingsScope.launch {
+            val preferences = applicationContext
+                .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+            var consumedRequestId = preferences.getLong(DebugAutoSpaceFixtures.STATE_RESPONSE_ID_KEY, -1L)
+            while (isActive) {
+                val requestId = preferences.getLong(DebugAutoSpaceFixtures.STATE_REQUEST_ID_KEY, -1L)
+                val requestJson = preferences.getString(DebugAutoSpaceFixtures.STATE_REQUEST_JSON_KEY, null)
+                if (requestId > consumedRequestId && requestJson != null) {
+                    consumedRequestId = requestId
+                    val decoded = runCatching { KeyboardStateJsonCodec.decode(requestJson) }
+                    mainHandler.post {
+                        decoded.fold(
+                            onSuccess = { snapshot -> applyDebugStateSnapshot(requestId, snapshot) },
+                            onFailure = { error ->
+                                preferences.edit()
+                                    .putLong(DebugAutoSpaceFixtures.STATE_RESPONSE_ID_KEY, requestId)
+                                    .putString(
+                                        DebugAutoSpaceFixtures.STATE_RESPONSE_ERROR_KEY,
+                                        error.message ?: "Invalid keyboard state snapshot",
+                                    )
+                                    .commit()
+                            },
+                        )
+                    }
+                }
+                delay(25L)
+            }
+        }
+    }
+
+    private fun applyDebugStateSnapshot(requestId: Long, snapshot: com.iaido.core.state.KeyboardStateSnapshot) {
+        check(isDebugBuild()) { "Debug state restore is unavailable in release builds" }
+        val session = snapshot.session ?: emptyTypingSessionSnapshot()
+        swipeTypingCoordinator.onNonSwipeInput()
+        splitController.cancel()
+        splitGraceHandler.removeCallbacksAndMessages(null)
+        inferenceSelectionGuard.clear()
+        clearBackspaceSwipe()
+        pendingManualEdit.value = null
+        languageSwitcher.select(session.language)
+        activeLanguage = session.language
+        spacingModeForTypingCoordinator = snapshot.profile.spacingMode
+        flowCorrectionEngine.setMaxCascadeDepth(snapshot.profile.flowCorrectionDepth)
+        splitGraceWindowMs = snapshot.profile.splitGraceWindowMs
+        splitController.updateGraceWindowMs(splitGraceWindowMs)
+        commandBindings.replaceAll(snapshot.profile.commandBindings)
+        learningDictionary.restore(snapshot.profile.dictionary)
+        correctionHistory.restore(session.correctionHistory)
+        cursorPosition = session.cursorPosition
+        pendingCandidates = session.pendingCandidates.takeIf { it.isNotEmpty() }
+        runtimeState.restore(session)
+        refreshSuggestionChips()
+        pendingDebugRestoreId = requestId
+        val revision = beginRuntimeRevision()
+        if (currentInputConnection != null) runtimeReadiness.markInputConnectionBound(revision)
+        composeInputView?.let(::renderInputView)
+    }
+
+    private fun emptyTypingSessionSnapshot() = TypingSessionSnapshot(
+        language = Language.ENGLISH,
+        correctionHistory = SessionCorrectionHistorySnapshot(nextId = 0, entries = emptyList()),
+        cursorPosition = 0,
+        pendingCandidates = emptyList(),
+    )
+
+    private fun isDebugBuild(): Boolean =
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    private fun observeKeyboardSettings() {
+        settingsScope.launch {
+            applicationContext.settingsStore.data
+                .map(::keyboardSettingsFromPreferences)
+                .collectLatest { resolvedMode ->
+                    mainHandler.post {
+                        spacingModeForTypingCoordinator = resolvedMode.spacingMode
+                        flowCorrectionEngine.setMaxCascadeDepth(resolvedMode.flowCorrectionDepth)
+                        splitGraceWindowMs = resolvedMode.splitGraceWindowMs
+                        splitController.updateGraceWindowMs(splitGraceWindowMs)
+                        commandBindings.replaceAll(resolvedMode.commandBindings)
+                        applicationContext
+                            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, MODE_PRIVATE)
+                            .edit()
+                            .putString(DebugAutoSpaceFixtures.ACTIVE_SPACING_MODE_KEY, resolvedMode.spacingMode.name)
+                            .apply()
+                    }
+                }
         }
     }
 

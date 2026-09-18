@@ -21,6 +21,20 @@ SHA-256 checksum, and a versioned JSON manifest. Wireless ADB pairing is done
 once through Android Studio or `adb pair`; subsequent installs use the device
 serial passed to `deploy_app.ps1`.
 
+## Keyboard profile migration
+
+Open Iaido Settings and use **Export profile** to save a versioned,
+checksum-protected JSON file through Android's document picker. The file contains
+typing settings, command bindings, and learned words/ngrams; it does not contain
+the text in the currently focused editor. Use **Import profile** on the new phone
+to validate and replace the stored profile. Reopen the keyboard afterward so the
+IME service reloads imported learning data.
+
+The same validated snapshot model is used by debug E2E setup. It restores model
+state through a monotonic runtime revision and waits until both the input
+connection and rendered keyboard acknowledge that revision; Android runtime
+handles and in-flight gestures are intentionally never serialized.
+
 ## In-app APK updates
 
 Settings can download the newest stable `app-release.apk` from the GitHub

@@ -9,7 +9,7 @@ data class SplitWordParts(
 )
 
 /** Collects concurrent partial gestures until the bounded grace window closes. */
-class SplitGestureSession(private val graceWindowMs: Long = 350L) {
+class SplitGestureSession(private var graceWindowMs: Long = 350L) {
     private data class ActivePart(
         val pointerId: Int,
         val touchOrder: Int,
@@ -83,6 +83,11 @@ class SplitGestureSession(private val graceWindowMs: Long = 350L) {
 
     fun cancel() {
         clear()
+    }
+
+    fun setGraceWindowMs(value: Long) {
+        require(value >= 0L) { "Grace window must not be negative" }
+        graceWindowMs = value
     }
 
     private fun expireIfLate(atMs: Long) {

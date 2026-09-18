@@ -2,7 +2,12 @@ package com.iaido.core.recognition
 
 import com.iaido.core.dictionary.WordEntry
 
-class SplitWordMerger(private val graceWindowMs: Long = 350L) {
+class SplitWordMerger(private var graceWindowMs: Long = 350L) {
+    fun setGraceWindowMs(value: Long) {
+        require(value >= 0L) { "Grace window must not be negative" }
+        graceWindowMs = value
+    }
+
     fun mergeParts(parts: List<String>, dictionary: List<WordEntry>): List<WordEntry> {
         if (parts.isEmpty() || parts.any { it.isEmpty() }) return emptyList()
         val merged = parts.joinToString(separator = "")

@@ -17,6 +17,11 @@ class LanguageSwitcher(
     var current: Language = initial
         private set
 
+    fun select(language: Language) {
+        require(language in enabled) { "Language is not enabled: $language" }
+        current = language
+    }
+
     fun next(): Language {
         current = enabled[(enabled.indexOf(current) + 1) % enabled.size]
         return current

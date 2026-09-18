@@ -196,13 +196,14 @@ object KeyboardStateJsonCodec {
                         end = entry.requiredInt("end"),
                         original = entry.requiredString("original"),
                         current = entry.requiredString("current"),
-                        candidates = entry.requiredArray("candidates").map { it.jsonPrimitive.content },
+                    candidates = entry.requiredArray("candidates").map { it.requiredStringValue("candidate") },
                         corrected = entry.requiredBoolean("corrected"),
                     )
                 },
             ),
             cursorPosition = session.requiredInt("cursorPosition"),
-            pendingCandidates = session.requiredArray("pendingCandidates").map { it.jsonPrimitive.content },
+            pendingCandidates = session.requiredArray("pendingCandidates")
+                .map { it.requiredStringValue("pending candidate") },
         )
     }
 
@@ -217,8 +218,14 @@ object KeyboardStateJsonCodec {
 
     private fun JsonObject.requiredArray(name: String): JsonArray = required(name).jsonArray
 
-    private fun JsonObject.requiredString(name: String): String = required(name).jsonPrimitive.let {
-        it.content
+    private fun JsonObject.requiredString(name: String): String = required(name).requiredStringValue(name)
+
+    private fun JsonElement.requiredStringValue(name: String): String {
+        val primitive = jsonPrimitive
+        require(primitive.toString().startsWith("\"")) {
+            "JSON field '$name' must be a string"
+        }
+        return primitive.content
     }
 
     private fun JsonObject.requiredInt(name: String): Int = required(name).jsonPrimitive.int

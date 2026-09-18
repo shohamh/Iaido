@@ -8,6 +8,7 @@ internal class ImeSuiteSessionState {
     private var activeFixture: String? = null
     private var activeIme: String? = null
     private var activeLanguage: Language? = null
+    private var baselineId: String? = null
 
     fun needsBootstrap(requestedFixture: String?): Boolean =
         !ready || activeFixture != requestedFixture
@@ -15,6 +16,12 @@ internal class ImeSuiteSessionState {
     fun needsImeSelection(imeId: String): Boolean = !ready || activeIme != imeId
 
     fun languageOrNull(): Language? = activeLanguage
+
+    fun baselineOrNull(): String? = baselineId
+
+    fun setBaseline(id: String) {
+        baselineId = id
+    }
 
     fun markReady(
         fixture: String?,
@@ -29,5 +36,6 @@ internal class ImeSuiteSessionState {
 
     fun invalidate() {
         ready = false
+        baselineId = null
     }
 }

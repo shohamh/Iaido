@@ -49,6 +49,9 @@ data class PersonalDictionarySnapshot(
         require(customWords.distinct().size == customWords.size) {
             "Dictionary snapshot contains duplicate custom words"
         }
+        require(customWords.all { word -> wordOverrides.any { it.word == word } }) {
+            "Custom words must have a corresponding word override"
+        }
     }
 
     companion object {

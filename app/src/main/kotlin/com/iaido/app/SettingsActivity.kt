@@ -6,7 +6,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,9 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import com.iaido.core.typing.SpacingMode
@@ -62,6 +61,29 @@ class SettingsActivity : ComponentActivity() {
         var status by remember { mutableStateOf("Ready") }
         var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
         val appUpdateClient = remember { AppUpdateClient(this@SettingsActivity) }
+        val exportProfile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            lifecycleScope.launch {
+                status = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val profile = readProfile()
+                        KeyboardProfileFileTransfer.write(this@SettingsActivity, uri, profile, appVersion())
+                    }
+                    "Profile exported"
+                }.getOrElse { "Export failed: ${it.message ?: "unknown error"}" }
+            }
+        }
+        val importProfile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            lifecycleScope.launch {
+                status = runCatching {
+                    withContext(Dispatchers.IO) {
+                        replaceProfile(KeyboardProfileFileTransfer.read(this@SettingsActivity, uri))
+                    }
+                    "Profile imported; reopen the keyboard to apply learned words"
+                }.getOrElse { "Import failed: ${it.message ?: "invalid profile"}" }
+            }
+        }
 
         LaunchedEffect(Unit) {
             val preferences = settingsStore.data.first()
@@ -133,6 +155,14 @@ class SettingsActivity : ComponentActivity() {
                 appUpdateStatusLabel(appUpdateState),
                 color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             )
+
+            HorizontalDivider()
+            Text("Profile migration", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Text("Export settings and learned words to move Iaido to another phone. Editor text is never included.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { exportProfile.launch("iaido-profile.json") }) { Text("Export profile") }
+                Button(onClick = { importProfile.launch(arrayOf("application/json", "text/plain")) }) { Text("Import profile") }
+            }
 
             HorizontalDivider()
             Text("Gestures", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
@@ -262,33 +292,37 @@ class SettingsActivity : ComponentActivity() {
             database.close()
         }
     }
-}
 
-internal object SettingsDefaults {
-    const val CASCADE_DEPTH = 2
-    const val GRACE_WINDOW_MS = 350
-    val CASCADE_DEPTH_RANGE = 0..4
-    val GRACE_WINDOW_RANGE = 300..400
-}
+    private fun readProfile(): com.iaido.core.state.KeyboardProfileSnapshot {
+        val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+            .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+            .build()
+        return try {
+            KeyboardProfileStore(
+                DataStoreKeyboardSettingsDataSource(applicationContext),
+                RoomPersonalDictionarySnapshotDataSource(database, emptyList()),
+            ).read()
+        } finally {
+            database.close()
+        }
+    }
 
-private val commandBindingKey = stringPreferencesKey("command_binding_language")
-private val cascadeDepthKey = intPreferencesKey("flow_correction_depth")
-private val graceWindowKey = intPreferencesKey("split_grace_window_ms")
-internal val spacingModeKey = stringPreferencesKey("spacing_mode")
+    private fun replaceProfile(profile: com.iaido.core.state.KeyboardProfileSnapshot) {
+        val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
+            .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
+            .build()
+        try {
+            KeyboardProfileStore(
+                DataStoreKeyboardSettingsDataSource(applicationContext),
+                RoomPersonalDictionarySnapshotDataSource(database, emptyList()),
+            ).replace(profile)
+        } finally {
+            database.close()
+        }
+    }
 
-internal val Context.settingsStore by preferencesDataStore(name = "settings")
-
-internal fun spacingModeFromStoredValue(value: String?): SpacingMode = when (value) {
-    "manual" -> SpacingMode.MANUAL
-    "after_swipe" -> SpacingMode.AFTER_SWIPE
-    "infer_spaces" -> SpacingMode.INFER_SPACES
-    else -> SpacingMode.INFER_SPACES
-}
-
-internal fun spacingModeStoredValue(mode: SpacingMode): String = when (mode) {
-    SpacingMode.MANUAL -> "manual"
-    SpacingMode.AFTER_SWIPE -> "after_swipe"
-    SpacingMode.INFER_SPACES -> "infer_spaces"
+    private fun appVersion(): String =
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
 }
 
 internal data class SpacingModeOption(

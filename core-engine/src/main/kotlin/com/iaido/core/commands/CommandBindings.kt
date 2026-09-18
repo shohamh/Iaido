@@ -11,7 +11,16 @@ data class CommandBinding(val slot: String, val trigger: String, val action: Ges
 
 class CommandBindingSet(initial: List<CommandBinding> = defaultBindings) {
     private val mutableBindings = initial.toMutableList()
+    init {
+        validate(mutableBindings)
+    }
     val bindings: List<CommandBinding> get() = mutableBindings.toList()
+
+    fun replaceAll(replacements: List<CommandBinding>) {
+        validate(replacements)
+        mutableBindings.clear()
+        mutableBindings += replacements
+    }
 
     fun actionFor(trigger: String): GestureAction? = mutableBindings.firstOrNull { it.trigger == trigger }?.action
 
@@ -23,6 +32,15 @@ class CommandBindingSet(initial: List<CommandBinding> = defaultBindings) {
     }
 
     private companion object {
+        fun validate(bindings: List<CommandBinding>) {
+            require(bindings.map { it.slot }.distinct().size == bindings.size) {
+                "Command slots must be unique"
+            }
+            require(bindings.map { it.trigger }.distinct().size == bindings.size) {
+                "Command triggers must be unique"
+            }
+        }
+
         val defaultBindings = listOf(
             CommandBinding("language", "two-finger-horizontal", GestureAction.SWITCH_LANGUAGE),
             CommandBinding("dismiss", "two-finger-down", GestureAction.DISMISS),

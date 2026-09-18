@@ -3,6 +3,7 @@ package com.iaido.app
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.iaido.core.commands.CommandBinding
@@ -52,14 +53,7 @@ internal class DataStoreKeyboardSettingsDataSource(
     private val context: Context,
 ) : KeyboardSettingsDataSource {
     override fun read(): KeyboardSettings = runBlocking {
-        val preferences = context.settingsStore.data.first()
-        KeyboardSettings(
-            spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey]),
-            flowCorrectionDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH,
-            splitGraceWindowMs = (preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS).toLong(),
-            commandBindings = commandBindingsFromStoredValue(preferences[commandBindingKey]),
-            preferredLanguage = languageFromStoredValue(preferences[preferredLanguageKey]),
-        )
+        keyboardSettingsFromPreferences(context.settingsStore.data.first())
     }
 
     override fun replace(settings: KeyboardSettings) {
@@ -84,6 +78,14 @@ internal class DataStoreKeyboardSettingsDataSource(
     }
 }
 
+internal fun keyboardSettingsFromPreferences(preferences: Preferences): KeyboardSettings = KeyboardSettings(
+    spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey]),
+    flowCorrectionDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH,
+    splitGraceWindowMs = (preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS).toLong(),
+    commandBindings = commandBindingsFromStoredValue(preferences[commandBindingKey]),
+    preferredLanguage = languageFromStoredValue(preferences[preferredLanguageKey]),
+)
+
 internal fun spacingModeFromStoredValue(value: String?): SpacingMode = when (value) {
     "manual" -> SpacingMode.MANUAL
     "after_swipe" -> SpacingMode.AFTER_SWIPE
@@ -101,7 +103,7 @@ internal fun languageFromStoredValue(value: String?): Language = value
     ?.let { stored -> Language.entries.firstOrNull { it.name == stored } }
     ?: Language.ENGLISH
 
-private fun commandBindingsFromStoredValue(value: String?): List<CommandBinding> {
+internal fun commandBindingsFromStoredValue(value: String?): List<CommandBinding> {
     val defaults = CommandBindingSet().bindings
     val languageTrigger = value?.takeIf { it.isNotBlank() } ?: return defaults
     return defaults.map { binding ->

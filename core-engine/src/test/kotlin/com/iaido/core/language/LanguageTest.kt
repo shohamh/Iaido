@@ -36,4 +36,14 @@ class LanguageTest {
         assertTrue(switcher.handleTwoFingerSwipe(2f, 1f, 2))
         assertEquals(Language.HEBREW, switcher.current)
     }
+
+    @Test
+    fun `select restores an imported language without changing enabled languages`() {
+        val switcher = LanguageSwitcher()
+
+        switcher.select(Language.HEBREW)
+
+        assertEquals(Language.HEBREW, switcher.current)
+        assertEquals(Language.ENGLISH, switcher.next())
+    }
 }

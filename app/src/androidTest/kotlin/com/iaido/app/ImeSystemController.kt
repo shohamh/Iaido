@@ -63,6 +63,33 @@ class ImeSystemController(
         }
     }
 
+    fun waitForSpacingMode(mode: SpacingMode) {
+        val preferences = instrumentation.targetContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, Context.MODE_PRIVATE)
+        val deadline = SystemClock.elapsedRealtime() + DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (preferences.getString(DebugAutoSpaceFixtures.ACTIVE_SPACING_MODE_KEY, null) == mode.name) {
+                return
+            }
+            SystemClock.sleep(25L)
+        }
+        check(false) {
+            "Spacing mode '$mode' did not reach the active IME"
+        }
+    }
+
+    fun waitForRuntimeReady(minimumRevision: Long = 0L): Long {
+        val preferences = instrumentation.targetContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, Context.MODE_PRIVATE)
+        val deadline = SystemClock.elapsedRealtime() + DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val revision = preferences.getLong(DebugAutoSpaceFixtures.RUNTIME_READY_REVISION_KEY, -1L)
+            if (revision >= minimumRevision && revision >= 0L) return revision
+            SystemClock.sleep(25L)
+        }
+        error("IME runtime did not publish ready revision >= $minimumRevision")
+    }
+
     fun setAutoSpaceFixture(autoSpaceFixture: String?) {
         instrumentation.targetContext
             .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, Context.MODE_PRIVATE)
