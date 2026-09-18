@@ -8,22 +8,40 @@ class CoreEngineDexLoader(
     private val context: Context,
     private val store: CoreEngineUpdateStore,
 ) {
+    private var cachedArtifactSignature: String? = null
+    private var cachedLoader: ClassLoader? = null
+
     fun load(className: String): Class<*>? {
         val current = store.currentArtifact() ?: return null
         return tryLoad(current, className) ?: run {
             if (!store.rollback()) return null
+            clearCache()
             store.currentArtifact()?.let { tryLoad(it, className) }
         }
     }
 
     private fun tryLoad(artifact: java.io.File, className: String): Class<*>? = runCatching {
-        UpdateFirstDexClassLoader(
-            artifact.absolutePath,
-            context.codeCacheDir.absolutePath,
-            null,
-            context.classLoader,
-        ).loadClass(className)
+        loaderFor(artifact).loadClass(className)
     }.getOrNull()
+
+    private fun loaderFor(artifact: java.io.File): ClassLoader {
+        val signature = "${artifact.absolutePath}:${artifact.length()}:${artifact.lastModified()}"
+        if (signature != cachedArtifactSignature) {
+            cachedLoader = UpdateFirstDexClassLoader(
+                artifact.absolutePath,
+                context.codeCacheDir.absolutePath,
+                null,
+                context.classLoader,
+            )
+            cachedArtifactSignature = signature
+        }
+        return cachedLoader!!
+    }
+
+    private fun clearCache() {
+        cachedArtifactSignature = null
+        cachedLoader = null
+    }
 
     private class UpdateFirstDexClassLoader(
         dexPath: String,

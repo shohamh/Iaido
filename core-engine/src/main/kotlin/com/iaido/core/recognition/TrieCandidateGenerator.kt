@@ -6,16 +6,13 @@ import com.iaido.core.gesture.GesturePoint
 import com.iaido.core.layout.KeyboardLayout
 import kotlin.math.sqrt
 
-/**
- * Prunes the dictionary to words whose letters plausibly lie along the
- * drawn path, in order. This is a straightforward per-word proximity
- * check rather than a literal trie traversal -- fine for Stage 1's small
- * test dictionary. A trie-backed implementation can replace this one
- * later without changing [CandidateGenerator] callers.
- */
+/** Prunes dictionary words whose letters plausibly lie along the drawn path, in order. */
 class TrieCandidateGenerator(
     private val proximityThreshold: Float = ScoringConstants.PROXIMITY_THRESHOLD,
 ) : CandidateGenerator {
+
+    private var indexedDictionary: List<WordEntry>? = null
+    private var dictionaryIndex: Node = Node()
 
     override fun generateCandidates(
         path: GesturePath,
@@ -23,32 +20,58 @@ class TrieCandidateGenerator(
         dictionary: List<WordEntry>,
     ): List<WordEntry> {
         val normalizedPath = layout.normalize(path)
-        return dictionary.filter { entry -> isPlausible(entry.word, normalizedPath, layout) }
+        val normalizedCenters = layout.keys.associate { key -> key.letter to layout.normalize(key) }
+        val index = indexFor(dictionary)
+        val matches = mutableSetOf<String>()
+        collectMatches(index, normalizedPath, normalizedCenters, 0, matches)
+        return dictionary.filter { it.word in matches }
     }
 
-    private fun isPlausible(word: String, path: GesturePath, layout: KeyboardLayout): Boolean {
-        var searchStartIndex = 0
-        for (letter in word.lowercase()) {
-            val key = layout.normalize(layout.centerOf(letter))
-            val matchIndex = findNearestPointFrom(searchStartIndex, key, path)
-            if (matchIndex == -1) return false
-            searchStartIndex = matchIndex
+    private fun indexFor(dictionary: List<WordEntry>): Node {
+        if (dictionary === indexedDictionary) return dictionaryIndex
+        val root = Node()
+        dictionary.forEach { entry ->
+            var node = root
+            entry.word.lowercase().forEach { letter ->
+                node = node.children.getOrPut(letter) { Node() }
+            }
+            node.words += entry.word
         }
-        return true
+        indexedDictionary = dictionary
+        dictionaryIndex = root
+        return root
     }
 
-    private fun findNearestPointFrom(startIndex: Int, key: com.iaido.core.layout.KeyPosition, path: GesturePath): Int {
-        for (i in startIndex until path.points.size) {
-            if (distance(path.points[i], key.x, key.y) <= proximityThreshold) {
-                return i
+    private fun collectMatches(
+        node: Node,
+        path: GesturePath,
+        centers: Map<Char, com.iaido.core.layout.KeyPosition>,
+        startIndex: Int,
+        matches: MutableSet<String>,
+    ) {
+        node.words.forEach(matches::add)
+        node.children.forEach { (letter, child) ->
+            val key = centers[letter] ?: throw NoSuchElementException("No key for letter '$letter'")
+            val matchIndex = findNearestPointFrom(startIndex, key, path)
+            if (matchIndex != -1) {
+                collectMatches(child, path, centers, matchIndex, matches)
             }
         }
-        return -1
     }
+
+    private fun findNearestPointFrom(startIndex: Int, key: com.iaido.core.layout.KeyPosition, path: GesturePath): Int =
+        (startIndex until path.points.size).firstOrNull { i ->
+            distance(path.points[i], key.x, key.y) <= proximityThreshold
+        } ?: -1
 
     private fun distance(point: GesturePoint, x: Float, y: Float): Float {
         val dx = point.x - x
         val dy = point.y - y
         return sqrt(dx * dx + dy * dy)
+    }
+
+    private class Node {
+        val children = linkedMapOf<Char, Node>()
+        val words = mutableListOf<String>()
     }
 }
