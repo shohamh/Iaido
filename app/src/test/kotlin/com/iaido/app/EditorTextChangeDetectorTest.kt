@@ -38,6 +38,16 @@ class EditorTextChangeDetectorTest {
     }
 
     @Test
+    fun `own edit delivered through an intermediate snapshot is consumed without a candidate`() {
+        val detector = EditorTextChangeDetector()
+        detector.reset(EditorSnapshot("hello", selectionStart = 5, selectionEnd = 5))
+        detector.expectOwnEdit(start = 5, end = 5, replacement = " world")
+
+        assertNull(detector.observe(EditorSnapshot("hello w", selectionStart = 7, selectionEnd = 7)))
+        assertNull(detector.observe(EditorSnapshot("hello world", selectionStart = 11, selectionEnd = 11)))
+    }
+
+    @Test
     fun `a genuine external edit after a same-length own edit is still detected`() {
         val detector = EditorTextChangeDetector()
         detector.reset(EditorSnapshot("X in", selectionStart = 4, selectionEnd = 4))

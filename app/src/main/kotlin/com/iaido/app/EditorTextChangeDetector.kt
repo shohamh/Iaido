@@ -16,7 +16,23 @@ data class ManualEditCandidate(
 
 /** Diffs editor snapshots and separates Iaido edits from external edits. */
 class EditorTextChangeDetector {
-    private data class ExpectedEdit(val start: Int, val end: Int, val replacement: String)
+    private data class ExpectedEdit(
+        val start: Int,
+        val end: Int,
+        val replacement: String,
+        val expectedText: String?,
+        val prefix: String?,
+        val suffix: String?,
+    ) {
+        fun isIntermediate(text: String): Boolean {
+            if (expectedText == null || prefix == null || suffix == null) return false
+            if (!text.startsWith(prefix) || !text.endsWith(suffix)) return false
+            val middleEnd = text.length - suffix.length
+            if (middleEnd < prefix.length) return false
+            val middle = text.substring(prefix.length, middleEnd)
+            return replacement.startsWith(middle)
+        }
+    }
 
     private var previous: EditorSnapshot? = null
     private var expected: ExpectedEdit? = null
@@ -27,7 +43,21 @@ class EditorTextChangeDetector {
     }
 
     fun expectOwnEdit(start: Int, end: Int, replacement: String) {
-        expected = ExpectedEdit(start, end, replacement)
+        val base = previous
+        val localStart = base?.let { start - it.offset }
+        val localEnd = base?.let { end - it.offset }
+        val canReconstruct = localStart != null && localEnd != null &&
+            localStart >= 0 && localEnd >= localStart && localEnd <= base.text.length
+        expected = ExpectedEdit(
+            start = start,
+            end = end,
+            replacement = replacement,
+            expectedText = if (canReconstruct) {
+                base.text.substring(0, localStart!!) + replacement + base.text.substring(localEnd!!)
+            } else null,
+            prefix = if (canReconstruct) base.text.substring(0, localStart!!) else null,
+            suffix = if (canReconstruct) base.text.substring(localEnd!!) else null,
+        )
     }
 
     fun observe(snapshot: EditorSnapshot): ManualEditCandidate? {
@@ -37,8 +67,14 @@ class EditorTextChangeDetector {
 
         val edit = singleEdit(before.text, snapshot.text)
         val expectedEdit = expected
-        expected = null
-        if (expectedEdit != null && appliesTo(expectedEdit, before) == snapshot.text) return null
+        if (expectedEdit != null) {
+            if (expectedEdit.expectedText == snapshot.text || expectedEdit.isIntermediate(snapshot.text)) {
+                if (expectedEdit.expectedText == snapshot.text) expected = null
+                return null
+            }
+            expected = null
+            if (appliesTo(expectedEdit, before) == snapshot.text) return null
+        }
 
         val token = wordRangeAround(before.text, edit.start) ?: return null
         val original = before.text.substring(token.first, token.last + 1)
