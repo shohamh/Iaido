@@ -8,8 +8,35 @@ class AppUpdateUiStateTest {
     @Test
     fun `busy states disable the update action`() {
         assertEquals(false, appUpdateButtonEnabled(AppUpdateUiState.Checking))
-        assertEquals(false, appUpdateButtonEnabled(AppUpdateUiState.Downloading))
+        assertEquals(false, appUpdateButtonEnabled(AppUpdateUiState.Downloading()))
         assertEquals(true, appUpdateButtonEnabled(AppUpdateUiState.Idle))
+    }
+
+    @Test
+    fun `downloading state exposes progress and eta`() {
+        val state = AppUpdateUiState.Downloading(
+            downloadedBytes = 4L,
+            totalBytes = 10L,
+            etaMillis = 3_000L,
+        )
+
+        assertEquals(0.4f, state.progressFraction)
+        assertEquals(
+            "Downloading the newest Iaido release… 40% · 4 B / 10 B · about 3 seconds remaining",
+            appUpdateStatusLabel(state),
+        )
+    }
+
+    @Test
+    fun `eta is estimated from observed byte rate`() {
+        assertEquals(
+            3_000L,
+            estimateDownloadRemainingMillis(downloadedBytes = 4L, totalBytes = 10L, elapsedMillis = 2_000L),
+        )
+        assertEquals(
+            null,
+            estimateDownloadRemainingMillis(downloadedBytes = 0L, totalBytes = 10L, elapsedMillis = 2_000L),
+        )
     }
 
     @Test

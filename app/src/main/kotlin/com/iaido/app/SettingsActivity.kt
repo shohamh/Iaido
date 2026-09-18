@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.SystemClock
 import android.content.pm.PackageManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -23,6 +24,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
@@ -130,8 +132,29 @@ class SettingsActivity : ComponentActivity() {
                 return
             }
 
-            appUpdateState = AppUpdateUiState.Downloading
-            val result = withContext(Dispatchers.IO) { appUpdateClient.update() }
+            val downloadStartedAt = SystemClock.elapsedRealtime()
+            appUpdateState = AppUpdateUiState.Downloading()
+            val result = withContext(Dispatchers.IO) {
+                appUpdateClient.update(
+                    onDownloadProgress = { downloadedBytes, totalBytes ->
+                        val elapsedMillis = SystemClock.elapsedRealtime() - downloadStartedAt
+                        val etaMillis = estimateDownloadRemainingMillis(
+                            downloadedBytes = downloadedBytes,
+                            totalBytes = totalBytes,
+                            elapsedMillis = elapsedMillis,
+                        )
+                        runOnUiThread {
+                            if (appUpdateState is AppUpdateUiState.Downloading) {
+                                appUpdateState = AppUpdateUiState.Downloading(
+                                    downloadedBytes = downloadedBytes,
+                                    totalBytes = totalBytes,
+                                    etaMillis = etaMillis,
+                                )
+                            }
+                        }
+                    },
+                )
+            }
             appUpdateState = when (result) {
                 AppUpdateResult.UpToDate -> AppUpdateUiState.UpToDate
                 is AppUpdateResult.ReadyToInstall ->
@@ -222,6 +245,14 @@ class SettingsActivity : ComponentActivity() {
                         startActivity(appUpdateClient.installIntent(ready.apk))
                     },
                 ) { Text("Install update") }
+            }
+            (appUpdateState as? AppUpdateUiState.Downloading)?.let { downloading ->
+                downloading.progressFraction?.let { fraction ->
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             Text(
                 appUpdateStatusLabel(appUpdateState),

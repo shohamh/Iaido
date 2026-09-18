@@ -80,13 +80,19 @@ class AppUpdateClient(
     private val incomingApk = File(updateDirectory, INCOMING_APK)
     private val stagedApk = File(updateDirectory, STAGED_APK)
 
-    fun update(onDownloadStarted: () -> Unit = {}): AppUpdateResult {
+    fun update(
+        onDownloadStarted: () -> Unit = {},
+        onDownloadProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit = { _, _ -> },
+    ): AppUpdateResult {
         return synchronized(APP_UPDATE_LOCK) {
-            updateInternal(onDownloadStarted)
+            updateInternal(onDownloadStarted, onDownloadProgress)
         }
     }
 
-    private fun updateInternal(onDownloadStarted: () -> Unit): AppUpdateResult {
+    private fun updateInternal(
+        onDownloadStarted: () -> Unit,
+        onDownloadProgress: (Long, Long?) -> Unit,
+    ): AppUpdateResult {
         clearIncoming()
         val result = runCatching {
             val release = parseRelease(readText(requestUrl))
@@ -108,7 +114,7 @@ class AppUpdateClient(
             }
             val installed = installedPackageInfo()
             onDownloadStarted()
-            download(asset.browserDownloadUrl, incomingApk, asset.sizeBytes)
+            download(asset.browserDownloadUrl, incomingApk, asset.sizeBytes, onDownloadProgress)
             val archive = archiveInfo(incomingApk)
             when (val validation = validateAppArchive(
                 archive = archive,
@@ -238,7 +244,12 @@ class AppUpdateClient(
         }
     }
 
-    private fun download(urlValue: String, target: File, expectedSize: Long?) {
+    private fun download(
+        urlValue: String,
+        target: File,
+        expectedSize: Long?,
+        onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+    ) {
         val url = URL(urlValue)
         require(isTrustedAppReleaseUrl(url.toString())) { "APK asset URL is not trusted" }
         val connection = openConnection(url)
@@ -246,6 +257,8 @@ class AppUpdateClient(
             checkResponse(connection)
             val contentLength = connection.contentLengthLong
             if (contentLength > MAX_APP_UPDATE_BYTES) error("APK exceeds the download size limit")
+            val totalBytes = expectedSize ?: contentLength.takeIf { it > 0L }
+            onProgress(0L, totalBytes)
             target.parentFile?.mkdirs()
             var total = 0L
             connection.inputStream.use { input ->
@@ -257,6 +270,7 @@ class AppUpdateClient(
                         total += count
                         if (total > MAX_APP_UPDATE_BYTES) error("APK exceeds the download size limit")
                         output.write(buffer, 0, count)
+                        onProgress(total, totalBytes)
                     }
                 }
             }
