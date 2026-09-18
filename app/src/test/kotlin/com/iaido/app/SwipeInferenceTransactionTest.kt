@@ -100,6 +100,20 @@ class SwipeInferenceTransactionTest {
         )
     }
 
+    @Test
+    fun `finalization does not retain one-letter fragments as alternatives for a word`() {
+        val alternatives = listOf(
+            option(listOf("Hello")),
+            option(listOf("Help")),
+            option(listOf("H")),
+        )
+
+        assertEquals(
+            listOf(listOf("Hello", "Help")),
+            inferenceWordCandidates(listOf("Hello"), alternatives),
+        )
+    }
+
     private fun unit(id: String, word: String): GestureUnit = GestureUnit(
         id = id,
         paths = listOf(GesturePath(listOf(GesturePoint(0f, 0f, 0L)))),

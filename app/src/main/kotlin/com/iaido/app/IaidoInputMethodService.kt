@@ -827,7 +827,14 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
         val word = wordForDisplayIndex(displayIndex) ?: return
-        val replacement = word.candidates.getOrNull(candidateIndex) ?: return
+        val chip = SuggestionChip(
+            word = word.current,
+            alternatives = word.candidates,
+            selectedIndex = word.candidates.indexOf(word.current).coerceAtLeast(0),
+            corrected = word.corrected,
+            id = word.id,
+        )
+        val replacement = displayCandidateForIndex(chip, candidateIndex) ?: return
         val changed = replaceSessionWord(word.id, replacement)
         if (changed && candidateIndex > 0 && activeLanguage == Language.ENGLISH) {
             recordLearning(

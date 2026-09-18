@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import com.iaido.core.recognition.SuggestionChip
+import com.iaido.core.recognition.ReplacementOption
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -96,6 +97,52 @@ class SuggestionReelMathTest {
 
         assertEquals(listOf("H", "he", "Hello"), candidates)
         assertEquals("Hello", candidates[selectedIndex])
+    }
+
+    @Test
+    fun `inline replacement reels expose word options without one-letter fragments`() {
+        val reels = inlineReplacementReels(
+            listOf(
+                ReplacementOption(listOf("Hello"), listOf("Hello"), 1.0),
+                ReplacementOption(listOf("Hello"), listOf("Help"), 0.9),
+                ReplacementOption(listOf("Hello"), listOf("H"), 0.8),
+            ),
+        )
+
+        assertEquals(1, reels.size)
+        assertEquals("Hello", reels.single().chip.word)
+        assertEquals(listOf("Hello", "Help"), reels.single().chip.alternatives)
+        assertEquals(listOf("Hello", "Help"), reels.single().options.map { it.replacementWords.single() })
+        assertEquals(3, inlineReplacementOptionIds(
+            listOf(
+                ReplacementOption(listOf("Hello"), listOf("Hello"), 1.0),
+                ReplacementOption(listOf("Hello"), listOf("Help"), 0.9),
+                ReplacementOption(listOf("Hello"), listOf("H"), 0.8),
+            ),
+        ).size)
+    }
+
+    @Test
+    fun `inline replacement reels create one block per active word`() {
+        val reels = inlineReplacementReels(
+            listOf(
+                ReplacementOption(listOf("hello", "world"), listOf("hello", "world"), 1.0),
+                ReplacementOption(listOf("hello", "world"), listOf("hi", "world"), 0.9),
+                ReplacementOption(listOf("hello", "world"), listOf("hello", "earth"), 0.8),
+            ),
+        )
+
+        assertEquals(listOf("hello", "world"), reels.map { it.chip.word })
+        assertEquals(listOf("hello", "hi"), reels[0].chip.alternatives)
+        assertEquals(listOf("world", "earth"), reels[1].chip.alternatives)
+    }
+
+    @Test
+    fun `display candidate lookup uses the same de-duplicated order as the reel`() {
+        val chip = SuggestionChip(word = "Hello", alternatives = listOf("Help"))
+
+        assertEquals("Help", displayCandidateForIndex(chip, 0))
+        assertEquals("Hello", displayCandidateForIndex(chip, 1))
     }
 
     @Test

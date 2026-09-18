@@ -103,6 +103,7 @@ internal fun inferenceWordCandidates(
         .filter { it.words.size == words.size }
         .map { it.words[index] }
         .distinct()
+        .filterNot { candidate -> words[index].length > 1 && candidate.length == 1 }
         .toList()
         .ifEmpty { listOf(words[index]) }
 }

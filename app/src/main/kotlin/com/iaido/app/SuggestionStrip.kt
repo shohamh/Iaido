@@ -67,6 +67,13 @@ fun SuggestionStrip(
     onReplacementCancel: () -> Unit = {},
 ) {
     val ordered = if (rtl) chips.asReversed() else chips
+    val inlineReels = remember(replacementOptions) { inlineReplacementReels(replacementOptions) }
+    val inlineOptionIds = remember(replacementOptions) {
+        inlineReplacementOptionIds(replacementOptions)
+    }
+    val groupedReplacementOptions = remember(replacementOptions, inlineOptionIds) {
+        replacementOptions.filterNot { it.id in inlineOptionIds }
+    }
     val chipSlotCount = ordered.maxOfOrNull {
         reelVisibleSlotCount(reelCandidatesForDisplay(it).size)
     }
@@ -78,18 +85,21 @@ fun SuggestionStrip(
     // populate earlier than the transaction resolves; provenance, not chip-attachment, is what
     // distinguishes the two cases -- see SuggestionStrip.kt task 9 report for why a chip-match
     // based filter doesn't work).
-    val splitOrLiveReplacementOptions = remember(replacementOptions, liveReplacementOptionIds) {
-        replacementOptions.filterNot { option ->
+    val splitOrLiveReplacementOptions = remember(groupedReplacementOptions, liveReplacementOptionIds) {
+        groupedReplacementOptions.filterNot { option ->
             option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
                 option.id !in liveReplacementOptionIds
         }
     }
+    val inlineSlotCount = inlineReels.maxOfOrNull { reel ->
+        reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size)
+    } ?: 0
     val replacementSlotCount = if (splitOrLiveReplacementOptions.isEmpty()) {
         0
     } else {
         reelVisibleSlotCount(splitOrLiveReplacementOptions.size)
     }
-    val visibleSlotCount = maxOf(chipSlotCount, replacementSlotCount)
+    val visibleSlotCount = maxOf(chipSlotCount, inlineSlotCount, replacementSlotCount)
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     // The outer strip's height is pinned to the maximum possible slot count so the strip
     // (and therefore the whole keyboard, which wraps its height around it) never grows or
@@ -119,6 +129,12 @@ fun SuggestionStrip(
             chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
         }
     }
+    val inlineReservedWidths = remember(inlineReels, bodyTextStyleKey) {
+        inlineReels.map { reel ->
+            val measuredWidthPx = textMeasurer.measure(text = reel.chip.word, style = bodyStyle).size.width
+            chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
+        }
+    }
     val joinAttachments = remember(chips, replacementOptions) {
         attachJoinCandidates(chips, replacementOptions)
     }
@@ -145,6 +161,19 @@ fun SuggestionStrip(
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
                 )
+            }
+        }
+        if (rtl) {
+            inlineReels.asReversed().forEachIndexed { index, reel ->
+                item(key = "inline-reel-${reel.chip.id}") {
+                    InlineReplacementChip(
+                        reel = reel,
+                        index = ordered.size + index,
+                        visibleSlotCount = visibleSlotCount,
+                        reservedWidthDp = inlineReservedWidths[inlineReels.lastIndex - index],
+                        onRelease = onReplacementRelease,
+                    )
+                }
             }
         }
         itemsIndexed(ordered, key = { _, chip -> chip.id ?: -1 }) { index, chip ->
@@ -188,6 +217,19 @@ fun SuggestionStrip(
                 onReplacementCancel = onReplacementCancel,
             )
         }
+        if (!rtl) {
+            inlineReels.forEachIndexed { index, reel ->
+                item(key = "inline-reel-${reel.chip.id}") {
+                    InlineReplacementChip(
+                        reel = reel,
+                        index = ordered.size + index,
+                        visibleSlotCount = visibleSlotCount,
+                        reservedWidthDp = inlineReservedWidths[index],
+                        onRelease = onReplacementRelease,
+                    )
+                }
+            }
+        }
         if (splitOrLiveReplacementOptions.isNotEmpty() && !rtl) {
             item(key = "replacement-slot") {
                 ReplacementReelSlot(
@@ -201,6 +243,33 @@ fun SuggestionStrip(
             }
         }
     }
+}
+
+@Composable
+private fun InlineReplacementChip(
+    reel: InlineReplacementReel,
+    index: Int,
+    visibleSlotCount: Int,
+    reservedWidthDp: Float,
+    onRelease: (ReplacementOption) -> Unit,
+) {
+    SuggestionChipView(
+        chip = reel.chip,
+        index = index,
+        visibleSlotCount = visibleSlotCount,
+        modifier = Modifier,
+        reservedWidthDp = reservedWidthDp,
+        neighborReservedWidthDp = null,
+        growsForward = true,
+        joinCandidate = null,
+        onRelease = { candidateIndex ->
+            reel.optionForDisplayIndex(candidateIndex)?.let(onRelease)
+        },
+        onUndo = {},
+        onReplacementPreview = {},
+        onReplacementRelease = onRelease,
+        onReplacementCancel = {},
+    )
 }
 
 private val ReplacementReelSelectionSaver = Saver<ReplacementReelSelection, String>(
