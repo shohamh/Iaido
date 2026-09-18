@@ -30,13 +30,56 @@ data class TelemetryEnvelope(
     }
 }
 
+enum class DiagnosticsOutcome {
+    ACCEPTED,
+    REJECTED,
+    CANCELLED,
+}
+
+data class BoundedResearchText(val value: String) {
+    init {
+        require(value.length in 1..MAX_LENGTH) {
+            "Research text must contain at most $MAX_LENGTH characters"
+        }
+    }
+
+    companion object {
+        const val MAX_LENGTH = 256
+    }
+}
+
+data class NormalizedKeyboardPointer(val x: Float, val y: Float) {
+    init {
+        require(x.isFinite() && y.isFinite()) {
+            "Keyboard pointer coordinates must be finite"
+        }
+        require(x in 0f..1f && y in 0f..1f) {
+            "Keyboard pointer coordinates must be normalized to [0, 1]"
+        }
+    }
+}
+
+class NormalizedGestureTrace(points: List<NormalizedKeyboardPointer>) {
+    val points: List<NormalizedKeyboardPointer> = points.toList()
+
+    init {
+        require(points.isNotEmpty() && points.size <= MAX_POINTS) {
+            "Gesture traces must contain 1-$MAX_POINTS pointers"
+        }
+    }
+
+    companion object {
+        const val MAX_POINTS = 512
+    }
+}
+
 sealed interface DiagnosticsEvent {
-    data class GestureOutcome(val outcome: String) : DiagnosticsEvent
+    data class GestureOutcome(val outcome: DiagnosticsOutcome) : DiagnosticsEvent
 }
 
 sealed interface ResearchEvent {
-    data class TextSample(val text: String) : ResearchEvent
-    data class GestureTrace(val points: List<List<Int>>) : ResearchEvent
+    data class TextSample(val text: BoundedResearchText) : ResearchEvent
+    data class GestureTrace(val trace: NormalizedGestureTrace) : ResearchEvent
 }
 
 object DiagnosticsEventCodec {
@@ -45,7 +88,7 @@ object DiagnosticsEventCodec {
     fun encode(event: DiagnosticsEvent): String = when (event) {
         is DiagnosticsEvent.GestureOutcome -> buildJsonObject {
             put("event_type", JsonPrimitive("gesture_outcome"))
-            put("outcome", JsonPrimitive(event.outcome))
+            put("outcome", JsonPrimitive(event.outcome.name))
         }.toString()
     }
 
@@ -67,9 +110,11 @@ object DiagnosticsEventCodec {
         require(root["event_type"]?.jsonPrimitive?.content == "gesture_outcome") {
             "Unsupported diagnostics event type"
         }
+        val outcome = root["outcome"]?.jsonPrimitive?.content
+            ?: throw IllegalArgumentException("Missing diagnostics outcome")
         return DiagnosticsEvent.GestureOutcome(
-            outcome = root["outcome"]?.jsonPrimitive?.content
-                ?: throw IllegalArgumentException("Missing diagnostics outcome"),
+            outcome = DiagnosticsOutcome.entries.firstOrNull { it.name == outcome }
+                ?: throw IllegalArgumentException("Unsupported diagnostics outcome: $outcome"),
         )
     }
 }
