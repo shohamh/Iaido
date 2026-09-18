@@ -68,4 +68,78 @@ class TypingControllerTest {
 
         assertEquals(listOf(1), deleted)
     }
+
+    @Test
+    fun `backspace after a swipe deletes its trailing space and whole word`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello " }
+
+        typing.commitWord("Hello ")
+        typing.backspace()
+
+        assertEquals(listOf(6), deleted)
+    }
+
+    @Test
+    fun `backspace after a letter tap deletes only one character`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello" }
+
+        typing.tap("x")
+        typing.backspace()
+
+        assertEquals(listOf(1), deleted)
+    }
+
+    @Test
+    fun `a later space tap clears swipe word deletion context`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello " }
+
+        typing.commitWord("Hello")
+        typing.tap(" ", nowMs = 1000)
+        typing.backspace()
+
+        assertEquals(listOf(1), deleted)
+    }
+
+    @Test
+    fun `held backspace after a swipe keeps repeated deletion character based`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello " }
+
+        typing.commitWord("Hello ")
+        typing.backspace(singleTap = false)
+
+        assertEquals(listOf(1), deleted)
+    }
+
+    @Test
+    fun `accelerated held backspace switches to whole-word deletion`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello worl" }
+
+        typing.backspace(singleTap = false)
+        typing.backspace(singleTap = false, deleteWord = true)
+
+        assertEquals(listOf(1, 4), deleted)
+    }
+
+    @Test
+    fun `backspace tap after a horizontal deletion gesture deletes one character`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "Hello " }
+
+        typing.commitWord("Hello")
+        typing.markNonSwipeInput()
+        typing.backspace()
+
+        assertEquals(listOf(1), deleted)
+    }
 }

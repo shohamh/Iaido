@@ -76,7 +76,10 @@ class SettingsUpdateE2eTest {
         try {
             val device = UiDevice.getInstance(instrumentation)
             assertTrue(device.wait(Until.hasObject(By.text("Update app")), 5_000L))
-            assertTrue(device.hasObject(By.text("Download the newest signed Iaido APK from GitHub Releases.")))
+            assertTrue(device.hasObject(By.text("Update channel")))
+            assertTrue(device.hasObject(By.text("Stable release")))
+            assertTrue(device.hasObject(By.text("Nightly")))
+            assertTrue(device.hasObject(By.text("Download the newest signed stable release Iaido APK from GitHub Releases.")))
         } finally {
             activity.finish()
         }

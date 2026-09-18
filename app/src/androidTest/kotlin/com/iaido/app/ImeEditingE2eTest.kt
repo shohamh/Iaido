@@ -16,7 +16,7 @@ class ImeEditingE2eTest {
             swipeWord("hello")
             tapSpace(checkpointEach = false)
             swipeWord("world")
-            pressBackspace(5, checkpointEach = false)
+            tapKey("backspace", checkpointEach = false)
             swipeWord("there")
             assertText("Hello there")
         }
@@ -84,7 +84,14 @@ class ImeEditingE2eTest {
             swipeWord("hello")
             tapSpace(checkpointEach = false)
             swipeWord("world")
-            holdBackspace(durationMs = 1_200L)
+            holdBackspace(durationMs = 1_800L)
+        }
+    }
+
+    @Test
+    fun settingsButtonOpensSettingsActivity() {
+        scenario().run {
+            openSettingsFromKeyboard()
         }
     }
 
@@ -97,6 +104,20 @@ class ImeEditingE2eTest {
             val snapshots = swipeBackspaceLeftThenRight()
             check(snapshots.distinct().size > 1) { "Expected multiple live deletion states: $snapshots" }
             assertText("Hello world")
+        }
+    }
+
+    @Test
+    fun backspaceSwipeLeftCommitsDeletionOnRelease() {
+        scenario().run {
+            swipeWord("hello")
+            tapSpace(checkpointEach = false)
+            swipeWord("world")
+            val before = currentText()
+            val after = swipeBackspaceLeft()
+            check(after.length < before.length) {
+                "Backspace swipe did not commit deletion: before='$before' after='$after'"
+            }
         }
     }
 

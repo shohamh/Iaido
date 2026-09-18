@@ -29,6 +29,12 @@ class KeyboardGeometryTest {
     }
 
     @Test
+    fun `bottom row starts after three full rows and keeps the same height`() {
+        assertEquals(384f, keyboardBottomRowTopPx(128f), 0.001f)
+        assertEquals(128f, keyboardBottomRowHeightPx(128f), 0.001f)
+    }
+
+    @Test
     fun `letter hit testing uses the pixel positioned layout`() {
         val layout = KeyboardLayout(
             listOf(
@@ -38,5 +44,12 @@ class KeyboardGeometryTest {
         )
 
         assertEquals("a", keyAt(128f, 192f, 128f, layout, Language.ENGLISH))
+    }
+
+    @Test
+    fun `bottom row hit testing includes the settings button`() {
+        assertEquals(SETTINGS_KEY, bottomRowKeyAt(1.5f * 128f, 128f, Language.ENGLISH))
+        assertEquals(" ", bottomRowKeyAt(7.5f * 128f, 128f, Language.ENGLISH))
+        assertEquals("⌫", bottomRowKeyAt(9.5f * 128f, 128f, Language.ENGLISH))
     }
 }

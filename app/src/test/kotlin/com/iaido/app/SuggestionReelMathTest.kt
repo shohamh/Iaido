@@ -1,5 +1,6 @@
 package com.iaido.app
 
+import com.iaido.core.recognition.SuggestionChip
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -80,6 +81,21 @@ class SuggestionReelMathTest {
             80f,
             overflowDrawWidthDp(naturalWidthDp = 300f, reservedWidthDp = 80f, neighborReservedWidthDp = null),
         )
+    }
+
+    @Test
+    fun `reel centers the committed full word when candidates contain stale fragments`() {
+        val chip = SuggestionChip(
+            word = "Hello",
+            alternatives = listOf("H", "he"),
+            selectedIndex = 0,
+        )
+
+        val candidates = reelCandidatesForDisplay(chip)
+        val selectedIndex = reelSelectedIndexForDisplay(chip, candidates)
+
+        assertEquals(listOf("H", "he", "Hello"), candidates)
+        assertEquals("Hello", candidates[selectedIndex])
     }
 
     @Test

@@ -23,6 +23,9 @@ internal fun backspaceRepeatIntervalMs(repeatCount: Int): Long =
     (BACKSPACE_INITIAL_INTERVAL_MS - repeatCount.coerceAtLeast(0) * BACKSPACE_ACCELERATION_MS)
         .coerceAtLeast(BACKSPACE_MIN_INTERVAL_MS)
 
+internal fun backspaceRepeatDeletesWord(repeatCount: Int): Boolean =
+    repeatCount >= BACKSPACE_WORD_REPEAT_THRESHOLD
+
 internal fun deletionCountForSwipe(
     requestedCount: Int,
     textBeforeCursor: String,
@@ -56,4 +59,5 @@ private fun wordBoundaryDeletionCounts(textBeforeCursor: String): List<Int> = bu
 private const val BACKSPACE_INITIAL_INTERVAL_MS = 200L
 private const val BACKSPACE_ACCELERATION_MS = 15L
 private const val BACKSPACE_MIN_INTERVAL_MS = 70L
+private const val BACKSPACE_WORD_REPEAT_THRESHOLD = 8
 private const val WORD_BOUNDARY_SNAP_CHARS = 1

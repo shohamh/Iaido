@@ -15,10 +15,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
@@ -56,6 +59,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private const val GLOBE_KEY = "\uD83C\uDF10"
+internal const val SETTINGS_KEY = "\u2699"
 private const val BACKSPACE_KEY = "\u232B"
 private const val MAX_TRAIL_POINTS = 80
 private const val KEYBOARD_ROOT_DESCRIPTION = "Iaido keyboard root"
@@ -81,7 +85,7 @@ fun KeyboardInputView(
     onReplacementPreview: (ReplacementOption) -> Unit = {},
     onReplacementRelease: (ReplacementOption) -> Unit = {},
     onReplacementCancel: () -> Unit = {},
-    onBackspaceRepeat: () -> Unit = {},
+    onBackspaceRepeat: (deleteWord: Boolean) -> Unit = {},
     onBackspacePressStart: () -> Unit = {},
     onBackspaceSwipeStart: () -> Unit = {},
     onBackspaceSwipeDistance: (requestedCharacters: Int) -> Unit = {},
@@ -105,10 +109,12 @@ fun KeyboardInputView(
         val columnCount = if (language == Language.HEBREW) 11 else KEYBOARD_COLUMN_COUNT
         val keySizePx = widthPx / columnCount
         val keySize = with(density) { keySizePx.toDp() }
-        val keyHeight = with(density) { keyboardKeyHeightPx(keySizePx).toDp() }
+        val keyHeightPx = keyboardKeyHeightPx(keySizePx)
+        val keyHeight = with(density) { keyHeightPx.toDp() }
         val bottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
         val surfaceHeightPx = keyboardSurfaceHeightPx(keySizePx)
         val contentHeightPx = imeContentHeightPx(keySizePx, bottomInsetPx)
+        val keyboardSurfaceHeight = with(density) { surfaceHeightPx.toDp() }
         val bottomInset = with(density) {
             (contentHeightPx - surfaceHeightPx).toDp() + BOTTOM_KEYBOARD_CLEARANCE_DP
         }
@@ -150,8 +156,8 @@ fun KeyboardInputView(
             if (backspaceMode != BackspaceMode.HOLD) return@LaunchedEffect
             var repeats = 0
             while (backspaceMode == BackspaceMode.HOLD) {
-                onBackspaceRepeat()
                 repeats += 1
+                onBackspaceRepeat(backspaceRepeatDeletesWord(repeats))
                 delay(backspaceRepeatIntervalMs(repeats))
             }
         }
@@ -167,12 +173,16 @@ fun KeyboardInputView(
             resetBackspaceGestureState()
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION }
-                .background(MaterialTheme.colorScheme.background),
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION },
+            ) {
             Box(
                 modifier = Modifier
                     .size(1.dp)
@@ -222,7 +232,7 @@ fun KeyboardInputView(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(keySize * KEYBOARD_ROW_COUNT)
+                    .height(keyboardSurfaceHeight)
                     .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
                         when (event.actionMasked) {
@@ -425,18 +435,19 @@ fun KeyboardInputView(
                     KeyboardRow(
                         letters = row,
                         offset = keySize * keyboardRowOffsetUnits(row.length, columnCount),
-                        y = keySize * index,
+                        y = keyHeight * index,
                         keySize = keyHeight,
                         pressedKey = startKey,
                     )
                 }
                 KeyboardBottomRow(keyHeight, language, pressedKey = startKey)
                 val trailColor = MaterialTheme.colorScheme.primary
-                Canvas(modifier = Modifier.fillMaxWidth().height(keySize * KEYBOARD_ROW_COUNT)) {
+                Canvas(modifier = Modifier.fillMaxWidth().height(keyboardSurfaceHeight)) {
                     drawSwipeTrail(trailPoints, trailColor)
                 }
             }
             Spacer(Modifier.height(bottomInset))
+            }
         }
     }
 }
@@ -468,22 +479,24 @@ private fun KeyboardRow(
 }
 
 @Composable
-private fun KeyboardBottomRow(keySize: Dp, language: Language, pressedKey: String?) {
+private fun KeyboardBottomRow(rowHeight: Dp, language: Language, pressedKey: String?) {
     val gap = 3.dp
     val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
-    val keys = listOf(GLOBE_KEY to 1f) + punctuation.map { it to 1f } + listOf("space" to 4f, BACKSPACE_KEY to 1f)
+    val keys = listOf(GLOBE_KEY to 1f, SETTINGS_KEY to 1f) +
+        punctuation.map { it to 1f } + listOf("space" to 3f, BACKSPACE_KEY to 1f)
     Row(
-        modifier = Modifier.offset(y = keySize * 3),
+        modifier = Modifier.offset(y = rowHeight * (KEYBOARD_ROW_COUNT - 1)),
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         keys.forEach { (label, widthWeight) ->
             KeyboardKey(
                 label = if (label == "space") language.localeTag.replace('-', ' ').uppercase() else label,
                 modifier = Modifier.weight(widthWeight),
-                height = keySize,
+                height = rowHeight,
                 pressed = pressedKey == label || (label == "space" && pressedKey == " "),
                 testKey = when (label) {
                     GLOBE_KEY -> "globe"
+                    SETTINGS_KEY -> "settings"
                     BACKSPACE_KEY -> "backspace"
                     else -> label
                 },
@@ -502,22 +515,31 @@ private fun KeyboardKey(
     number: String? = null,
     testKey: String? = null,
 ) {
-    val keyModifier = if (width != null) modifier.size(width = width, height = height) else modifier
+    val keyModifier = modifier
+        .then(width?.let { Modifier.width(it) } ?: Modifier)
+        .height(height)
+    val shape = RoundedCornerShape(9.dp)
     Box(
         modifier = keyModifier
             .semantics {
                 testKey?.let { contentDescription = "Iaido key $it" }
             }
+            .shadow(if (pressed) 2.dp else 1.dp, shape)
             .background(
                 color = if (pressed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(6.dp),
+                shape = shape,
             )
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp)),
+            .border(
+                width = if (pressed) 1.5.dp else 1.dp,
+                color = if (pressed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                shape = shape,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             color = if (pressed) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleMedium,
         )
         number?.let {
             Text(
@@ -550,17 +572,22 @@ private fun numberFor(letter: Char): String? = "qwertyuiop".indexOf(letter).take
 
 internal fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, language: Language): String? {
     if (y >= size * 3) {
-        val index = (x / size).toInt()
-        val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
-        return when {
-            index == 0 -> GLOBE_KEY
-            index in 1..punctuation.size -> punctuation[index - 1]
-            index in (punctuation.size + 1)..(punctuation.size + 4) -> " "
-            index == punctuation.size + 5 -> BACKSPACE_KEY
-            else -> null
-        }
+        return bottomRowKeyAt(x, size, language)
     }
     return layout.keys.minByOrNull { (x - it.x) * (x - it.x) + (y - it.y) * (y - it.y) }?.letter?.toString()
+}
+
+internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? {
+    if (x < 0f || size <= 0f) return null
+    val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
+    val keys = listOf(GLOBE_KEY to 1f, SETTINGS_KEY to 1f) +
+        punctuation.map { it to 1f } + listOf(" " to 3f, BACKSPACE_KEY to 1f)
+    val unit = x / size
+    var end = 0f
+    return keys.firstOrNull { (_, weight) ->
+        end += weight
+        unit < end
+    }?.first
 }
 
 private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {

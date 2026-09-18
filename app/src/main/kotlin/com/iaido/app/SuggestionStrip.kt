@@ -67,7 +67,9 @@ fun SuggestionStrip(
     onReplacementCancel: () -> Unit = {},
 ) {
     val ordered = if (rtl) chips.asReversed() else chips
-    val chipSlotCount = ordered.maxOfOrNull { reelVisibleSlotCount(it.alternatives.size) }
+    val chipSlotCount = ordered.maxOfOrNull {
+        reelVisibleSlotCount(reelCandidatesForDisplay(it).size)
+    }
         ?: reelVisibleSlotCount(0)
     // The edge-anchored slot only ever hides a join-shaped option once it is no longer part of
     // the live SwipeTypingCoordinator transaction (a history-derived join, or a live join whose
@@ -110,7 +112,9 @@ fun SuggestionStrip(
 
     val reservedWidths = remember(ordered, bodyTextStyleKey) {
         ordered.map { chip ->
-            val word = chip.alternatives.getOrElse(chip.selectedIndex) { chip.alternatives.firstOrNull() ?: chip.word }
+            val candidates = reelCandidatesForDisplay(chip)
+            val selectedIndex = reelSelectedIndexForDisplay(chip, candidates)
+            val word = candidates[selectedIndex]
             val measuredWidthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
             chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
         }
@@ -334,6 +338,15 @@ private fun ReplacementReelGroup(
     }
 }
 
+internal fun reelCandidatesForDisplay(chip: SuggestionChip): List<String> =
+    (chip.alternatives + chip.word).distinct()
+
+internal fun reelSelectedIndexForDisplay(
+    chip: SuggestionChip,
+    candidates: List<String>,
+): Int = candidates.indexOf(chip.word).takeIf { it >= 0 }
+    ?: chip.selectedIndex.coerceIn(0, candidates.lastIndex.coerceAtLeast(0))
+
 @Composable
 private fun SuggestionChipView(
     chip: SuggestionChip,
@@ -350,7 +363,7 @@ private fun SuggestionChipView(
     onReplacementRelease: (ReplacementOption) -> Unit,
     onReplacementCancel: () -> Unit,
 ) {
-    val baseAlternatives = chip.alternatives.ifEmpty { listOf(chip.word) }
+    val baseAlternatives = reelCandidatesForDisplay(chip)
     val alternatives = if (joinCandidate != null) {
         baseAlternatives + joinCandidate.replacementWords.joinToString(" ")
     } else {
@@ -365,13 +378,14 @@ private fun SuggestionChipView(
     val reelStepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val dragThresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
     val maxIndex = alternatives.lastIndex
-    val minOffset = (chip.selectedIndex - maxIndex).toFloat()
-    val maxOffset = chip.selectedIndex.toFloat()
+    val selectedIndex = reelSelectedIndexForDisplay(chip, baseAlternatives)
+    val minOffset = (selectedIndex - maxIndex).toFloat()
+    val maxOffset = selectedIndex.toFloat()
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
     val latestDragOffset = rememberUpdatedState(dragOffset)
     val renderedOffset = if (isDragging) dragOffset else reelOffset.value
-    val displayedIndex = displayedReelIndex(chip.selectedIndex, renderedOffset, maxIndex)
+    val displayedIndex = displayedReelIndex(selectedIndex, renderedOffset, maxIndex)
     val currentWord = alternatives.getOrNull(displayedIndex).orEmpty()
     val shape = RoundedCornerShape(16.dp)
     val containerColor = if (chip.corrected) {
@@ -381,7 +395,7 @@ private fun SuggestionChipView(
     }
     val foregroundColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    LaunchedEffect(chip.id, chip.word, chip.selectedIndex) {
+    LaunchedEffect(chip.id, chip.word, selectedIndex) {
         dragY = 0f
         isDragging = false
         reelOffset.snapTo(0f)
@@ -415,7 +429,7 @@ private fun SuggestionChipView(
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = shape,
             )
-            .pointerInput(chip.id, chip.word, chip.selectedIndex) {
+            .pointerInput(chip.id, chip.word, selectedIndex) {
                 detectVerticalDragGestures(
                     onDragStart = {
                         scope.launch { reelOffset.stop() }
@@ -425,9 +439,9 @@ private fun SuggestionChipView(
                     onDragEnd = {
                         val releaseOffset = latestDragOffset.value
                         val shouldSelect = abs(dragY) >= dragThresholdPx && alternatives.size > 1
-                        val targetIndex = displayedReelIndex(chip.selectedIndex, releaseOffset, maxIndex)
+                        val targetIndex = displayedReelIndex(selectedIndex, releaseOffset, maxIndex)
                         val targetOffset = if (shouldSelect) {
-                            reelSettleOffset(targetIndex, chip.selectedIndex)
+                            reelSettleOffset(targetIndex, selectedIndex)
                         } else {
                             0f
                         }
@@ -481,7 +495,7 @@ private fun SuggestionChipView(
                     .fillMaxWidth()
                     .graphicsLayer {
                         translationY = with(density) {
-                            ((renderedOffset - chip.selectedIndex + centerSlotOffset) * REEL_STEP_DP).dp.toPx()
+                            ((renderedOffset - selectedIndex + centerSlotOffset) * REEL_STEP_DP).dp.toPx()
                         }
                     },
             ) {

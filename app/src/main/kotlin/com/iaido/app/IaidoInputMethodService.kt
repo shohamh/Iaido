@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import android.inputmethodservice.InputMethodService
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.text.InputType
 import android.os.Handler
@@ -329,14 +330,16 @@ class IaidoInputMethodService : InputMethodService() {
                                 }
                                 rememberCandidatesForCommittedSwipe(results)
                                 swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
+                                typingController.markSwipeCommitted()
                             }
                         }
                     },
-                    onTap = { value ->
-                        swipeTypingCoordinator.onNonSwipeInput()
-                        when (value) {
-                            "⌫" -> typingController.backspace()
-                            "🌐" -> switchLanguage()
+                        onTap = { value ->
+                            swipeTypingCoordinator.onNonSwipeInput()
+                            when (value) {
+                                "⌫" -> typingController.backspace()
+                                SETTINGS_KEY -> openSettings()
+                                "🌐" -> switchLanguage()
                             else -> typingController.tap(value)
                         }
                     },
@@ -362,9 +365,9 @@ class IaidoInputMethodService : InputMethodService() {
                     onReplacementPreview = swipeTypingCoordinator::previewReplacement,
                     onReplacementRelease = ::releaseReplacementOption,
                     onReplacementCancel = swipeTypingCoordinator::cancelReplacement,
-                    onBackspaceRepeat = {
+                    onBackspaceRepeat = { deleteWord ->
                         swipeTypingCoordinator.onNonSwipeInput()
-                        typingController.backspace()
+                        typingController.backspace(singleTap = false, deleteWord = deleteWord)
                     },
                     onBackspacePressStart = {
                         swipeTypingCoordinator.onNonSwipeInput()
@@ -372,13 +375,20 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onBackspaceSwipeStart = {
                         swipeTypingCoordinator.onNonSwipeInput()
+                        typingController.markNonSwipeInput()
                         beginBackspaceSwipe()
                     },
                     onBackspaceSwipeDistance = ::updateBackspaceSwipe,
                     onBackspaceSwipeEnd = ::finishBackspaceSwipe,
                     onBackspaceSwipeCancel = ::cancelBackspaceSwipe,
-                    onBackspaceUndo = ::undoBackspace,
-                    onBackspaceRedo = ::redoBackspace,
+                    onBackspaceUndo = {
+                        typingController.markNonSwipeInput()
+                        undoBackspace()
+                    },
+                    onBackspaceRedo = {
+                        typingController.markNonSwipeInput()
+                        redoBackspace()
+                    },
                     onSplitBegin = splitController::begin,
                     onSplitMove = splitController::move,
                     onSplitEnd = { pointerId, path, layout, atMs ->
@@ -412,6 +422,7 @@ class IaidoInputMethodService : InputMethodService() {
                                     } else {
                                         swipeTypingCoordinator.onRecognizedTwoFingerResult(parts.paths, candidates)
                                     }
+                                    typingController.markSwipeCommitted()
                                     splitPreview.value = null
                                 }
                             }
@@ -948,6 +959,12 @@ class IaidoInputMethodService : InputMethodService() {
         swipeTypingCoordinator.onNonSwipeInput()
         activeLanguage = languageSwitcher.next()
         composeInputView?.let(::renderInputView)
+    }
+
+    private fun openSettings() {
+        startActivity(
+            Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     private fun handleCommand(trigger: GestureTrigger) {

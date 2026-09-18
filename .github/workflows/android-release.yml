@@ -2,8 +2,14 @@ name: Android release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -11,6 +17,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'stable' || 'nightly' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -31,8 +39,16 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD"
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
-      - name: Validate release version
-        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^iaidoVersion=//p' gradle.properties)"
+      - name: Resolve release version
+        run: |
+          base_version="$(sed -n 's/^iaidoVersion=//p' gradle.properties)"
+          if [ "$RELEASE_CHANNEL" = "stable" ]; then
+            test "${GITHUB_REF_NAME#v}" = "$base_version"
+            echo "IAIDO_VERSION=$base_version" >> "$GITHUB_ENV"
+          else
+            echo "IAIDO_VERSION=${base_version}-nightly.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+          echo "IAIDO_VERSION_CODE=$((1000000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -43,7 +59,10 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon --console=plain
+        run: ./gradlew :app:assembleRelease \
+          -PiaidoVersion="$IAIDO_VERSION" \
+          -PiaidoVersionCode="$IAIDO_VERSION_CODE" \
+          --no-daemon --console=plain
       - name: Verify release APK identity and signature
         run: |
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
@@ -52,4 +71,16 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/release/app-release.apk --verify-tag --generate-notes
+        run: |
+          if [ "$RELEASE_CHANNEL" = "stable" ]; then
+            gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/release/app-release.apk --verify-tag --generate-notes
+          else
+            if gh release view nightly >/dev/null 2>&1; then
+              gh release delete nightly --yes --cleanup-tag
+            fi
+            gh release create nightly app/build/outputs/apk/release/app-release.apk \
+              --target "$GITHUB_SHA" \
+              --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
+              --prerelease \
+              --notes "Automated nightly build from main commit $GITHUB_SHA."
+          fi

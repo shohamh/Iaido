@@ -28,7 +28,7 @@ object KeyboardWindowLocator {
     const val LANGUAGE_DESCRIPTION_PREFIX = "Iaido language "
     const val KEY_DESCRIPTION_PREFIX = "Iaido key "
 
-    private val requiredKeys = listOf("globe", "space", "backspace")
+    private val requiredKeys = listOf("globe", "settings", "space", "backspace")
 
     fun locate(device: UiDevice, timeoutMs: Long = 5_000L): KeyboardWindow {
         val startedAtMs = SystemClock.elapsedRealtime()

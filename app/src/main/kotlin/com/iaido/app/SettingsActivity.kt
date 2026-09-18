@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,11 +58,15 @@ class SettingsActivity : ComponentActivity() {
         var cascadeDepth by remember { mutableStateOf(SettingsDefaults.CASCADE_DEPTH) }
         var graceWindowMs by remember { mutableStateOf(SettingsDefaults.GRACE_WINDOW_MS) }
         var spacingMode by remember { mutableStateOf(SpacingMode.INFER_SPACES) }
+        val installedVersionName = remember { appVersion() }
+        var updateChannel by remember { mutableStateOf(updateChannelFromStoredValue(null, installedVersionName)) }
         var addWord by remember { mutableStateOf("") }
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
         var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
-        val appUpdateClient = remember { AppUpdateClient(this@SettingsActivity) }
+        val appUpdateClient = remember(updateChannel) {
+            AppUpdateClient(this@SettingsActivity, channel = updateChannel)
+        }
         val exportProfile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             lifecycleScope.launch {
@@ -90,12 +96,18 @@ class SettingsActivity : ComponentActivity() {
             cascadeDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH
             graceWindowMs = preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS
             spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey])
+            updateChannel = updateChannelFromStoredValue(preferences[updateChannelKey], installedVersionName)
         }
 
-        Column(
-            modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+            contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onBackground,
         ) {
+            Column(
+                modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             Text("Iaido Settings", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
             Text("Try the keyboard behavior here before leaving settings.")
             OutlinedTextField(
@@ -115,7 +127,16 @@ class SettingsActivity : ComponentActivity() {
 
             HorizontalDivider()
             Text("App updates", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-            Text("Download the newest signed Iaido APK from GitHub Releases.")
+            Text("Update channel", style = androidx.compose.material3.MaterialTheme.typography.labelLarge)
+            UpdateChannelSelector(
+                selectedChannel = updateChannel,
+                onChannelSelected = { channel ->
+                    updateChannel = channel
+                    appUpdateState = AppUpdateUiState.Idle
+                    saveString(updateChannelKey, updateChannelStoredValue(channel))
+                },
+            )
+            Text("Download the newest signed ${updateChannel.displayName.lowercase()} Iaido APK from GitHub Releases.")
             Text("A release APK cannot update a debug build. If you installed Iaido from Android Studio, uninstall that build first; your settings and learned words will be removed.")
             Button(
                 enabled = appUpdateButtonEnabled(appUpdateState),
@@ -248,7 +269,8 @@ class SettingsActivity : ComponentActivity() {
             HorizontalDivider()
             Text("Help", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
             Text("Swipe across letters to type. Flick a key upward for its number. Drag punctuation down to add a space. Use two fingers for split-word typing; a quick tap during a split repeats a letter.")
-            Text(status, color = androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                Text(status, color = androidx.compose.material3.MaterialTheme.colorScheme.primary)
+            }
         }
     }
 
@@ -330,6 +352,29 @@ internal data class SpacingModeOption(
     val label: String,
     val selected: Boolean,
 )
+
+@Composable
+internal fun UpdateChannelSelector(
+    selectedChannel: UpdateChannel,
+    onChannelSelected: (UpdateChannel) -> Unit,
+) {
+    Column {
+        UpdateChannel.entries.forEach { channel ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = channel == selectedChannel,
+                        onClick = { onChannelSelected(channel) },
+                        role = Role.RadioButton,
+                    ),
+            ) {
+                RadioButton(selected = channel == selectedChannel, onClick = null)
+                Text(channel.displayName, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
 
 internal fun spacingModeOptions(selectedMode: SpacingMode): List<SpacingModeOption> = listOf(
     SpacingModeOption(SpacingMode.MANUAL, "Manual spacing", SpacingMode.MANUAL == selectedMode),

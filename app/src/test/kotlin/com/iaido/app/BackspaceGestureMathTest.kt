@@ -24,6 +24,13 @@ class BackspaceGestureMathTest {
     }
 
     @Test
+    fun `held backspace switches from characters to words after acceleration`() {
+        assertEquals(false, backspaceRepeatDeletesWord(repeatCount = 1))
+        assertEquals(false, backspaceRepeatDeletesWord(repeatCount = 7))
+        assertEquals(true, backspaceRepeatDeletesWord(repeatCount = 8))
+    }
+
+    @Test
     fun `swipe deletion stays precise but snaps near word endings`() {
         assertEquals(3, deletionCountForSwipe(3, "one two three", 60))
         assertEquals(6, deletionCountForSwipe(6, "one two three", 60))

@@ -9,8 +9,10 @@ class TypingController(
     private val doubleSpaceWindowMs: Long = 500L,
 ) {
     private var lastSpaceTapMs: Long? = null
+    private var lastTextAction = LastTextAction.NONE
 
     fun tap(value: String, nowMs: Long = System.currentTimeMillis()) {
+        lastTextAction = LastTextAction.TAP
         if (value == " ") {
             val previousSpace = lastSpaceTapMs
             if (previousSpace != null && nowMs - previousSpace <= doubleSpaceWindowMs &&
@@ -30,29 +32,48 @@ class TypingController(
     }
 
     fun commitWord(word: String) {
-        lastSpaceTapMs = null
+        markSwipeCommitted()
         commitText(capitalizeIfNeeded(word))
     }
 
+    fun markSwipeCommitted() {
+        lastSpaceTapMs = null
+        lastTextAction = LastTextAction.SWIPE
+    }
+
+    fun markNonSwipeInput() {
+        lastSpaceTapMs = null
+        lastTextAction = LastTextAction.NONE
+    }
+
     fun flick(letter: String, direction: FlickDirection) {
+        lastTextAction = LastTextAction.TAP
         if (direction == FlickDirection.UP) {
             numberFor(letter)?.let(commitText)
         }
     }
 
     fun punctuationToSpace(punctuation: String) {
+        lastTextAction = LastTextAction.TAP
         if (punctuation in setOf(",", ".", "?", "\"", "'", "׳", "״")) {
             commitText(punctuation + " ")
         }
     }
 
     fun longPress(letter: String) {
+        lastTextAction = LastTextAction.TAP
         commitText(accents[letter] ?: letter)
     }
 
-    fun backspace() {
+    fun backspace(singleTap: Boolean = true, deleteWord: Boolean = false) {
         lastSpaceTapMs = null
-        deleteSurroundingText(1)
+        val count = if (deleteWord || (singleTap && lastTextAction == LastTextAction.SWIPE)) {
+            previousWordDeletionCount(textBeforeCursor())
+        } else {
+            1
+        }
+        lastTextAction = LastTextAction.NONE
+        deleteSurroundingText(count)
     }
 
     private fun capitalizeIfNeeded(value: String): String =
@@ -69,4 +90,18 @@ class TypingController(
             "n" to "ñ", "o" to "ó", "u" to "ú",
         )
     }
+}
+
+private enum class LastTextAction {
+    NONE,
+    TAP,
+    SWIPE,
+}
+
+private fun previousWordDeletionCount(textBeforeCursor: String): Int {
+    if (textBeforeCursor.isEmpty()) return 1
+    var index = textBeforeCursor.length
+    while (index > 0 && textBeforeCursor[index - 1].isWhitespace()) index -= 1
+    while (index > 0 && !textBeforeCursor[index - 1].isWhitespace()) index -= 1
+    return (textBeforeCursor.length - index).coerceAtLeast(1)
 }

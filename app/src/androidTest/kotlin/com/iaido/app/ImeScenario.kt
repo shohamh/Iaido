@@ -75,6 +75,7 @@ class ImeScenario(
 
     private var expectedText = ""
     private var expectedSelection = 0
+    private var expectedLastInputWasSwipe = false
     private var expectedLanguage = Language.ENGLISH
     private var expectedIme = system.iaidoImeId
 
@@ -107,6 +108,7 @@ class ImeScenario(
         editor.clear()
         expectedText = ""
         expectedSelection = 0
+        expectedLastInputWasSwipe = false
         checkpoint("clearText")
     }
 
@@ -127,6 +129,7 @@ class ImeScenario(
             word
         }
         insertExpected(committed)
+        expectedLastInputWasSwipe = true
         checkpoint("swipeWord($word)")
     }
 
@@ -194,9 +197,11 @@ class ImeScenario(
         when (logicalKey) {
             "space" -> {
                 insertExpected(" ")
+                expectedLastInputWasSwipe = false
             }
             "backspace" -> {
-                deleteExpectedOne()
+                if (expectedLastInputWasSwipe) deleteExpectedPreviousWord() else deleteExpectedOne()
+                expectedLastInputWasSwipe = false
             }
             else -> {
                 val textBeforeCursor = expectedText.take(expectedSelection)
@@ -204,12 +209,20 @@ class ImeScenario(
                     (textBeforeCursor.isEmpty() || textBeforeCursor.last() in ".!?\n")
                 ) logicalKey.uppercase() else logicalKey
                 insertExpected(value)
+                expectedLastInputWasSwipe = false
             }
         }
         if (checkpointEach) checkpoint("tapKey($key)")
     }
 
     fun tapSpace(checkpointEach: Boolean = true) = tapKey("space", checkpointEach)
+
+    fun openSettingsFromKeyboard() {
+        pendingPointerEvents = editor.tapMarkedKey(keyDescription("settings"))
+        check(device.wait(Until.hasObject(By.text("Iaido Settings")), 5_000L)) {
+            "Settings activity did not open from the keyboard settings button"
+        }
+    }
 
     fun switchLanguage() = tapKey("globe")
 
@@ -237,7 +250,8 @@ class ImeScenario(
         require(count >= 0) { "Backspace count cannot be negative" }
         repeat(count) {
             editor.pressBackspace()
-            deleteExpectedOne()
+            if (expectedLastInputWasSwipe) deleteExpectedPreviousWord() else deleteExpectedOne()
+            expectedLastInputWasSwipe = false
             if (checkpointEach) checkpoint("pressBackspace")
         }
     }
@@ -505,6 +519,28 @@ class ImeScenario(
         expectedText = after
         expectedSelection = editor.selection().last
         checkpoint("holdBackspace($durationMs)")
+        return after
+    }
+
+    fun currentText(): String = editor.text()
+
+    fun swipeBackspaceLeft(leftDistancePx: Float = 168f): String {
+        val before = editor.text()
+        val center = keyboard().keyCenter("backspace")
+        pendingPointerEvents = pointer.injectScreenSwipe(
+            points = listOf(
+                PointF(center.x.toFloat(), center.y.toFloat()),
+                PointF(center.x.toFloat() - leftDistancePx, center.y.toFloat()),
+            ),
+            holdBeforeMoveMs = 520L,
+        )
+        val after = editor.waitForTextChange(before)
+        check(after.length < before.length) {
+            "Backspace swipe left did not delete text: before='$before' after='$after'"
+        }
+        expectedText = after
+        expectedSelection = editor.selection().last
+        checkpoint("swipeBackspaceLeft")
         return after
     }
 
@@ -1045,6 +1081,15 @@ class ImeScenario(
         if (expectedSelection <= 0) return
         expectedText = expectedText.removeRange(expectedSelection - 1, expectedSelection)
         expectedSelection -= 1
+    }
+
+    private fun deleteExpectedPreviousWord() {
+        if (expectedSelection <= 0) return
+        var start = expectedSelection
+        while (start > 0 && expectedText[start - 1].isWhitespace()) start -= 1
+        while (start > 0 && !expectedText[start - 1].isWhitespace()) start -= 1
+        expectedText = expectedText.removeRange(start, expectedSelection)
+        expectedSelection = start
     }
 
 }

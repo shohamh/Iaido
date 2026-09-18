@@ -56,11 +56,13 @@ sealed interface AppUpdateResult {
 /** Downloads and validates the latest signed application APK from GitHub Releases. */
 class AppUpdateClient(
     private val context: Context,
-    private val apiUrl: URL = URL(AppUpdateConfig.RELEASE_API_URL),
+    apiUrl: URL? = null,
+    private val channel: UpdateChannel = UpdateChannel.STABLE,
     private val connectionFactory: (URL) -> HttpURLConnection = { url ->
         url.openConnection() as? HttpURLConnection ?: error("Update URL is not HTTP")
     },
 ) {
+    private val requestUrl = apiUrl ?: URL(channel.apiUrl)
     private val updateDirectory = File(context.filesDir, UPDATE_DIRECTORY)
     private val incomingApk = File(updateDirectory, INCOMING_APK)
     private val stagedApk = File(updateDirectory, STAGED_APK)
@@ -69,9 +71,12 @@ class AppUpdateClient(
     fun update(onDownloadStarted: () -> Unit = {}): AppUpdateResult {
         clearIncoming()
         val result = runCatching {
-            val release = parseRelease(readText(apiUrl))
-            if (release.isDraft || release.isPrerelease) {
-                error("Latest GitHub release is not stable")
+            val release = parseRelease(readText(requestUrl))
+            if (release.isDraft || (channel == UpdateChannel.STABLE && release.isPrerelease)) {
+                error("Latest ${channel.displayName.lowercase()} release is not installable")
+            }
+            if (channel.releaseTag != null && release.appRelease.tagName != channel.releaseTag) {
+                error("Latest ${channel.displayName.lowercase()} release has an unexpected tag")
             }
             val asset = selectApkAsset(release.appRelease)
             if (asset.sizeBytes != null && asset.sizeBytes > MAX_APP_UPDATE_BYTES) {
