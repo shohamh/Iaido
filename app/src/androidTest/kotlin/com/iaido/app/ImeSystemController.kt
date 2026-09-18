@@ -58,9 +58,9 @@ class ImeSystemController(
     }
 
     fun ensureHostVisible(autoSpaceFixture: String? = null) {
-        if (device.findObject(By.res("$packageName:id/ime_test_editor")) == null) {
-            launchHost(autoSpaceFixture)
-        }
+        val editorSelector = By.res("$packageName:id/ime_test_editor")
+        if (device.findObject(editorSelector) != null) return
+        launchHost(autoSpaceFixture)
     }
 
     fun waitForSpacingMode(mode: SpacingMode) {

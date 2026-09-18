@@ -10,8 +10,7 @@ internal class ImeSuiteSessionState {
     private var activeLanguage: Language? = null
     private var baselineId: String? = null
 
-    fun needsBootstrap(requestedFixture: String?): Boolean =
-        !ready || activeFixture != requestedFixture
+    fun needsBootstrap(requestedFixture: String? = activeFixture): Boolean = !ready
 
     fun needsImeSelection(imeId: String): Boolean = !ready || activeIme != imeId
 

@@ -22,7 +22,7 @@ class ImeEditorDriver(
     }
 
     fun clear() {
-        clickMarked("ime_test_clear")
+        clickMarkedWithUiAutomator("ime_test_clear")
         waitForText("")
     }
 
@@ -71,15 +71,17 @@ class ImeEditorDriver(
         )
     }
 
-    fun waitForText(expected: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS) {
+    fun waitForText(expected: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): String {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         do {
-            if (text() == expected) return
+            val current = text()
+            if (current == expected) return current
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
         check(false) {
             "Expected editor text '$expected', observed '${text()}'"
         }
+        error("Unreachable")
     }
 
     fun waitForTextChange(previous: String, timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS): String {
@@ -106,6 +108,21 @@ class ImeEditorDriver(
                     centerX = (bounds.left + bounds.right) / 2f,
                     centerY = (bounds.top + bounds.bottom) / 2f,
                 )
+                return
+            } catch (failure: StaleObjectException) {
+                lastFailure = failure
+                SystemClock.sleep(50L)
+            }
+        }
+        throw IllegalStateException("Could not click host view $id", lastFailure)
+    }
+
+    private fun clickMarkedWithUiAutomator(id: String) {
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        var lastFailure: Throwable? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
+                markedView(id).click()
                 return
             } catch (failure: StaleObjectException) {
                 lastFailure = failure

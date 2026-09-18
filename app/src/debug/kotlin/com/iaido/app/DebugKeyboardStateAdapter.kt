@@ -2,6 +2,8 @@ package com.iaido.app
 
 import android.content.Context
 import android.os.SystemClock
+import android.util.Log
+import androidx.datastore.preferences.core.edit
 import com.iaido.core.commands.CommandBindingSet
 import com.iaido.core.dictionary.PersonalDictionarySnapshot
 import com.iaido.core.language.Language
@@ -10,6 +12,7 @@ import com.iaido.core.state.KeyboardProfileSnapshot
 import com.iaido.core.state.KeyboardStateSnapshot
 import com.iaido.core.state.TypingSessionSnapshot
 import com.iaido.core.typing.SpacingMode
+import kotlinx.coroutines.runBlocking
 
 /**
  * Debug/instrumentation bridge for restoring a validated keyboard snapshot into the IME service.
@@ -31,6 +34,14 @@ class DebugKeyboardStateAdapter(private val context: Context) {
     fun restoreBaseline(id: String): Long = restore(requireBaseline(id))
 
     fun restore(snapshot: KeyboardStateSnapshot): Long {
+        val startedAtMs = SystemClock.elapsedRealtime()
+        // Keep persisted debug settings aligned with the snapshot before the IME applies it. This
+        // avoids a second DataStore reset and IME rebind during the next scenario setup.
+        runBlocking {
+            context.settingsStore.edit { preferences ->
+                preferences[spacingModeKey] = spacingModeStoredValue(snapshot.profile.spacingMode)
+            }
+        }
         val preferences = context.getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, Context.MODE_PRIVATE)
         val requestId = synchronized(REQUEST_LOCK) {
             preferences.getLong(DebugAutoSpaceFixtures.STATE_REQUEST_ID_KEY, 0L) + 1L
@@ -49,6 +60,11 @@ class DebugKeyboardStateAdapter(private val context: Context) {
                 check(error == null) { "IME rejected keyboard state snapshot $requestId: $error" }
                 val revision = preferences.getLong(DebugAutoSpaceFixtures.RUNTIME_READY_REVISION_KEY, -1L)
                 check(revision >= 0L) { "IME acknowledged snapshot $requestId without a ready revision" }
+                Log.i(
+                    "E2E-PERF",
+                    "phase=state_restore durationMs=${SystemClock.elapsedRealtime() - startedAtMs} " +
+                        "requestId=$requestId revision=$revision",
+                )
                 return revision
             }
             check(responseId < requestId) {

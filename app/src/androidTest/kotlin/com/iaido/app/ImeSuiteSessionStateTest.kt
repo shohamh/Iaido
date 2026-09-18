@@ -8,14 +8,14 @@ import org.junit.Test
 
 class ImeSuiteSessionStateTest {
     @Test
-    fun firstScenarioBootstrapsAndLaterSameFixtureScenariosReuseIt() {
+    fun laterFixturesReuseTheExistingHostAndOnlyChangeTheDebugFixture() {
         val state = ImeSuiteSessionState()
 
         assertTrue(state.needsBootstrap("fixture-a"))
         state.markReady("fixture-a")
 
         assertFalse(state.needsBootstrap("fixture-a"))
-        assertTrue(state.needsBootstrap("fixture-b"))
+        assertFalse(state.needsBootstrap("fixture-b"))
     }
 
     @Test

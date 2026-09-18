@@ -744,17 +744,20 @@ class ImeScenario(
     private fun setup() {
         val setupStartedAtMs = SystemClock.elapsedRealtime()
         val fixture = autoSpaceFixture?.preferenceValue
-        val bootstrap = suiteState.needsBootstrap(fixture)
+        val bootstrap = suiteState.needsBootstrap()
         val needsImeSelection = suiteState.needsImeSelection(system.iaidoImeId)
-        val spacingModeChanged = system.ensureManualSpacingMode()
+        val spacingModeChanged = false
         if (bootstrap) {
             system.launchHost(fixture)
             // Bind the selected IME after the editor exists. Selecting it before the host is
             // focused can leave Android's input-method manager with a selected-but-unbound IME.
             system.enableAndSelect(system.iaidoImeId)
         } else {
-            if (spacingModeChanged || needsImeSelection) system.enableAndSelect(system.iaidoImeId)
+            // Keep the existing editor activity alive before changing the selected IME. The
+            // selection handoff can temporarily hide the editor from UiAutomator; checking after
+            // that handoff makes every fixture look like a missing host and relaunches it.
             system.ensureHostVisible(fixture)
+            if (spacingModeChanged || needsImeSelection) system.enableAndSelect(system.iaidoImeId)
         }
         system.setAutoSpaceFixture(fixture)
         editor.focus()
@@ -763,9 +766,13 @@ class ImeScenario(
         }
         val stateAdapter = DebugKeyboardStateAdapter(instrumentation.targetContext)
         val baselineId = suiteState.baselineOrNull() ?: stateAdapter.saveBaseline().also(suiteState::setBaseline)
-        val baselineRevision = stateAdapter.restoreBaseline(baselineId)
-        system.waitForRuntimeReady(baselineRevision)
+        stateAdapter.restoreBaseline(baselineId)
+        val clearStartedAtMs = SystemClock.elapsedRealtime()
         editor.clear()
+        Log.i(
+            "E2E-PERF",
+            "phase=editor_clear durationMs=${SystemClock.elapsedRealtime() - clearStartedAtMs}",
+        )
         expectedText = ""
         expectedSelection = 0
         expectedLanguage = Language.ENGLISH
@@ -980,8 +987,7 @@ class ImeScenario(
 
     private fun checkpoint(action: String, verifyEnvironment: Boolean = false) {
         val checkpointStartedAtMs = SystemClock.elapsedRealtime()
-        editor.waitForText(expectedText)
-        val observedText = editor.text()
+        val observedText = editor.waitForText(expectedText)
         val observedSelection = editor.selection()
         val observedIme = if (verifyEnvironment) system.selectedInputMethodId() else expectedIme
         val observedLanguage = if (verifyEnvironment && expectedIme == system.iaidoImeId) {
