@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.iaido.core.commands.CommandBinding
@@ -26,6 +27,7 @@ internal val cascadeDepthKey = intPreferencesKey("flow_correction_depth")
 internal val graceWindowKey = intPreferencesKey("split_grace_window_ms")
 internal val spacingModeKey = stringPreferencesKey("spacing_mode")
 internal val preferredLanguageKey = stringPreferencesKey("preferred_language")
+internal val showCandidateScoresKey = booleanPreferencesKey("show_candidate_scores")
 
 internal val Context.settingsStore by preferencesDataStore(name = "settings")
 
@@ -35,6 +37,7 @@ internal data class KeyboardSettings(
     val splitGraceWindowMs: Long = SettingsDefaults.GRACE_WINDOW_MS.toLong(),
     val commandBindings: List<CommandBinding> = CommandBindingSet().bindings,
     val preferredLanguage: Language = Language.ENGLISH,
+    val showCandidateScores: Boolean = false,
 ) {
     init {
         require(flowCorrectionDepth in SettingsDefaults.CASCADE_DEPTH_RANGE)
@@ -84,6 +87,7 @@ internal fun keyboardSettingsFromPreferences(preferences: Preferences): Keyboard
     splitGraceWindowMs = (preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS).toLong(),
     commandBindings = commandBindingsFromStoredValue(preferences[commandBindingKey]),
     preferredLanguage = languageFromStoredValue(preferences[preferredLanguageKey]),
+    showCandidateScores = preferences[showCandidateScoresKey] ?: false,
 )
 
 internal fun spacingModeFromStoredValue(value: String?): SpacingMode = when (value) {

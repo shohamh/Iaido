@@ -60,6 +60,7 @@ fun SuggestionStrip(
     rtl: Boolean,
     replacementOptions: List<ReplacementOption> = emptyList(),
     liveReplacementOptionIds: Set<String> = emptySet(),
+    showCandidateScores: Boolean = false,
     onRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
     onUndo: (chipIndex: Int) -> Unit = {},
     onReplacementPreview: (ReplacementOption) -> Unit = {},
@@ -86,10 +87,7 @@ fun SuggestionStrip(
     // distinguishes the two cases -- see SuggestionStrip.kt task 9 report for why a chip-match
     // based filter doesn't work).
     val splitOrLiveReplacementOptions = remember(groupedReplacementOptions, liveReplacementOptionIds) {
-        groupedReplacementOptions.filterNot { option ->
-            option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
-                option.id !in liveReplacementOptionIds
-        }
+        edgeReplacementOptions(groupedReplacementOptions, liveReplacementOptionIds)
     }
     val inlineSlotCount = inlineReels.maxOfOrNull { reel ->
         reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size)
@@ -160,6 +158,7 @@ fun SuggestionStrip(
                     onPreview = onReplacementPreview,
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
+                    showCandidateScores = showCandidateScores,
                 )
             }
         }
@@ -172,6 +171,7 @@ fun SuggestionStrip(
                         visibleSlotCount = visibleSlotCount,
                         reservedWidthDp = inlineReservedWidths[inlineReels.lastIndex - index],
                         onRelease = onReplacementRelease,
+                        showCandidateScores = showCandidateScores,
                     )
                 }
             }
@@ -226,6 +226,7 @@ fun SuggestionStrip(
                         visibleSlotCount = visibleSlotCount,
                         reservedWidthDp = inlineReservedWidths[index],
                         onRelease = onReplacementRelease,
+                        showCandidateScores = showCandidateScores,
                     )
                 }
             }
@@ -239,6 +240,7 @@ fun SuggestionStrip(
                     onPreview = onReplacementPreview,
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
+                    showCandidateScores = showCandidateScores,
                 )
             }
         }
@@ -252,7 +254,17 @@ private fun InlineReplacementChip(
     visibleSlotCount: Int,
     reservedWidthDp: Float,
     onRelease: (ReplacementOption) -> Unit,
+    showCandidateScores: Boolean,
 ) {
+    val candidateScores = remember(reel.options, reel.wordIndex) {
+        reel.options
+            .mapNotNull { it.replacementWords.getOrNull(reel.wordIndex) }
+            .distinct()
+            .mapNotNull { word ->
+                replacementScoreForWord(reel.options, reel.wordIndex, word)?.let { score -> word to score }
+            }
+            .toMap()
+    }
     SuggestionChipView(
         chip = reel.chip,
         index = index,
@@ -269,6 +281,7 @@ private fun InlineReplacementChip(
         onReplacementPreview = {},
         onReplacementRelease = onRelease,
         onReplacementCancel = {},
+        candidateScores = if (showCandidateScores) candidateScores else emptyMap(),
     )
 }
 
@@ -287,6 +300,7 @@ private fun ReplacementReelSlot(
     onPreview: (ReplacementOption) -> Unit,
     onRelease: (ReplacementOption) -> Unit,
     onCancel: () -> Unit,
+    showCandidateScores: Boolean,
 ) {
     val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
         ReplacementReelSelection()
@@ -310,6 +324,7 @@ private fun ReplacementReelSlot(
             selection.cancel()
             onCancel()
         },
+        showCandidateScores = showCandidateScores,
     )
 }
 
@@ -322,6 +337,7 @@ private fun ReplacementReelGroup(
     onPreview: (ReplacementOption) -> Unit,
     onRelease: (ReplacementOption) -> Unit,
     onCancel: () -> Unit,
+    showCandidateScores: Boolean,
 ) {
     val density = LocalDensity.current
     val stateKey = options.joinToString { it.id }
@@ -396,12 +412,21 @@ private fun ReplacementReelGroup(
                     .padding(8.dp),
                 contentAlignment = androidx.compose.ui.Alignment.Center,
             ) {
-                Text(
-                    text = word,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                )
+                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    Text(
+                        text = word,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                    )
+                    if (showCandidateScores) {
+                        Text(
+                            text = candidateScoreLabel(option.score),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         }
     }
@@ -431,6 +456,7 @@ private fun SuggestionChipView(
     onReplacementPreview: (ReplacementOption) -> Unit,
     onReplacementRelease: (ReplacementOption) -> Unit,
     onReplacementCancel: () -> Unit,
+    candidateScores: Map<String, Double> = emptyMap(),
 ) {
     val baseAlternatives = reelCandidatesForDisplay(chip)
     val alternatives = if (joinCandidate != null) {
@@ -582,23 +608,33 @@ private fun SuggestionChipView(
                                 },
                             ),
                     ) {
-                        Text(
-                            text = candidate,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
-                            color = foregroundColor.copy(alpha = when (distance) {
-                                0 -> 1f
-                                1 -> 0.48f
-                                else -> 0.2f
-                            }),
-                            style = if (distance == 0) {
-                                MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
-                            } else {
-                                MaterialTheme.typography.bodyMedium
-                            },
-                            maxLines = 1,
-                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = candidate,
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                color = foregroundColor.copy(alpha = when (distance) {
+                                    0 -> 1f
+                                    1 -> 0.48f
+                                    else -> 0.2f
+                                }),
+                                style = if (distance == 0) {
+                                    MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+                                } else {
+                                    MaterialTheme.typography.bodyMedium
+                                },
+                                maxLines = 1,
+                            )
+                            candidateScores[candidate]?.let { score ->
+                                    Text(
+                                        text = candidateScoreLabel(score),
+                                        color = foregroundColor.copy(alpha = 0.72f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                            }
+                        }
                     }
                 }
             }

@@ -68,6 +68,7 @@ class IaidoInputMethodService : InputMethodService() {
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
+    private val showCandidateScores = mutableStateOf(false)
     // Ids of replacement options currently produced by the live SwipeTypingCoordinator
     // transaction, as opposed to history-derived joins -- used only to decide whether a
     // join-shaped option still belongs in the edge-anchored ReplacementReelSlot (a still-live join
@@ -360,6 +361,7 @@ class IaidoInputMethodService : InputMethodService() {
                     suggestionChips = sessionChips.value,
                     replacementOptions = replacementOptions.value,
                     liveReplacementOptionIds = liveReplacementOptionIds.value,
+                    showCandidateScores = showCandidateScores.value,
                     onSuggestionRelease = ::releaseSuggestion,
                     onSuggestionUndo = ::undoSuggestion,
                     onReplacementPreview = swipeTypingCoordinator::previewReplacement,
@@ -560,6 +562,7 @@ class IaidoInputMethodService : InputMethodService() {
                 .collectLatest { resolvedMode ->
                     mainHandler.post {
                         spacingModeForTypingCoordinator = resolvedMode.spacingMode
+                        showCandidateScores.value = resolvedMode.showCandidateScores && isDebugBuild()
                         flowCorrectionEngine.setMaxCascadeDepth(resolvedMode.flowCorrectionDepth)
                         splitGraceWindowMs = resolvedMode.splitGraceWindowMs
                         splitController.updateGraceWindowMs(splitGraceWindowMs)

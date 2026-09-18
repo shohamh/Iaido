@@ -2,6 +2,7 @@ package com.iaido.app
 
 import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.SuggestionChip
+import java.util.Locale
 
 internal fun displayedReelIndex(selectedIndex: Int, dragOffsetSteps: Float, maxIndex: Int): Int {
     if (maxIndex < 0) return 0
@@ -36,10 +37,21 @@ internal fun inlineReplacementOptionIds(options: List<ReplacementOption>): Set<S
         .toSet()
 }
 
+internal fun edgeReplacementOptions(
+    options: List<ReplacementOption>,
+    liveReplacementOptionIds: Set<String>,
+): List<ReplacementOption> = options.filterNot { option ->
+    val singleWordSplit = option.sourceWords.size == 1 && option.replacementWords.size > 1
+    val historicalJoin = option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
+        option.id !in liveReplacementOptionIds
+    singleWordSplit || historicalJoin
+}
+
 /**
  * Builds one ordinary word reel for each word in a live same-shaped inference option group.
- * Structural split/join options stay in the grouped replacement reel. A one-letter alternative
- * is not a useful correction for a multi-letter word and is excluded from the inline reel.
+ * Same-shaped options stay in one ordinary word reel. Single-word structural splits are hidden
+ * because they do not represent an alternative word choice; multi-word joins remain in the
+ * grouped reel where they can be previewed and committed as one replacement.
  */
 internal fun inlineReplacementReels(options: List<ReplacementOption>): List<InlineReplacementReel> {
     val sourceWords = options.firstOrNull()?.sourceWords.orEmpty()
@@ -79,6 +91,17 @@ internal fun InlineReplacementReel.optionForDisplayIndex(index: Int): Replacemen
     val candidate = displayCandidateForIndex(chip, index) ?: return null
     return options.firstOrNull { it.replacementWords.getOrNull(wordIndex) == candidate }
 }
+
+internal fun replacementScoreForWord(
+    options: List<ReplacementOption>,
+    wordIndex: Int,
+    word: String,
+): Double? = options
+    .filter { it.replacementWords.getOrNull(wordIndex) == word }
+    .maxOfOrNull(ReplacementOption::score)
+
+internal fun candidateScoreLabel(score: Double): String =
+    String.format(Locale.US, "%.3f", score)
 
 private fun Float.roundToInt(): Int = kotlin.math.round(this).toInt()
 

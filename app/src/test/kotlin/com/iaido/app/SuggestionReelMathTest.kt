@@ -138,6 +138,34 @@ class SuggestionReelMathTest {
     }
 
     @Test
+    fun `single-word split candidates do not create a second grouped reel`() {
+        val options = listOf(
+            ReplacementOption(listOf("help"), listOf("help"), 1.0),
+            ReplacementOption(listOf("help"), listOf("he", "lp"), 0.9),
+        )
+
+        val inlineIds = inlineReplacementOptionIds(options)
+        val edgeOptions = edgeReplacementOptions(
+            options.filterNot { it.id in inlineIds },
+            liveReplacementOptionIds = emptySet(),
+        )
+
+        assertEquals(emptyList<ReplacementOption>(), edgeOptions)
+        assertEquals(listOf("help"), inlineReplacementReels(options).map { it.chip.word })
+    }
+
+    @Test
+    fun `candidate score overlay follows the visible replacement word`() {
+        val options = listOf(
+            ReplacementOption(listOf("help"), listOf("help"), 0.91),
+            ReplacementOption(listOf("help"), listOf("held"), 0.73),
+        )
+
+        assertEquals(0.73, replacementScoreForWord(options, wordIndex = 0, word = "held"))
+        assertEquals("0.910", candidateScoreLabel(0.91))
+    }
+
+    @Test
     fun `display candidate lookup uses the same de-duplicated order as the reel`() {
         val chip = SuggestionChip(word = "Hello", alternatives = listOf("Help"))
 

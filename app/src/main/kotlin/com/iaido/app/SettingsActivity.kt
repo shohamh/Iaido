@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -68,6 +69,7 @@ class SettingsActivity : ComponentActivity() {
         var cascadeDepth by remember { mutableStateOf(SettingsDefaults.CASCADE_DEPTH) }
         var graceWindowMs by remember { mutableStateOf(SettingsDefaults.GRACE_WINDOW_MS) }
         var spacingMode by remember { mutableStateOf(SpacingMode.INFER_SPACES) }
+        var showCandidateScores by remember { mutableStateOf(false) }
         val installedVersionName = remember { appVersion() }
         var updateChannel by remember { mutableStateOf(updateChannelFromStoredValue(null, installedVersionName)) }
         var addWord by remember { mutableStateOf("") }
@@ -113,6 +115,7 @@ class SettingsActivity : ComponentActivity() {
             cascadeDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH
             graceWindowMs = preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS
             spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey])
+            showCandidateScores = preferences[showCandidateScoresKey] ?: false
             updateChannel = updateChannelFromStoredValue(preferences[updateChannelKey], installedVersionName)
             settingsLoaded = true
         }
@@ -272,6 +275,29 @@ class SettingsActivity : ComponentActivity() {
                 valueRange = SettingsDefaults.GRACE_WINDOW_RANGE.first.toFloat()..SettingsDefaults.GRACE_WINDOW_RANGE.last.toFloat(),
                 steps = 3,
             )
+
+            if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                HorizontalDivider()
+                Text("Debug", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show candidate scores")
+                        Text("Display recognition scores on the active reel choices.")
+                    }
+                    Switch(
+                        checked = showCandidateScores,
+                        onCheckedChange = { enabled ->
+                            showCandidateScores = enabled
+                            lifecycleScope.launch {
+                                settingsStore.edit { it[showCandidateScoresKey] = enabled }
+                            }
+                        },
+                    )
+                }
+            }
 
             HorizontalDivider()
             Text("Dictionary & Learning", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
