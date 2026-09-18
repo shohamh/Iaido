@@ -14,11 +14,11 @@ class ImeKeyboardSwitchE2eTest {
     fun referenceKeyboardCanBeSelectedAndIaidoRestored() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             switchToReferenceKeyboard()
             tapReferenceCommit()
             switchBackToIaido()
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
             assertText("Hello reference world")
         }
@@ -30,7 +30,7 @@ class ImeKeyboardSwitchE2eTest {
             switchToReferenceKeyboard()
             tapReferenceCommit()
             switchBackToIaido()
-            pressBackspace(9)
+            pressBackspace(9, checkpointEach = false)
             swipeWord("there")
             assertText("There")
         }

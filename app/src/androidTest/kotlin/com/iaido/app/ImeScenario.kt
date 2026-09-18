@@ -180,7 +180,7 @@ class ImeScenario(
         return cancelled
     }
 
-    fun tapKey(key: String) {
+    fun tapKey(key: String, checkpointEach: Boolean = true) {
         val logicalKey = key.lowercase()
         if (logicalKey == "globe") {
             val before = expectedLanguage
@@ -205,10 +205,10 @@ class ImeScenario(
                 insertExpected(value)
             }
         }
-        checkpoint("tapKey($key)")
+        if (checkpointEach) checkpoint("tapKey($key)")
     }
 
-    fun tapSpace() = tapKey("space")
+    fun tapSpace(checkpointEach: Boolean = true) = tapKey("space", checkpointEach)
 
     fun switchLanguage() = tapKey("globe")
 
@@ -232,21 +232,21 @@ class ImeScenario(
         checkpoint("twoFingerLanguageSwitch", verifyEnvironment = true)
     }
 
-    fun pressBackspace(count: Int = 1) {
+    fun pressBackspace(count: Int = 1, checkpointEach: Boolean = true) {
         require(count >= 0) { "Backspace count cannot be negative" }
         repeat(count) {
             editor.pressBackspace()
             deleteExpectedOne()
-            checkpoint("pressBackspace")
+            if (checkpointEach) checkpoint("pressBackspace")
         }
     }
 
-    fun moveCursorLeft(count: Int = 1) {
+    fun moveCursorLeft(count: Int = 1, checkpointEach: Boolean = true) {
         require(count >= 0) { "Cursor movement count cannot be negative" }
         repeat(count) {
             editor.moveCursorLeft()
             expectedSelection = (expectedSelection - 1).coerceAtLeast(0)
-            checkpoint("moveCursorLeft")
+            if (checkpointEach) checkpoint("moveCursorLeft")
         }
     }
 

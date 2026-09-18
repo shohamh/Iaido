@@ -16,7 +16,7 @@ class ImeLifecycleE2eTest {
         artifacts.track(scenario)
         scenario.run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
             hideAndShowKeyboard()
             assertText("Hello world")

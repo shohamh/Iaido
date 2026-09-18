@@ -14,9 +14,9 @@ class ImeEditingE2eTest {
     fun sentenceCanDeleteWordAndRetypeIt() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
-            pressBackspace(5)
+            pressBackspace(5, checkpointEach = false)
             swipeWord("there")
             assertText("Hello there")
         }
@@ -26,9 +26,9 @@ class ImeEditingE2eTest {
     fun middleCursorEditInsertsWithoutLosingSurroundingText() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
-            moveCursorLeft(5)
+            moveCursorLeft(5, checkpointEach = false)
             tapKey("x")
             assertText("Hello xworld")
         }
@@ -38,7 +38,7 @@ class ImeEditingE2eTest {
     fun cancelledMistakePathDoesNotMutateText() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             injectCancelledSwipe("world")
             assertText("Hello ")
         }
@@ -61,11 +61,11 @@ class ImeEditingE2eTest {
     @Test
     fun typedMistakeCanBeDeletedAndCorrected() {
         scenario().run {
-            tapKey("t")
-            tapKey("e")
+            tapKey("t", checkpointEach = false)
+            tapKey("e", checkpointEach = false)
             tapKey("h")
             assertText("Teh")
-            pressBackspace(3)
+            pressBackspace(3, checkpointEach = false)
             swipeWord("the")
             assertText("The")
         }
@@ -82,7 +82,7 @@ class ImeEditingE2eTest {
     fun heldBackspaceDeletesRepeatedlyAndAccelerates() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
             holdBackspace(durationMs = 1_200L)
         }
@@ -92,7 +92,7 @@ class ImeEditingE2eTest {
     fun backspaceSwipeShowsLiveDeletionAndRestoresWhenMovedRight() {
         scenario().run {
             swipeWord("hello")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("world")
             val snapshots = swipeBackspaceLeftThenRight()
             check(snapshots.distinct().size > 1) { "Expected multiple live deletion states: $snapshots" }

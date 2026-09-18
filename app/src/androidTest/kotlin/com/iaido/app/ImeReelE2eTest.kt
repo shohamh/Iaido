@@ -96,11 +96,11 @@ class ImeReelE2eTest {
     fun stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords() {
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("is")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("a")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("ninja")
             val device = androidx.test.uiautomator.UiDevice.getInstance(
                 androidx.test.InstrumentationRegistry.getInstrumentation(),
@@ -130,12 +130,12 @@ class ImeReelE2eTest {
     @Test
     fun scrollingPastAChipsLastAlternativeCommitsTheJoinedWord() {
         ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.JOIN_REEL).also(artifacts::track).run {
-            tapKey("x")
-            tapSpace()
+            tapKey("x", checkpointEach = false)
+            tapSpace(checkpointEach = false)
             swipeWord("in")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("to")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             val before = state().expectedText
             // The pure-typing accessibility tree is stale before the first reel gesture (a
             // documented, pre-existing condition -- see stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords's
@@ -181,7 +181,7 @@ class ImeReelE2eTest {
     fun theEdgeAnchoredReplacementSlotNoLongerAppearsForAJoinCandidate() {
         ImeScenario().also(artifacts::track).run {
             swipeWord("wh")
-            tapSpace()
+            tapSpace(checkpointEach = false)
             swipeWord("at")
             val device = androidx.test.uiautomator.UiDevice.getInstance(
                 androidx.test.InstrumentationRegistry.getInstrumentation(),

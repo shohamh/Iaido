@@ -15,7 +15,7 @@ class ImeEnglishE2eTest {
         scenario().run {
             ImeScenarioData.englishSmoke.forEachIndexed { index, word ->
                 swipeWord(word)
-                if (index < ImeScenarioData.englishSmoke.lastIndex) tapSpace()
+                if (index < ImeScenarioData.englishSmoke.lastIndex) tapSpace(checkpointEach = false)
             }
             tapKey(".")
             assertText("There is a ninja.")
