@@ -1,0 +1,24 @@
+services:
+  telemetry:
+    image: python:3.13-slim
+    working_dir: /service
+    command:
+      - /bin/sh
+      - -ec
+      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers
+    environment:
+      IAIDO_DATABASE_URL: sqlite:////data/telemetry.db
+      IAIDO_STORAGE_ROOT: /data/objects
+      IAIDO_OPERATOR_TOKEN: ${IAIDO_OPERATOR_TOKEN:?set IAIDO_OPERATOR_TOKEN in the server environment}
+      IAIDO_MAX_REQUEST_BYTES: ${IAIDO_MAX_REQUEST_BYTES:-262144}
+      IAIDO_RATE_LIMIT_REQUESTS: ${IAIDO_RATE_LIMIT_REQUESTS:-120}
+      IAIDO_RATE_LIMIT_WINDOW_SECONDS: ${IAIDO_RATE_LIMIT_WINDOW_SECONDS:-60}
+    volumes:
+      - .:/service:ro
+      - telemetry-data:/data
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+volumes:
+  telemetry-data:
