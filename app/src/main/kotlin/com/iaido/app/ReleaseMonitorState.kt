@@ -4,7 +4,7 @@ internal const val RELEASE_POLL_NORMAL_DELAY_MS = 10 * 60 * 1000L
 internal const val RELEASE_POLL_FAST_DELAY_MS = 60 * 1000L
 internal const val RELEASE_POLL_FAST_WINDOW_MS = 60 * 60 * 1000L
 
-internal data class ReleaseIdentity(
+data class ReleaseIdentity(
     val channel: UpdateChannel,
     val tagName: String,
     val releaseId: Long,
@@ -14,20 +14,31 @@ internal data class ReleaseIdentity(
 internal data class ReleaseMonitorState(
     val fastPollingUntilMs: Long = 0L,
     val fastPollingBaseline: ReleaseIdentity? = null,
+    val fastPollingWorkflowId: Long? = null,
     val lastStagedRelease: ReleaseIdentity? = null,
     val stagedVersionName: String = "",
     val lastNotifiedRelease: ReleaseIdentity? = null,
 ) {
-    fun startFastPolling(nowMs: Long, baseline: ReleaseIdentity? = fastPollingBaseline): ReleaseMonitorState = copy(
-        fastPollingUntilMs = maxOf(fastPollingUntilMs, nowMs + RELEASE_POLL_FAST_WINDOW_MS),
-        fastPollingBaseline = baseline,
-    )
+    fun startFastPolling(
+        nowMs: Long,
+        workflowId: Long,
+        baseline: ReleaseIdentity? = fastPollingBaseline,
+    ): ReleaseMonitorState = when {
+        fastPollingWorkflowId == workflowId && fastPollingUntilMs > 0L && nowMs >= fastPollingUntilMs -> this
+        fastPollingWorkflowId == workflowId -> copy(fastPollingBaseline = baseline)
+        else -> copy(
+            fastPollingUntilMs = nowMs + RELEASE_POLL_FAST_WINDOW_MS,
+            fastPollingBaseline = baseline,
+            fastPollingWorkflowId = workflowId,
+        )
+    }
 
     fun isFastPolling(nowMs: Long): Boolean = nowMs < fastPollingUntilMs
 
     fun stopFastPolling(): ReleaseMonitorState = copy(
         fastPollingUntilMs = 0L,
         fastPollingBaseline = null,
+        fastPollingWorkflowId = null,
     )
 }
 

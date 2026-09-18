@@ -12,6 +12,7 @@ data class AppReleaseAsset(
 data class AppRelease(
     val tagName: String,
     val assets: List<AppReleaseAsset>,
+    val releaseId: Long = 0L,
 )
 
 fun selectApkAsset(release: AppRelease): AppReleaseAsset {

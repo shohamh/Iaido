@@ -21,10 +21,10 @@ internal sealed interface ReleaseProbe {
     data object Unavailable : ReleaseProbe
 }
 
-internal enum class ReleaseWorkflowStatus {
-    RUNNING,
-    IDLE,
-    UNKNOWN,
+internal sealed interface ReleaseWorkflowStatus {
+    data class Running(val runId: Long) : ReleaseWorkflowStatus
+    data object Idle : ReleaseWorkflowStatus
+    data object Unknown : ReleaseWorkflowStatus
 }
 
 internal class GitHubReleaseMonitorClient(
@@ -52,7 +52,7 @@ internal class GitHubReleaseMonitorClient(
             checkResponse(connection)
             parseReleaseWorkflowStatus(readResponse(connection))
         } catch (_: Exception) {
-            ReleaseWorkflowStatus.UNKNOWN
+            ReleaseWorkflowStatus.Unknown
         } finally {
             connection.disconnect()
         }
@@ -131,9 +131,11 @@ internal fun parseReleaseWorkflowStatus(json: String): ReleaseWorkflowStatus {
     val runs = parseJsonObject(json).getValue("workflow_runs").jsonArray
     for (runElement in runs) {
         val status = runElement.jsonObject.optionalString("status")
-        if (status == "queued" || status == "in_progress") return ReleaseWorkflowStatus.RUNNING
+        if (status == "queued" || status == "in_progress") {
+            return ReleaseWorkflowStatus.Running(runElement.jsonObject.requiredLong("id"))
+        }
     }
-    return ReleaseWorkflowStatus.IDLE
+    return ReleaseWorkflowStatus.Idle
 }
 
 private val releaseJson = Json { ignoreUnknownKeys = true }

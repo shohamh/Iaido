@@ -51,8 +51,18 @@ fun validateAppArchive(
 
 sealed interface AppUpdateResult {
     data object UpToDate : AppUpdateResult
-    data class ReadyToInstall(val apk: File, val versionCode: Long, val versionName: String = "") : AppUpdateResult
-    data class InstallPermissionRequired(val apk: File, val versionCode: Long, val versionName: String = "") : AppUpdateResult
+    data class ReadyToInstall(
+        val apk: File,
+        val versionCode: Long,
+        val versionName: String = "",
+        val releaseIdentity: ReleaseIdentity? = null,
+    ) : AppUpdateResult
+    data class InstallPermissionRequired(
+        val apk: File,
+        val versionCode: Long,
+        val versionName: String = "",
+        val releaseIdentity: ReleaseIdentity? = null,
+    ) : AppUpdateResult
     data class Failed(val message: String) : AppUpdateResult
 }
 
@@ -70,8 +80,13 @@ class AppUpdateClient(
     private val incomingApk = File(updateDirectory, INCOMING_APK)
     private val stagedApk = File(updateDirectory, STAGED_APK)
 
-    @Synchronized
     fun update(onDownloadStarted: () -> Unit = {}): AppUpdateResult {
+        return synchronized(APP_UPDATE_LOCK) {
+            updateInternal(onDownloadStarted)
+        }
+    }
+
+    private fun updateInternal(onDownloadStarted: () -> Unit): AppUpdateResult {
         clearIncoming()
         val result = runCatching {
             val release = parseRelease(readText(requestUrl))
@@ -82,6 +97,12 @@ class AppUpdateClient(
                 error("Latest ${channel.displayName.lowercase()} release has an unexpected tag")
             }
             val asset = selectApkAsset(release.appRelease)
+            val releaseIdentity = ReleaseIdentity(
+                channel = channel,
+                tagName = release.appRelease.tagName,
+                releaseId = release.appRelease.releaseId,
+                assetUpdatedAt = asset.updatedAt,
+            )
             if (asset.sizeBytes != null && asset.sizeBytes > MAX_APP_UPDATE_BYTES) {
                 error("APK exceeds the download size limit")
             }
@@ -98,9 +119,19 @@ class AppUpdateClient(
                 AppArchiveValidation.Valid -> {
                     moveReplacing(incomingApk, stagedApk)
                     if (context.packageManager.canRequestPackageInstalls()) {
-                        AppUpdateResult.ReadyToInstall(stagedApk, archive.versionCode, archive.versionName)
+                        AppUpdateResult.ReadyToInstall(
+                            stagedApk,
+                            archive.versionCode,
+                            archive.versionName,
+                            releaseIdentity,
+                        )
                     } else {
-                        AppUpdateResult.InstallPermissionRequired(stagedApk, archive.versionCode, archive.versionName)
+                        AppUpdateResult.InstallPermissionRequired(
+                            stagedApk,
+                            archive.versionCode,
+                            archive.versionName,
+                            releaseIdentity,
+                        )
                     }
                 }
                 is AppArchiveValidation.Invalid -> if (validation.reason == NOT_NEWER_REASON) {
@@ -134,6 +165,7 @@ class AppUpdateClient(
         return ParsedRelease(
             appRelease = AppRelease(
                 tagName = release.getString("tag_name"),
+                releaseId = release.getLong("id"),
                 assets = buildList {
                     for (index in 0 until assets.length()) {
                         val asset = assets.getJSONObject(index)
@@ -142,6 +174,7 @@ class AppUpdateClient(
                                 name = asset.getString("name"),
                                 browserDownloadUrl = asset.getString("browser_download_url"),
                                 sizeBytes = asset.optLong("size", -1L).takeIf { it >= 0L },
+                                updatedAt = asset.optString("updated_at"),
                             ),
                         )
                     }
@@ -279,6 +312,7 @@ class AppUpdateClient(
         const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         const val MAX_METADATA_BYTES = 2L * 1024L * 1024L
         const val NOT_NEWER_REASON = "APK is not newer than the installed version"
+        val APP_UPDATE_LOCK = Any()
 
         fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
             .digest(bytes)

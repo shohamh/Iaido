@@ -41,18 +41,18 @@ class GitHubReleaseMonitorClientTest {
             """
             {
               "workflow_runs": [
-                {"status": "completed", "name": "Android release"},
-                {"status": "in_progress", "name": "Android release"}
+                {"id": 3, "status": "completed", "name": "Android release"},
+                {"id": 7, "status": "in_progress", "name": "Android release"}
               ]
             }
             """.trimIndent(),
         )
 
-        assertEquals(ReleaseWorkflowStatus.RUNNING, result)
+        assertEquals(ReleaseWorkflowStatus.Running(7L), result)
     }
 
     @Test
     fun `empty workflow list is idle`() {
-        assertEquals(ReleaseWorkflowStatus.IDLE, parseReleaseWorkflowStatus("{\"workflow_runs\": []}"))
+        assertEquals(ReleaseWorkflowStatus.Idle, parseReleaseWorkflowStatus("{\"workflow_runs\": []}"))
     }
 }

@@ -145,8 +145,11 @@ class SettingsActivity : ComponentActivity() {
                 onChannelSelected = { channel ->
                     updateChannel = channel
                     appUpdateState = AppUpdateUiState.Idle
-                    saveString(updateChannelKey, updateChannelStoredValue(channel))
-                    ReleaseMonitorScheduler.schedule(this@SettingsActivity, 0L)
+                    lifecycleScope.launch {
+                        settingsStore.edit { it[updateChannelKey] = updateChannelStoredValue(channel) }
+                        clearReleaseMonitorState(applicationContext)
+                        ReleaseMonitorScheduler.schedule(applicationContext, 0L)
+                    }
                 },
             )
             Text("Download the newest signed ${updateChannel.displayName.lowercase()} Iaido APK from GitHub Releases.")

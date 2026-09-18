@@ -13,6 +13,9 @@ import androidx.core.app.NotificationManagerCompat
 
 internal const val RELEASE_NOTIFICATION_CHANNEL_ID = "iaido-release-updates"
 internal const val RELEASE_NOTIFICATION_CHANNEL_EXTRA = "release_channel"
+internal const val RELEASE_NOTIFICATION_TAG_EXTRA = "release_tag"
+internal const val RELEASE_NOTIFICATION_ID_EXTRA = "release_id"
+internal const val RELEASE_NOTIFICATION_ASSET_UPDATED_AT_EXTRA = "release_asset_updated_at"
 
 internal fun releaseNotificationTitle(channel: UpdateChannel): String =
     "Iaido ${channel.displayName} update available"
@@ -21,7 +24,12 @@ internal fun releaseNotificationText(versionName: String): String =
     "Version $versionName is ready to install"
 
 internal object ReleaseNotificationPublisher {
-    fun publish(context: Context, channel: UpdateChannel, versionName: String): Boolean {
+    fun publish(
+        context: Context,
+        channel: UpdateChannel,
+        versionName: String,
+        identity: ReleaseIdentity,
+    ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -32,6 +40,9 @@ internal object ReleaseNotificationPublisher {
         createChannel(context)
         val installIntent = Intent(context, ReleaseInstallActivity::class.java).apply {
             putExtra(RELEASE_NOTIFICATION_CHANNEL_EXTRA, channel.name)
+            putExtra(RELEASE_NOTIFICATION_TAG_EXTRA, identity.tagName)
+            putExtra(RELEASE_NOTIFICATION_ID_EXTRA, identity.releaseId)
+            putExtra(RELEASE_NOTIFICATION_ASSET_UPDATED_AT_EXTRA, identity.assetUpdatedAt)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
