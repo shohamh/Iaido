@@ -1,12 +1,17 @@
 package com.iaido.app
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -34,41 +39,46 @@ data class TelemetryBatch(
 )
 
 class TelemetryQueue(
-    private val directory: File,
+    directory: File,
+    private val plane: TelemetryPlane,
     private val clock: () -> Long,
     private val limits: QueueLimits,
 ) {
-    private var nextBatchSequence = 0L
+    private val storageDirectory = File(directory, plane.name.lowercase(Locale.ROOT))
+    private var nextBatchSequence: Long? = null
 
     fun append(event: TelemetryEnvelope) {
         runSafely {
-            val record = encodeRecord(event)
-            if (record.size > limits.maxBatchBytes) return@runSafely
-            require(directory.mkdirs() || directory.isDirectory)
+            try {
+                validateForPlane(event)
+                require(storageDirectory.mkdirs() || storageDirectory.isDirectory)
 
-            val current = batchFiles().lastOrNull()?.let(::readBatch)
-            val target = if (
-                current != null &&
-                current.events.size < limits.maxBatchEvents &&
-                current.file.length() + record.size <= limits.maxBatchBytes
-            ) {
-                current.file
-            } else {
-                File(directory, "batch-${clock()}-${nextBatchSequence++}-${UUID.randomUUID()}.batch")
+                val current = batchFiles().lastOrNull()?.let { readBatchOrNull(it.file) }
+                val currentEvents = current?.events.orEmpty()
+                val canAppend = current != null && currentEvents.size < limits.maxBatchEvents
+                val candidateEvents = if (canAppend) {
+                    currentEvents + event
+                } else {
+                    listOf(event)
+                }
+                if (candidateEvents.size <= limits.maxBatchEvents) {
+                    val compressed = compressBatch(candidateEvents)
+                    val appendToCurrent = canAppend && compressed.size <= limits.maxBatchBytes
+                    val eventsToWrite = if (appendToCurrent) candidateEvents else listOf(event)
+                    val bytesToWrite = if (appendToCurrent) compressed else compressBatch(eventsToWrite)
+                    if (bytesToWrite.size <= limits.maxBatchBytes) {
+                        writeBatch(if (appendToCurrent) current!!.file else newBatchFile(), eventsToWrite)
+                    }
+                }
+            } finally {
+                enforceLimitsInternal()
             }
-            Files.write(
-                target.toPath(),
-                record,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND,
-            )
-            enforceLimitsInternal()
         }
     }
 
     fun pendingBatches(): List<TelemetryBatch> = try {
-        batchFiles().mapNotNull { file ->
-            readBatch(file).takeIf { it.events.isNotEmpty() }?.toPublicBatch()
+        batchFiles().mapNotNull { batchFile ->
+            readBatchOrNull(batchFile.file)?.takeIf { it.events.isNotEmpty() }?.toPublicBatch()
         }
     } catch (_: Exception) {
         emptyList()
@@ -76,13 +86,13 @@ class TelemetryQueue(
 
     fun acknowledge(batchId: String) {
         runSafely {
-            batchFiles().firstOrNull { it.nameWithoutExtension == batchId }?.delete()
+            batchFiles().firstOrNull { it.file.nameWithoutExtension == batchId }?.file?.delete()
         }
     }
 
     fun deleteAll() {
         runSafely {
-            batchFiles().forEach { it.delete() }
+            storageDirectory.listFiles()?.filter { it.isFile && isQueueFile(it) }?.forEach { it.delete() }
         }
     }
 
@@ -91,49 +101,112 @@ class TelemetryQueue(
     }
 
     private fun enforceLimitsInternal() {
+        cleanupTemporaryFiles()
         val now = clock()
-        batchFiles().forEach { file ->
-            val batch = readBatch(file)
+        batchFiles().forEach { batchFile ->
+            val batch = readBatchOrNull(batchFile.file)
+            if (batch == null) {
+                batchFile.file.delete()
+                return@forEach
+            }
+
             val freshEvents = batch.events.filter { now - it.occurredAtMs <= limits.maxAgeMs }
             when {
-                freshEvents.isEmpty() -> file.delete()
-                freshEvents.size != batch.events.size -> rewrite(file, freshEvents)
+                freshEvents.isEmpty() -> batchFile.file.delete()
+                freshEvents.size != batch.events.size -> writeBatch(batchFile.file, freshEvents)
             }
         }
 
-        var queuedBytes = batchFiles().sumOf { it.length() }
-        batchFiles().forEach { file ->
+        var queuedBytes = batchFiles().sumOf { it.file.length() }
+        batchFiles().forEach { batchFile ->
             if (queuedBytes <= limits.maxQueuedBytes) return@forEach
-            queuedBytes -= file.length()
-            file.delete()
+            queuedBytes -= batchFile.file.length()
+            batchFile.file.delete()
         }
     }
 
-    private fun batchFiles(): List<File> = directory.listFiles { file ->
-        file.isFile && file.extension == "batch"
-    }?.sortedBy { it.name } ?: emptyList()
+    private fun validateForPlane(event: TelemetryEnvelope) {
+        if (plane != TelemetryPlane.DIAGNOSTICS) return
+        require(event.eventType == "gesture_outcome") {
+            "Diagnostics queue only accepts gesture outcome events"
+        }
+        validateDiagnostics(DiagnosticsEventCodec.decode(event.payload.toString()))
+    }
 
-    private fun rewrite(file: File, events: List<TelemetryEnvelope>) {
-        val temporary = File(directory, "${file.name}.tmp")
+    private fun batchFiles(): List<BatchFile> = storageDirectory.listFiles { file ->
+        file.isFile && file.extension == "batch"
+    }?.mapNotNull { file ->
+        parseBatchFile(file)
+    }?.sortedWith(compareBy<BatchFile> { it.sequence }.thenBy { it.createdAt }.thenBy { it.file.name }
+    ) ?: emptyList()
+
+    private fun parseBatchFile(file: File): BatchFile? {
+        val parts = file.nameWithoutExtension.split('-')
+        if (parts.size < 4 || parts[0] != "batch") return null
+        return try {
+            BatchFile(
+                file = file,
+                sequence = parts[1].toLong(),
+                createdAt = parts[2].toLong(),
+            )
+        } catch (_: NumberFormatException) {
+            null
+        }
+    }
+
+    private fun newBatchFile(): File {
+        val sequence = nextSequence()
+        return File(storageDirectory, "batch-$sequence-${clock()}-${UUID.randomUUID()}.batch")
+    }
+
+    private fun nextSequence(): Long {
+        if (nextBatchSequence == null) {
+            nextBatchSequence = batchFiles().maxOfOrNull { it.sequence + 1 } ?: 0L
+        }
+        val sequence = nextBatchSequence!!
+        nextBatchSequence = sequence + 1
+        return sequence
+    }
+
+    private fun writeBatch(file: File, events: List<TelemetryEnvelope>) {
+        require(storageDirectory.mkdirs() || storageDirectory.isDirectory)
+        val temporary = File(storageDirectory, "${file.name}.tmp")
         Files.write(
             temporary.toPath(),
-            events.joinToString("") { encodeRecord(it).toString(StandardCharsets.UTF_8) }
-                .toByteArray(StandardCharsets.UTF_8),
+            compressBatch(events),
             StandardOpenOption.CREATE,
             StandardOpenOption.TRUNCATE_EXISTING,
         )
-        Files.move(
-            temporary.toPath(),
-            file.toPath(),
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
+        try {
+            Files.move(
+                temporary.toPath(),
+                file.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(
+                temporary.toPath(),
+                file.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
     }
 
-    private fun readBatch(file: File): StoredBatch {
-        val lines = file.readLines(StandardCharsets.UTF_8)
-        val events = lines.filter { it.isNotBlank() }.map(::decodeRecord)
-        return StoredBatch(file, events)
+    private fun readBatchOrNull(file: File): StoredBatch? = try {
+        val uncompressed = GZIPInputStream(file.inputStream()).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+        val events = uncompressed.lineSequence().filter { it.isNotBlank() }.map(::decodeRecord).toList()
+        StoredBatch(file, events)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun compressBatch(events: List<TelemetryEnvelope>): ByteArray {
+        val output = ByteArrayOutputStream()
+        GZIPOutputStream(output).bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+            events.forEach { event -> writer.write(encodeRecord(event).toString(StandardCharsets.UTF_8)) }
+        }
+        return output.toByteArray()
     }
 
     private fun encodeRecord(event: TelemetryEnvelope): ByteArray {
@@ -151,8 +224,7 @@ class TelemetryQueue(
             put("payload", event.payload)
         }.toString()
         val bytes = json.toByteArray(StandardCharsets.UTF_8)
-        val checksum = sha256(bytes)
-        return "${bytes.size}:$checksum:$json\n".toByteArray(StandardCharsets.UTF_8)
+        return "${bytes.size}:${sha256(bytes)}:$json\n".toByteArray(StandardCharsets.UTF_8)
     }
 
     private fun decodeRecord(line: String): TelemetryEnvelope {
@@ -185,6 +257,12 @@ class TelemetryQueue(
         .digest(bytes)
         .joinToString("") { "%02x".format(it) }
 
+    private fun cleanupTemporaryFiles() {
+        storageDirectory.listFiles()?.filter { it.isFile && it.extension == "tmp" }?.forEach { it.delete() }
+    }
+
+    private fun isQueueFile(file: File): Boolean = file.extension == "batch" || file.extension == "tmp"
+
     private fun runSafely(block: () -> Unit) {
         try {
             block()
@@ -192,6 +270,8 @@ class TelemetryQueue(
             // Telemetry is best effort and must never affect keyboard behavior.
         }
     }
+
+    private data class BatchFile(val file: File, val sequence: Long, val createdAt: Long)
 
     private data class StoredBatch(val file: File, val events: List<TelemetryEnvelope>) {
         fun toPublicBatch() = TelemetryBatch(file.nameWithoutExtension, events)
