@@ -6,6 +6,7 @@ data class AppReleaseAsset(
     val name: String,
     val browserDownloadUrl: String,
     val sizeBytes: Long?,
+    val updatedAt: String = "",
 )
 
 data class AppRelease(

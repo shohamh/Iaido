@@ -26,6 +26,7 @@ data class AppArchiveInfo(
     val versionCode: Long,
     val signingCertificates: Set<String>,
     val sizeBytes: Long,
+    val versionName: String = "",
 )
 
 sealed interface AppArchiveValidation {
@@ -50,8 +51,8 @@ fun validateAppArchive(
 
 sealed interface AppUpdateResult {
     data object UpToDate : AppUpdateResult
-    data class ReadyToInstall(val apk: File, val versionCode: Long) : AppUpdateResult
-    data class InstallPermissionRequired(val apk: File, val versionCode: Long) : AppUpdateResult
+    data class ReadyToInstall(val apk: File, val versionCode: Long, val versionName: String = "") : AppUpdateResult
+    data class InstallPermissionRequired(val apk: File, val versionCode: Long, val versionName: String = "") : AppUpdateResult
     data class Failed(val message: String) : AppUpdateResult
 }
 
@@ -97,9 +98,9 @@ class AppUpdateClient(
                 AppArchiveValidation.Valid -> {
                     moveReplacing(incomingApk, stagedApk)
                     if (context.packageManager.canRequestPackageInstalls()) {
-                        AppUpdateResult.ReadyToInstall(stagedApk, archive.versionCode)
+                        AppUpdateResult.ReadyToInstall(stagedApk, archive.versionCode, archive.versionName)
                     } else {
-                        AppUpdateResult.InstallPermissionRequired(stagedApk, archive.versionCode)
+                        AppUpdateResult.InstallPermissionRequired(stagedApk, archive.versionCode, archive.versionName)
                     }
                 }
                 is AppArchiveValidation.Invalid -> if (validation.reason == NOT_NEWER_REASON) {
@@ -124,6 +125,8 @@ class AppUpdateClient(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
+
+    fun stagedApkFile(): File? = stagedApk.takeIf { it.isFile }
 
     private fun parseRelease(json: String): ParsedRelease {
         val release = JSONObject(json.trimStart('\uFEFF'))
@@ -164,6 +167,7 @@ class AppUpdateClient(
             versionCode = packageInfo.longVersionCode,
             signingCertificates = installedCertificates(packageInfo),
             sizeBytes = file.length(),
+            versionName = packageInfo.versionName.orEmpty(),
         )
     }
 
@@ -301,3 +305,6 @@ private const val APP_UPDATE_API_URL = "https://api.github.com/repos/shohamh/Iai
 object AppUpdateConfig {
     const val RELEASE_API_URL = APP_UPDATE_API_URL
 }
+
+internal fun stagedAppUpdateFile(context: Context): File? =
+    File(context.filesDir, "app-updates/app-update.apk").takeIf { it.isFile }

@@ -1,9 +1,12 @@
 package com.iaido.app
 
+import android.Manifest
 import android.content.Intent
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.content.pm.PackageManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
@@ -49,6 +54,7 @@ class SettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ReleaseMonitorScheduler.schedule(this, 0L)
         setContent { IaidoTheme { SettingsScreen() } }
     }
 
@@ -64,8 +70,14 @@ class SettingsActivity : ComponentActivity() {
         var forgetWord by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Ready") }
         var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
+        var notificationsEnabled by remember { mutableStateOf(updateNotificationsEnabled()) }
         val appUpdateClient = remember(updateChannel) {
             AppUpdateClient(this@SettingsActivity, channel = updateChannel)
+        }
+        val requestNotificationPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            notificationsEnabled = granted && NotificationManagerCompat.from(this@SettingsActivity).areNotificationsEnabled()
         }
         val exportProfile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
@@ -134,9 +146,16 @@ class SettingsActivity : ComponentActivity() {
                     updateChannel = channel
                     appUpdateState = AppUpdateUiState.Idle
                     saveString(updateChannelKey, updateChannelStoredValue(channel))
+                    ReleaseMonitorScheduler.schedule(this@SettingsActivity, 0L)
                 },
             )
             Text("Download the newest signed ${updateChannel.displayName.lowercase()} Iaido APK from GitHub Releases.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationsEnabled) {
+                Button(onClick = { requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                    Text("Allow update notifications")
+                }
+                Text("Enable notifications so Iaido can tell you when a new release is ready.")
+            }
             Text("A release APK cannot update a debug build. If you installed Iaido from Android Studio, uninstall that build first; your settings and learned words will be removed.")
             Button(
                 enabled = appUpdateButtonEnabled(appUpdateState),
@@ -156,7 +175,7 @@ class SettingsActivity : ComponentActivity() {
                             }
                             appUpdateState = when (result) {
                                 AppUpdateResult.UpToDate -> AppUpdateUiState.UpToDate
-                                is AppUpdateResult.ReadyToInstall -> AppUpdateUiState.ReadyToInstall(result.apk, result.versionCode)
+                                is AppUpdateResult.ReadyToInstall -> AppUpdateUiState.ReadyToInstall(result.apk, result.versionCode, result.versionName)
                                 is AppUpdateResult.InstallPermissionRequired -> {
                                     startActivity(
                                         Intent(
@@ -345,6 +364,11 @@ class SettingsActivity : ComponentActivity() {
 
     private fun appVersion(): String =
         packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+
+    private fun updateNotificationsEnabled(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED &&
+                NotificationManagerCompat.from(this).areNotificationsEnabled())
 }
 
 internal data class SpacingModeOption(

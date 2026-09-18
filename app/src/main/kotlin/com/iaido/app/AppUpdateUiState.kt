@@ -7,7 +7,7 @@ sealed interface AppUpdateUiState {
     data object Checking : AppUpdateUiState
     data object Downloading : AppUpdateUiState
     data object UpToDate : AppUpdateUiState
-    data class ReadyToInstall(val apk: File, val versionCode: Long) : AppUpdateUiState
+    data class ReadyToInstall(val apk: File, val versionCode: Long, val versionName: String = "") : AppUpdateUiState
     data object PermissionRequired : AppUpdateUiState
     data class Failed(val message: String) : AppUpdateUiState
 }
