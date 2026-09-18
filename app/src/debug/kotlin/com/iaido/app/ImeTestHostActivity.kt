@@ -66,7 +66,9 @@ class ImeTestHostActivity : Activity() {
 
     private fun updateStatus() {
         if (!::editor.isInitialized || !::status.isInitialized) return
-        status.text = "length=${editor.text.length} selection=${editor.selectionStart}:${editor.selectionEnd}"
+        val value = "length=${editor.text.length} selection=${editor.selectionStart}:${editor.selectionEnd}"
+        status.text = value
+        status.contentDescription = value
     }
 
     private fun saveEditorState() {

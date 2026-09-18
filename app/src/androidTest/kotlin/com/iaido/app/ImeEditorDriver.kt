@@ -22,7 +22,8 @@ class ImeEditorDriver(
     }
 
     fun clear() {
-        clickMarkedWithUiAutomator("ime_test_clear")
+        setMarkedText("ime_test_editor", "")
+        if (readMarked("ime_test_editor") { it.text.orEmpty() }.isEmpty()) return
         waitForText("")
     }
 
@@ -32,7 +33,9 @@ class ImeEditorDriver(
     }
 
     private fun length(): Int {
-        val status = readMarked("ime_test_status") { it.text.orEmpty() }
+        val status = readMarked("ime_test_status") {
+            it.contentDescription.orEmpty() + " " + it.text.orEmpty()
+        }
         val match = LENGTH_REGEX.find(status)
             ?: error("Host status did not expose length: '$status'")
         return match.groupValues[1].toInt()
@@ -117,19 +120,19 @@ class ImeEditorDriver(
         throw IllegalStateException("Could not click host view $id", lastFailure)
     }
 
-    private fun clickMarkedWithUiAutomator(id: String) {
+    private fun setMarkedText(id: String, value: String) {
         val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
         var lastFailure: Throwable? = null
         while (SystemClock.elapsedRealtime() < deadline) {
             try {
-                markedView(id).click()
+                markedView(id).text = value
                 return
             } catch (failure: StaleObjectException) {
                 lastFailure = failure
                 SystemClock.sleep(50L)
             }
         }
-        throw IllegalStateException("Could not click host view $id", lastFailure)
+        throw IllegalStateException("Could not set host view $id text", lastFailure)
     }
 
     private fun <T> readMarked(id: String, read: (UiObject2) -> T): T {
