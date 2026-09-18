@@ -2,40 +2,65 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 from pathlib import Path
+from typing import Protocol
 
 
 class ObjectConflictError(Exception):
     pass
 
 
+PLANES = frozenset({"diagnostics", "research"})
+
+
+class ObjectStorage(Protocol):
+    def object_key(self, plane: str, installation_id: str, batch_id: str) -> str: ...
+
+    def put_if_absent(self, key: str, payload: bytes) -> None: ...
+
+    def delete(self, key: str) -> None: ...
+
+    def delete_installation(self, plane: str, installation_id: str) -> None: ...
+
+
+def object_key(plane: str, installation_id: str, batch_id: str) -> str:
+    if plane not in PLANES:
+        raise ValueError("unknown telemetry plane")
+    return f"{plane}/{installation_id}/{batch_id}.json"
+
+
 class LocalObjectStorage:
-    PLANES = frozenset({"diagnostics", "research"})
+    """Filesystem adapter for tests; production uses S3ObjectStorage."""
 
     def __init__(self, root: Path):
         self.root = root.resolve()
+        self._lock = threading.Lock()
 
     def object_key(self, plane: str, installation_id: str, batch_id: str) -> str:
-        self._check_plane(plane)
-        return f"{plane}/{installation_id}/{batch_id}.json"
+        return object_key(plane, installation_id, batch_id)
 
     def put_if_absent(self, key: str, payload: bytes) -> None:
         path = self._path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-        except FileExistsError:
-            if path.read_bytes() != payload:
-                raise ObjectConflictError(key)
-            return
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
+        with self._lock:
+            if path.exists():
+                if path.read_bytes() != payload:
+                    raise ObjectConflictError(key)
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{os.urandom(8).hex()}.tmp")
+            try:
+                temporary.write_bytes(payload)
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
 
     def delete_installation(self, plane: str, installation_id: str) -> None:
-        self._check_plane(plane)
+        if plane not in PLANES:
+            raise ValueError("unknown telemetry plane")
         directory = self._path(f"{plane}/{installation_id}")
         if directory.exists():
             shutil.rmtree(directory)
@@ -46,6 +71,64 @@ class LocalObjectStorage:
             raise ValueError("object key escapes storage root")
         return path
 
-    def _check_plane(self, plane: str) -> None:
-        if plane not in self.PLANES:
-            raise ValueError("unknown telemetry plane")
+
+class S3ObjectStorage:
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        endpoint_url: str,
+        access_key: str,
+        secret_key: str,
+        region: str,
+        client=None,
+    ):
+        self.bucket = bucket
+        if client is None:
+            import boto3
+
+            client = boto3.client(
+                "s3",
+                endpoint_url=endpoint_url,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region,
+            )
+        self.client = client
+
+    def object_key(self, plane: str, installation_id: str, batch_id: str) -> str:
+        return object_key(plane, installation_id, batch_id)
+
+    def put_if_absent(self, key: str, payload: bytes) -> None:
+        try:
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=payload,
+                IfNoneMatch="*",
+            )
+        except Exception as error:
+            code = getattr(error, "response", {}).get("Error", {}).get("Code")
+            if code not in {"PreconditionFailed", "412"}:
+                raise
+            existing = self.client.get_object(Bucket=self.bucket, Key=key)[
+                "Body"
+            ].read()
+            if existing != payload:
+                raise ObjectConflictError(key) from error
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def delete_installation(self, plane: str, installation_id: str) -> None:
+        prefix = (
+            object_key(plane, installation_id, "placeholder").rsplit("/", 1)[0] + "/"
+        )
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            objects = [{"Key": item["Key"]} for item in page.get("Contents", [])]
+            if objects:
+                self.client.delete_objects(
+                    Bucket=self.bucket,
+                    Delete={"Objects": objects, "Quiet": True},
+                )

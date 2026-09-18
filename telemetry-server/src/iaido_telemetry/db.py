@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Protocol
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
@@ -65,7 +66,38 @@ class BatchIdentityConflict(Exception):
     pass
 
 
-class Database:
+class TelemetryRepository(Protocol):
+    def create_schema(self) -> None: ...
+
+    def create_installation(
+        self, installation_id: str, write_hash: str, deletion_hash: str
+    ) -> InstallationRecord: ...
+
+    def installation_for_write_hash(
+        self, write_hash: str
+    ) -> InstallationRecord | None: ...
+
+    def installation_for_deletion_hash(
+        self, deletion_hash: str
+    ) -> InstallationRecord | None: ...
+
+    def batch(self, plane: str, installation_id: str, batch_id: str): ...
+
+    def add_batch(
+        self,
+        plane: str,
+        installation_id: str,
+        batch_id: str,
+        checksum: str,
+        object_key: str,
+    ) -> None: ...
+
+    def delete_batches(self, plane: str, installation_id: str) -> None: ...
+
+    def list_batches(self, plane: str): ...
+
+
+class SqlAlchemyRepository:
     def __init__(self, url: str):
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
         self.engine = create_engine(url, connect_args=connect_args)
@@ -157,3 +189,19 @@ class Database:
         model = PLANE_RECORDS[plane]
         with self._sessions() as session:
             return list(session.scalars(select(model).order_by(model.id)))
+
+
+class PostgresRepository(SqlAlchemyRepository):
+    def __init__(self, url: str):
+        if not url.startswith("postgresql+psycopg://"):
+            raise ValueError("PostgresRepository requires postgresql+psycopg://")
+        super().__init__(url)
+
+
+class SQLiteTestRepository(SqlAlchemyRepository):
+    """SQLite adapter for isolated tests; never selected from environment config."""
+
+    def __init__(self, url: str):
+        if not url.startswith("sqlite"):
+            raise ValueError("SQLiteTestRepository requires a SQLite URL")
+        super().__init__(url)

@@ -5,7 +5,8 @@ import json
 import threading
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
+from collections.abc import Callable
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -20,7 +21,12 @@ from .auth import (
     issue_credential,
 )
 from .config import Settings
-from .db import BatchIdentityConflict, Database, InstallationRecord
+from .db import (
+    BatchIdentityConflict,
+    InstallationRecord,
+    PostgresRepository,
+    TelemetryRepository,
+)
 from .schemas import (
     BatchAcknowledgement,
     DeletionReceipt,
@@ -30,28 +36,53 @@ from .schemas import (
     OperatorBatchList,
     ResearchBatch,
 )
-from .storage import LocalObjectStorage, ObjectConflictError
+from .storage import ObjectConflictError, ObjectStorage, S3ObjectStorage
 
 Plane = Literal["diagnostics", "research"]
 
 
 class RateLimiter:
-    def __init__(self, requests: int, window_seconds: int):
+    def __init__(
+        self,
+        requests: int,
+        window_seconds: int,
+        max_buckets: int,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         self.requests = requests
         self.window_seconds = window_seconds
-        self._requests: dict[str, deque[float]] = defaultdict(deque)
+        self.max_buckets = max_buckets
+        self._clock = clock
+        self._requests: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def allow(self, key: str) -> bool:
-        now = time.monotonic()
+        now = self._clock()
         with self._lock:
-            recent = self._requests[key]
+            self._evict_stale(now)
+            if key not in self._requests and len(self._requests) >= self.max_buckets:
+                self._requests.popitem(last=False)
+            recent = self._requests.setdefault(key, deque())
+            self._requests.move_to_end(key)
             while recent and recent[0] <= now - self.window_seconds:
                 recent.popleft()
             if len(recent) >= self.requests:
                 return False
             recent.append(now)
             return True
+
+    @property
+    def bucket_count(self) -> int:
+        with self._lock:
+            return len(self._requests)
+
+    def _evict_stale(self, now: float) -> None:
+        stale_before = now - self.window_seconds
+        for key, recent in list(self._requests.items()):
+            while recent and recent[0] <= stale_before:
+                recent.popleft()
+            if not recent:
+                del self._requests[key]
 
 
 class RequestTooLarge(Exception):
@@ -130,14 +161,31 @@ class IngestionBoundaryMiddleware:
         )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    database: TelemetryRepository | None = None,
+    storage: ObjectStorage | None = None,
+) -> FastAPI:
     active_settings = settings or Settings.from_environment()
-    database = Database(active_settings.database_url)
+    if (database is None) != (storage is None):
+        raise ValueError("database and storage adapters must be supplied together")
+    if database is None:
+        active_settings.validate_production()
+        database = PostgresRepository(active_settings.database_url)
+        storage = S3ObjectStorage(
+            bucket=active_settings.s3_bucket,
+            endpoint_url=active_settings.s3_endpoint_url,
+            access_key=active_settings.s3_access_key,
+            secret_key=active_settings.s3_secret_key,
+            region=active_settings.s3_region,
+        )
+    assert storage is not None
     database.create_schema()
-    storage = LocalObjectStorage(active_settings.storage_root)
     limiter = RateLimiter(
         active_settings.rate_limit_requests,
         active_settings.rate_limit_window_seconds,
+        active_settings.rate_limit_max_buckets,
     )
     app = FastAPI(title="Iaido Telemetry", version="1")
     app.state.settings = active_settings
@@ -178,7 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status_code=status.HTTP_201_CREATED,
     )
     def create_installation() -> InstallationResponse:
-        installation_id = uuid.uuid4().hex
+        installation_id = str(uuid.uuid4())
         write_credential = issue_credential()
         deletion_credential = issue_credential()
         database.create_installation(
@@ -202,10 +250,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(
                     status_code=422,
                     detail="Event installation_id does not match credential",
-                )
-            if event.batch_id != batch.batch_id:
-                raise HTTPException(
-                    status_code=422, detail="Event batch_id does not match batch"
                 )
         raw = json.dumps(
             batch.model_dump(mode="json"),

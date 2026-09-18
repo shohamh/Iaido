@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str
-    storage_root: Path
     operator_token: str
+    s3_endpoint_url: str = ""
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "us-east-1"
     max_request_bytes: int = 256 * 1024
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
+    rate_limit_max_buckets: int = 10_000
 
     def __post_init__(self) -> None:
         if not self.database_url:
@@ -25,6 +29,28 @@ class Settings:
             raise ValueError("rate_limit_requests must be positive")
         if self.rate_limit_window_seconds <= 0:
             raise ValueError("rate_limit_window_seconds must be positive")
+        if self.rate_limit_max_buckets <= 0:
+            raise ValueError("rate_limit_max_buckets must be positive")
+
+    def validate_production(self) -> None:
+        if not self.database_url.startswith("postgresql+psycopg://"):
+            raise RuntimeError(
+                "Production telemetry storage requires a PostgreSQL psycopg URL"
+            )
+        missing = [
+            name
+            for name, value in {
+                "IAIDO_S3_ENDPOINT_URL": self.s3_endpoint_url,
+                "IAIDO_S3_BUCKET": self.s3_bucket,
+                "IAIDO_S3_ACCESS_KEY": self.s3_access_key,
+                "IAIDO_S3_SECRET_KEY": self.s3_secret_key,
+            }.items()
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                "Production telemetry storage requires: " + ", ".join(missing)
+            )
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -33,12 +59,19 @@ class Settings:
             raise RuntimeError(
                 "IAIDO_OPERATOR_TOKEN must be supplied by the server environment"
             )
-        return cls(
-            database_url=os.environ.get(
-                "IAIDO_DATABASE_URL", "sqlite:///./data/telemetry.db"
-            ),
-            storage_root=Path(os.environ.get("IAIDO_STORAGE_ROOT", "./data/objects")),
+        database_url = os.environ.get("IAIDO_DATABASE_URL", "")
+        if not database_url:
+            raise RuntimeError(
+                "IAIDO_DATABASE_URL must be supplied by the server environment"
+            )
+        settings = cls(
+            database_url=database_url,
             operator_token=operator_token,
+            s3_endpoint_url=os.environ.get("IAIDO_S3_ENDPOINT_URL", ""),
+            s3_bucket=os.environ.get("IAIDO_S3_BUCKET", ""),
+            s3_access_key=os.environ.get("IAIDO_S3_ACCESS_KEY", ""),
+            s3_secret_key=os.environ.get("IAIDO_S3_SECRET_KEY", ""),
+            s3_region=os.environ.get("IAIDO_S3_REGION", "us-east-1"),
             max_request_bytes=int(
                 os.environ.get("IAIDO_MAX_REQUEST_BYTES", str(256 * 1024))
             ),
@@ -46,4 +79,9 @@ class Settings:
             rate_limit_window_seconds=int(
                 os.environ.get("IAIDO_RATE_LIMIT_WINDOW_SECONDS", "60")
             ),
+            rate_limit_max_buckets=int(
+                os.environ.get("IAIDO_RATE_LIMIT_MAX_BUCKETS", "10000")
+            ),
         )
+        settings.validate_production()
+        return settings
