@@ -2,6 +2,14 @@
 
 An Android keyboard combining the best of Swype and Nintype gesture-typing, reimagined for modern Android.
 
+## Why “Iaido”?
+
+Iaido (居合道) is a Japanese martial art focused on drawing a sword and attacking an opponent in one swift, controlled motion. We chose the name because we want the keyboard to offer that same swiftness: one deliberate swipe following a clean path to produce a complete word.
+
+### Pronunciation
+
+**Iaido** is pronounced **“ee-eye-doh”** (*i-a-i-dō*).
+
 ## Status
 
 Stages 1-12 are implemented on `main`. Stage 12 provides signed GitHub
