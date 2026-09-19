@@ -55,7 +55,11 @@ services:
       # would drop the proxy's `X-Forwarded-Proto: https` and every `/v1/` request would be
       # rejected with 426 by IngestionBoundaryMiddleware. The published port is host-local only
       # (see the deployment docs), so only the local proxy can reach it.
-      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+      #
+      # `--reload` (scoped to the mounted source) makes this local stack hot reloadable: editing a
+      # module under `src/` restarts the worker in a second or two, which is why the source mount
+      # above must stay writable. Production deployments run without `--reload`.
+      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=* --reload --reload-dir /service/src
     environment:
       IAIDO_DATABASE_URL: postgresql+psycopg://iaido:${IAIDO_POSTGRES_PASSWORD}@postgres:5432/iaido_telemetry
       IAIDO_S3_ENDPOINT_URL: http://minio:9000

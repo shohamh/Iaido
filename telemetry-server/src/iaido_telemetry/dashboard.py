@@ -120,14 +120,21 @@ BOTTOM_ROWS = {
 KEY_LABELS = {"globe": "\U0001F310", "settings": "\u2699", "space": "\u2423", "del": "\u232B"}
 POINTER_COLORS = ("#0b57d0", "#c5221f", "#137333", "#8430ce", "#b06000", "#0e7490")
 
+KEY_LABEL_FONT_SIZE = 0.055
+# A glyph's visual centre sits roughly 0.35em above its baseline. `dominant-baseline: middle` would
+# say that for us, but support differs between renderers (it is ignored by some mobile browsers, and
+# the labels then drift to the bottom of their keys), so the offset is applied explicitly here and
+# every engine places a label at the same spot.
+KEY_LABEL_BASELINE_OFFSET = KEY_LABEL_FONT_SIZE * 0.35
+
 # SVG presentation lives with the stylesheet's palette; the trace is drawn as one polyline per
 # pointer so a multi-touch gesture keeps its fingers visually distinct.
-SVG_STYLE = """
-.key { fill: none; stroke: #9aa0a6; stroke-width: 0.006; }
-.key-label { fill: #5f6368; font-size: 0.055px; text-anchor: middle; dominant-baseline: middle; }
-.point { fill: #ffffff; stroke-width: 0.012; }
-.path { fill: none; stroke-width: 0.022; stroke-linecap: round; stroke-linejoin: round; }
-.frame { fill: #ffffff; stroke: #d0d0d0; stroke-width: 0.006; }
+SVG_STYLE = f"""
+.key {{ fill: none; stroke: #9aa0a6; stroke-width: 0.006; }}
+.key-label {{ fill: #5f6368; font-size: {KEY_LABEL_FONT_SIZE}px; text-anchor: middle; }}
+.point {{ fill: #ffffff; stroke-width: 0.012; }}
+.path {{ fill: none; stroke-width: 0.022; stroke-linecap: round; stroke-linejoin: round; }}
+.frame {{ fill: #ffffff; stroke: #d0d0d0; stroke-width: 0.006; }}
 """
 
 
@@ -144,7 +151,8 @@ def _svg_keys(layout_id: str) -> list[str]:
             parts.append(
                 f'<rect class="key" x="{left:.4f}" y="{top:.4f}" '
                 f'width="{width:.4f}" height="{height:.4f}"/>'
-                f'<text class="key-label" x="{left + width / 2:.4f}" y="{top + height / 2:.4f}">{_esc(letter)}</text>'
+                f'<text class="key-label" x="{left + width / 2:.4f}" '
+                f'y="{top + height / 2 + KEY_LABEL_BASELINE_OFFSET:.4f}">{_esc(letter)}</text>'
             )
     bottom_top = (KEYBOARD_ROW_COUNT - 1) / KEYBOARD_ROW_COUNT
     bottom_height = 1 / KEYBOARD_ROW_COUNT
@@ -158,7 +166,8 @@ def _svg_keys(layout_id: str) -> list[str]:
         parts.append(
             f'<rect class="key" x="{left:.4f}" y="{bottom_top:.4f}" width="{right - left:.4f}" '
             f'height="{bottom_height:.4f}"/>'
-            f'<text class="key-label" x="{(left + right) / 2:.4f}" y="{bottom_top + bottom_height / 2:.4f}">'
+            f'<text class="key-label" x="{(left + right) / 2:.4f}" '
+            f'y="{bottom_top + bottom_height / 2 + KEY_LABEL_BASELINE_OFFSET:.4f}">'
             f"{_esc(KEY_LABELS.get(name, name))}</text>"
         )
     return parts

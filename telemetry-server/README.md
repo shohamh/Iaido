@@ -69,6 +69,29 @@ laptop). Optional overrides: `IAIDO_S3_REGION`, `IAIDO_MAX_REQUEST_BYTES`,
 `IAIDO_RATE_LIMIT_MAX_BUCKETS`, `IAIDO_DIAGNOSTICS_RETENTION_DAYS`,
 `IAIDO_RESEARCH_RETENTION_DAYS` (see the table above for defaults).
 
+### Local development: hot reload
+
+The compose stack runs uvicorn with `--reload` scoped to the mounted source
+(`--reload-dir /service/src`), so editing any module under `telemetry-server/src/` restarts the
+worker within a second or two - no `docker compose restart` needed. The container log shows it:
+
+```
+Will watch for changes in these directories: ['/service/src']
+Started reloader process [26] using WatchFiles
+...
+Started server process [31]
+```
+
+Two consequences worth knowing:
+
+- The source mount must stay writable, and `pip install -e .` means the running process imports
+  from `/service/src` - that is what makes a reload pick up the new code.
+- `--reload` is a development affordance: a production deployment runs uvicorn without it, so
+  changing code there takes an explicit rollout.
+- `docker compose up -d` does **not** reload anything by itself: it only recreates containers
+  when the compose configuration changes. Code changes are handled by the reloader; environment
+  changes still need a recreate (`docker compose up -d` after editing the env file).
+
 ### Behind a TLS-terminating proxy on the same host
 
 Publish the port to loopback only, then point the proxy at it:
