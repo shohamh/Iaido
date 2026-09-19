@@ -35,16 +35,11 @@ class EditorTextChangeDetector {
         previous = snapshot
         if (before == null || before.text == snapshot.text) return null
 
-        val edit = singleEdit(before.text, snapshot.text)
         val expectedEdit = expected
         expected = null
-        if (
-            expectedEdit != null &&
-            expectedEdit.start == before.offset + edit.start &&
-            expectedEdit.end == before.offset + edit.end &&
-            expectedEdit.replacement == edit.replacement
-        ) return null
+        if (expectedEdit != null && expectedEdit.produced(before, snapshot)) return null
 
+        val edit = singleEdit(before.text, snapshot.text)
         val token = wordRangeAround(before.text, edit.start) ?: return null
         val original = before.text.substring(token.first, token.last + 1)
         val replacementRange = wordRangeAround(snapshot.text, edit.start)
@@ -56,6 +51,28 @@ class EditorTextChangeDetector {
             original = original,
             replacement = replacement,
         )
+    }
+
+    /**
+     * True when applying this expectation to the previous snapshot's text reproduces the observed text.
+     *
+     * Comparing the resulting text rather than the literal `(start, end, replacement)` triple matters
+     * because [singleEdit] reports the *minimal* diff: a replacement that extends an existing prefix
+     * (e.g. replacing `in` with `in to`) is reported as an insertion of `" to"` at the end of the old
+     * word, which can never match the edit the IME actually performed. Treating that as an external edit
+     * finalized the in-flight inference transaction -- clearing the replacement reel and dropping the
+     * separator that the next swipe's word would otherwise be joined with.
+     */
+    private fun ExpectedEdit.produced(before: EditorSnapshot, after: EditorSnapshot): Boolean {
+        if (after.offset != before.offset) return false
+        val start = start - before.offset
+        val end = end - before.offset
+        if (start < 0 || end < start || end > before.text.length) return false
+        return buildString(before.text.length + replacement.length) {
+            append(before.text, 0, start)
+            append(replacement)
+            append(before.text, end, before.text.length)
+        } == after.text
     }
 
     private data class TextEdit(val start: Int, val end: Int, val replacement: String)
