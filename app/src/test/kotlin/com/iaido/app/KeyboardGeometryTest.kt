@@ -48,8 +48,25 @@ class KeyboardGeometryTest {
 
     @Test
     fun `bottom row hit testing includes the settings button`() {
-        assertEquals(SETTINGS_KEY, bottomRowKeyAt(1.5f * 128f, 128f, Language.ENGLISH))
-        assertEquals(" ", bottomRowKeyAt(7.5f * 128f, 128f, Language.ENGLISH))
-        assertEquals("⌫", bottomRowKeyAt(9.5f * 128f, 128f, Language.ENGLISH))
+        // Weights: globe 0.75, settings 0.75, space 6, backspace 1.5 (total 9 units).
+        assertEquals(SETTINGS_KEY, bottomRowKeyAt(1.0f * 128f, 128f, Language.ENGLISH))
+        assertEquals(" ", bottomRowKeyAt(4.5f * 128f, 128f, Language.ENGLISH))
+        assertEquals("⌫", bottomRowKeyAt(8.5f * 128f, 128f, Language.ENGLISH))
+    }
+
+    @Test
+    fun `bottom row space is centered with equal weight on either side`() {
+        val keys = listOf(
+            GLOBE_KEY_TEST to 0.75f,
+            SETTINGS_KEY to 0.75f,
+            "space" to 6f,
+            BACKSPACE_KEY_TEST to 1.5f,
+        )
+        val leftWeight = keys[0].second + keys[1].second
+        val rightWeight = keys[3].second
+        assertEquals(leftWeight, rightWeight, 0.001f)
     }
 }
+
+private const val GLOBE_KEY_TEST = "🌐"
+private const val BACKSPACE_KEY_TEST = "⌫"

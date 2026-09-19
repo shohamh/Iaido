@@ -107,7 +107,7 @@ fun KeyboardInputView(
     BoxWithConstraints {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
-        val columnCount = if (language == Language.HEBREW) 11 else KEYBOARD_COLUMN_COUNT
+        val columnCount = KEYBOARD_LETTER_ROW_COLUMN_COUNT
         val keySizePx = widthPx / columnCount
         val keySize = with(density) { keySizePx.toDp() }
         val keyHeightPx = keyboardKeyHeightPx(keySizePx)
@@ -428,11 +428,7 @@ fun KeyboardInputView(
                         }
                     },
             ) {
-                val rows = if (language == Language.ENGLISH) {
-                    listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-                } else {
-                    listOf("\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4", "\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3", "\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5")
-                }
+                val rows = keyboardLetterRowsFor(language)
                 rows.forEachIndexed { index, row ->
                     KeyboardRow(
                         letters = row,
@@ -483,9 +479,7 @@ private fun KeyboardRow(
 @Composable
 private fun KeyboardBottomRow(rowHeight: Dp, language: Language, pressedKey: String?) {
     val gap = 3.dp
-    val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
-    val keys = listOf(GLOBE_KEY to 1f, SETTINGS_KEY to 1f) +
-        punctuation.map { it to 1f } + listOf("space" to 3f, BACKSPACE_KEY to 1f)
+    val keys = bottomRowKeyWeights(spaceLabel = "space")
     Row(
         modifier = Modifier.offset(y = rowHeight * (KEYBOARD_ROW_COUNT - 1)),
         horizontalArrangement = Arrangement.spacedBy(gap),
@@ -581,9 +575,7 @@ internal fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, lang
 
 internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? {
     if (x < 0f || size <= 0f) return null
-    val punctuation = if (language == Language.ENGLISH) listOf("'", "?", ",", ".") else listOf("\u00B3", "\u00B4")
-    val keys = listOf(GLOBE_KEY to 1f, SETTINGS_KEY to 1f) +
-        punctuation.map { it to 1f } + listOf(" " to 3f, BACKSPACE_KEY to 1f)
+    val keys = bottomRowKeyWeights(spaceLabel = " ")
     val unit = x / size
     var end = 0f
     return keys.firstOrNull { (_, weight) ->
@@ -592,13 +584,34 @@ internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? 
     }?.first
 }
 
+/**
+ * Row/weight pairs for the space-bar row: globe and settings evenly balanced on the left, space
+ * dominant and centered, backspace on the right -- left weight (0.75 + 0.75 = 1.5) equals right
+ * weight (1.5), so space sits visually centered while owning the majority of the row's width.
+ */
+private fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> = listOf(
+    GLOBE_KEY to 0.75f,
+    SETTINGS_KEY to 0.75f,
+    spaceLabel to 6f,
+    BACKSPACE_KEY to 1.5f,
+)
+
+/** Letter rows for [language], with punctuation split across the left/right ends of the bottom letter row. */
+private fun keyboardLetterRowsFor(language: Language): List<String> = if (language == Language.ENGLISH) {
+    listOf("qwertyuiop", "asdfghjkl", "'?zxcvbnm,.")
+} else {
+    listOf(
+        "\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4",
+        "\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3",
+        "\u00B3\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5\u00B4",
+    )
+}
+
+internal const val KEYBOARD_LETTER_ROW_COLUMN_COUNT = 11
+
 private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {
-    val rows = if (language == Language.ENGLISH) {
-        listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-    } else {
-        listOf("\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4", "\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3", "\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5")
-    }
-    val columnCount = if (language == Language.HEBREW) 11 else KEYBOARD_COLUMN_COUNT
+    val rows = keyboardLetterRowsFor(language)
+    val columnCount = KEYBOARD_LETTER_ROW_COLUMN_COUNT
     val keys = buildList {
         rows.forEachIndexed { row, letters ->
             addRow(letters, keyboardRowOffsetUnits(letters.length, columnCount), row, size)
@@ -625,4 +638,4 @@ private enum class BackspaceMode {
 private const val BACKSPACE_HOLD_DELAY_MS = 350L
 private const val BACKSPACE_SWIPE_STEP_DP = 14f
 private const val BACKSPACE_GESTURE_THRESHOLD_DP = 18f
-private val BOTTOM_KEYBOARD_CLEARANCE_DP = 12.dp
+private val BOTTOM_KEYBOARD_CLEARANCE_DP = 24.dp

@@ -116,6 +116,18 @@ private const val LIVE_REEL_ID_BASE = -1_000_000
 internal fun chipReservedWidthDp(measuredTextWidthDp: Float): Float =
     (measuredTextWidthDp + CHIP_HORIZONTAL_PADDING_DP * 2).coerceIn(MIN_CHIP_WIDTH_DP, MAX_CHIP_WIDTH_DP)
 
+internal const val REPLACEMENT_WORD_HORIZONTAL_PADDING_DP = 5f
+internal const val MIN_REPLACEMENT_WORD_WIDTH_DP = 44f
+internal const val MAX_REPLACEMENT_WORD_WIDTH_DP = 140f
+
+/**
+ * A replacement-reel word's resting width: its measured width plus tight padding, clamped so a
+ * single letter isn't stretched into a wide box but a long word still gets room to be read.
+ */
+internal fun replacementWordReservedWidthDp(measuredTextWidthDp: Float): Float =
+    (measuredTextWidthDp + REPLACEMENT_WORD_HORIZONTAL_PADDING_DP * 2)
+        .coerceIn(MIN_REPLACEMENT_WORD_WIDTH_DP, MAX_REPLACEMENT_WORD_WIDTH_DP)
+
 /**
  * The width to actually draw a reel row at. Never below [reservedWidthDp] (its slot's resting
  * width) and, when a neighbor exists to visually overlap, never above [reservedWidthDp] plus

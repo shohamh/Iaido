@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -350,6 +351,17 @@ private fun ReplacementReelGroup(
     val layout = replacementReelLayout(option, rtl)
     val description = replacementReelDescription(option, previewIndex, options.size)
     val shape = RoundedCornerShape(16.dp)
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val wordReservedWidthsDp = remember(layout.renderedWords) {
+        layout.renderedWords.map { word ->
+            val widthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
+            val widthDp = with(density) { widthPx.toDp() }.value
+            replacementWordReservedWidthDp(widthDp)
+        }
+    }
+    val spacingDp = 6f
+    val totalWidthDp = wordReservedWidthsDp.sum() + spacingDp * (wordReservedWidthsDp.size - 1).coerceAtLeast(0)
 
     LaunchedEffect(isDragging, previewIndex, stateKey) {
         if (isDragging) onPreview(option)
@@ -357,7 +369,7 @@ private fun ReplacementReelGroup(
 
     Row(
         modifier = Modifier
-            .width((160 * layout.widthSlots).dp)
+            .width(totalWidthDp.dp)
             .height(viewportHeight)
             .semantics(mergeDescendants = true) {
                 contentDescription = description
@@ -404,12 +416,12 @@ private fun ReplacementReelGroup(
             },
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        layout.renderedWords.forEach { word ->
+        layout.renderedWords.forEachIndexed { wordIndex, word ->
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .padding(8.dp),
+                    .width(wordReservedWidthsDp[wordIndex].dp)
+                    .fillMaxHeight()
+                    .padding(5.dp),
                 contentAlignment = androidx.compose.ui.Alignment.Center,
             ) {
                 Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {

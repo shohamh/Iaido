@@ -56,6 +56,28 @@ class SuggestionReelMathTest {
     }
 
     @Test
+    fun `reserved replacement word width hugs a single letter instead of padding it into a wide box`() {
+        assertEquals(44f, replacementWordReservedWidthDp(measuredTextWidthDp = 6f))
+    }
+
+    @Test
+    fun `reserved replacement word width adds tight padding around a short word`() {
+        assertEquals(60f, replacementWordReservedWidthDp(measuredTextWidthDp = 50f))
+    }
+
+    @Test
+    fun `reserved replacement word width caps long words so one word cannot dominate the row`() {
+        assertEquals(140f, replacementWordReservedWidthDp(measuredTextWidthDp = 500f))
+    }
+
+    @Test
+    fun `reserved replacement word width clamps to its minimum and maximum`() {
+        assertEquals(44f, replacementWordReservedWidthDp(measuredTextWidthDp = 0f))
+        assertEquals(44f, replacementWordReservedWidthDp(measuredTextWidthDp = -20f))
+        assertEquals(140f, replacementWordReservedWidthDp(measuredTextWidthDp = 130f))
+    }
+
+    @Test
     fun `a row no wider than its reserved slot draws at the reserved width`() {
         assertEquals(80f, overflowDrawWidthDp(naturalWidthDp = 50f, reservedWidthDp = 80f, neighborReservedWidthDp = 100f))
     }
