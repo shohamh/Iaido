@@ -25,8 +25,9 @@ class ResearchCorrectionRecorderTest {
 
         assertEquals("teh", bounded.sourceText)
         assertEquals("the", bounded.finalText)
-        assertFalse(bounded.serialized.contains("secret"))
-        assertFalse(bounded.serialized.contains("document"))
+        val serialized = correctionPayload(bounded).toString()
+        assertFalse(serialized.contains("secret"))
+        assertFalse(serialized.contains("document"))
     }
 
     @Test
@@ -133,7 +134,7 @@ class ResearchCorrectionRecorderTest {
             ),
         )!!
         assertEquals("trace-123", withTrace.traceId)
-        assertTrue(withTrace.serialized.contains("trace-123"))
+        assertTrue(correctionPayload(withTrace).toString().contains("trace-123"))
 
         val withoutTrace = boundedCorrectionRecord(
             CorrectionInput(
@@ -144,7 +145,7 @@ class ResearchCorrectionRecorderTest {
             ),
         )!!
         assertNull(withoutTrace.traceId)
-        assertFalse(withoutTrace.serialized.contains("trace_id"))
+        assertFalse(correctionPayload(withoutTrace).containsKey("trace_id"))
     }
 
     @Test
@@ -165,7 +166,7 @@ class ResearchCorrectionRecorderTest {
 
     @Test
     fun `enabled recorder appends the bounded record once and schedules upload`() {
-        val appendedRecords = mutableListOf<BoundedCorrectionRecord>()
+        val appendedRecords = mutableListOf<BoundedResearchCorrection>()
         var scheduledCount = 0
         val recorder = ResearchCorrectionRecorder(
             enabled = { true },
@@ -248,7 +249,10 @@ class ResearchCorrectionRecorderTest {
         algorithmVersion = 1,
     )
 
-    private fun correctionEnvelope(record: BoundedCorrectionRecord): TelemetryEnvelope = TelemetryEnvelope(
+    private fun correctionPayload(record: BoundedResearchCorrection) =
+        ResearchEventCodec.payload(ResearchEvent.Correction(record))
+
+    private fun correctionEnvelope(record: BoundedResearchCorrection): TelemetryEnvelope = TelemetryEnvelope(
         schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
         eventId = record.correctionId,
         batchId = "00000000-0000-0000-0000-000000000002",
@@ -258,7 +262,7 @@ class ResearchCorrectionRecorderTest {
         appVersion = "0.1.8",
         buildType = "debug",
         androidApi = 36,
-        eventType = "research_correction",
-        payload = record.payloadJson(),
+        eventType = ResearchEventCodec.eventType(ResearchEvent.Correction(record)),
+        payload = correctionPayload(record),
     )
 }

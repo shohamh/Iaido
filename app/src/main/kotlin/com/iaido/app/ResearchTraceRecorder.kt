@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import com.iaido.core.language.Language
+import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
@@ -28,49 +29,20 @@ data class TouchPointer(
 )
 
 /**
- * One normalized, quantized touch sample stored inside a finished [ResearchTrace]. [x]/[y] are
- * in `[0, 1]` relative to the capturing surface, and [timeOffsetMs] is relative to the trace's
- * first sample - never an absolute wall-clock timestamp.
- */
-data class ResearchTracePoint(
-    val pointerId: Int,
-    val action: Int,
-    val timeOffsetMs: Long,
-    val x: Float,
-    val y: Float,
-)
-
-/**
  * Bounded, finalized research trace returned once per completed gesture by
  * [ResearchTraceRecorder.finish]. Carries only what's needed to reproduce the gesture's shape
  * for research/training purposes plus the coarse context (language/layout/algorithm version) to
- * interpret it - never absolute screen size or any host-window/app data.
+ * interpret it - never absolute screen size or any host-window/app data. [traceId] correlates a
+ * later correction record with the gesture that produced the corrected text.
  */
 data class ResearchTrace(
+    val traceId: String,
     val classification: String,
     val language: Language,
     val layoutId: String,
     val algorithmVersion: Int,
-    val points: List<ResearchTracePoint>,
+    val points: List<ResearchTraceSample>,
 )
-
-/**
- * Explicit gesture-family tags a caller passes to [ResearchTraceRecorder.finish]. Using one of
- * these (rather than an ad-hoc string) keeps a cancelled, failed, or non-typing gesture (a
- * command, a punctuation-to-space, a backspace edit) from ever being silently indistinguishable
- * from a real swipe-training example.
- */
-object ResearchTraceClassification {
-    const val SWIPE = "swipe"
-    const val TAP = "tap"
-    const val FLICK = "flick"
-    const val SPLIT = "split"
-    const val COMMAND = "command"
-    const val PUNCTUATION = "punctuation"
-    const val BACKSPACE = "backspace"
-    const val CANCELLED = "cancelled"
-    const val FAILED = "failed"
-}
 
 /**
  * Hard caps a single in-progress trace must stay within, or [ResearchTraceRecorder.finish] drops
@@ -115,7 +87,7 @@ class ResearchTraceRecorder(
     private val algorithmVersion: Int = CURRENT_ALGORITHM_VERSION,
 ) {
     private var traceStartMs: Long? = null
-    private val points = mutableListOf<ResearchTracePoint>()
+    private val points = mutableListOf<ResearchTraceSample>()
     private var overCap = false
 
     /**
@@ -149,7 +121,7 @@ class ResearchTraceRecorder(
                 val y = quantize(normalize(pointer.yPx, frame.surfaceHeightPx))
                 if (x == null || y == null) return@forEach
                 points.add(
-                    ResearchTracePoint(
+                    ResearchTraceSample(
                         pointerId = pointer.pointerId,
                         action = frame.action,
                         timeOffsetMs = offsetMs,
@@ -177,6 +149,7 @@ class ResearchTraceRecorder(
                 null
             } else {
                 ResearchTrace(
+                    traceId = UUID.randomUUID().toString(),
                     classification = classification,
                     language = language,
                     layoutId = layoutId,

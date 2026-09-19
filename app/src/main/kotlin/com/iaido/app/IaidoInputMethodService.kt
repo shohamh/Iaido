@@ -57,6 +57,17 @@ class IaidoInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private val inputMethodLifecycleOwner = InputMethodLifecycleOwner()
     private var sessionId = 0
+    /**
+     * Opt-in research capture (Task 9). [researchTraceRecorder] is the service's single in-memory
+     * touch-trace buffer, handed to every rendered keyboard view; it resets itself on every
+     * `finish`, so one instance covers the whole service lifetime. [researchTraceId] is the most
+     * recent typing gesture's trace id, attached to a later correction of the text that gesture
+     * produced - never fabricated, and cleared at session boundaries.
+     */
+    private val researchTraceRecorder = ResearchTraceRecorder(
+        enabled = { ResearchCorrectionRecorderProvider.isEnabled() },
+    )
+    private var researchTraceId: String? = null
     private val languageSwitcher = LanguageSwitcher()
     private var activeLanguage = Language.ENGLISH
     internal var spacingModeForTypingCoordinator = SpacingMode.INFER_SPACES
@@ -237,6 +248,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (currentInputConnection != null) runtimeReadiness.markInputConnectionBound(runtimeRevision)
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
+        researchTraceId = null
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -265,6 +277,7 @@ class IaidoInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         inputMethodLifecycleOwner.onFinishInputView()
         sessionId += 1
+        researchTraceId = null
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -454,6 +467,8 @@ class IaidoInputMethodService : InputMethodService() {
                     manualEditCandidate = pendingManualEdit.value,
                     onConfirmManualEdit = ::confirmManualEdit,
                     onDismissManualEdit = { pendingManualEdit.value = null },
+                    researchTraceRecorder = researchTraceRecorder,
+                    onResearchTraceCaptured = ::onResearchTraceCaptured,
                 )
             }
         }
@@ -945,15 +960,27 @@ class IaidoInputMethodService : InputMethodService() {
                     finalText = finalText,
                     candidates = candidates,
                     algorithmVersion = ResearchCorrectionRecorder.CURRENT_ALGORITHM_VERSION,
-                    // No research trace is currently wired from gesture completion into this
-                    // service (see ResearchTraceRecorder's doc comment - that wiring is separate,
-                    // future work), so there is never a real trace id to attach here. Leaving this
-                    // null rather than fabricating one matches the brief's explicit fallback.
-                    traceId = null,
+                    traceId = researchTraceId,
                 ),
             )
         } catch (_: Exception) {
             // Research correction capture is best effort and must never affect keyboard behavior.
+        }
+    }
+
+    /**
+     * Research trace capture (Task 9): called once per completed gesture by `KeyboardInputView`,
+     * which owns the raw touch boundary. Enqueues the bounded trace on the research plane and
+     * remembers its id when the gesture committed recognized text, so a later correction of that
+     * text can be correlated with the gesture that produced it. Diagnostics never see this data.
+     */
+    private fun onResearchTraceCaptured(trace: ResearchTrace) {
+        try {
+            ResearchCorrectionRecorderProvider.recordTrace(trace)
+            researchTraceId = trace.traceId
+                .takeIf { trace.classification in ResearchTraceClassification.TYPING }
+        } catch (_: Exception) {
+            // Research trace capture is best effort and must never affect keyboard behavior.
         }
     }
 

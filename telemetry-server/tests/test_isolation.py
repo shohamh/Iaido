@@ -102,83 +102,156 @@ def test_android_telemetry_batch_fixture_is_accepted_without_translation(
     assert response.json() == {"batch_id": ANDROID_QUEUE_BATCH_ID, "accepted": True}
 
 
-def test_research_accepts_only_bounded_text_and_normalized_trace(
-    client, installation, diagnostics_headers
-):
-    outer_batch_id = queue_batch_id(1)
-    text_event = envelope(
-        installation_id=installation["installation_id"],
-        event_id="00000000-0000-0000-0000-000000000011",
-        event_type="text_sample",
-        payload={"text": "bounded sample"},
+TRACE_ID = "30000000-0000-4000-8000-0000000000aa"
+
+
+def research_envelope(installation_id: str, event_id: str, event_type: str, payload: dict):
+    return envelope(
+        installation_id=installation_id,
+        event_id=event_id,
+        event_type=event_type,
+        payload=payload,
     )
-    trace_event = envelope(
-        installation_id=installation["installation_id"],
-        event_id="00000000-0000-0000-0000-000000000012",
-        event_type="gesture_trace",
-        payload={
-            "points": [{"x": 0.0, "y": 1.0}, {"x": 0.5, "y": 0.25}],
+
+
+def point(x: float, y: float, *, pointer_id: int = 4, action: int = 0, time_offset_ms: int = 0):
+    return {
+        "pointer_id": pointer_id,
+        "action": action,
+        "time_offset_ms": time_offset_ms,
+        "x": x,
+        "y": y,
+    }
+
+
+def trace_payload(**overrides) -> dict:
+    payload = {
+        "trace_id": TRACE_ID,
+        "classification": "swipe",
+        "language": "ENGLISH",
+        "layout_id": "qwerty",
+        "algorithm_version": 1,
+        "points": [point(0.25, 0.25), point(0.31, 0.25, action=2, time_offset_ms=42)],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def correction_payload(**overrides) -> dict:
+    payload = {
+        "correction_id": "30000000-0000-4000-8000-0000000000bb",
+        "trace_id": TRACE_ID,
+        "action": "manual_edit",
+        "source_text": "teh",
+        "final_text": "the",
+        "candidates": ["the", "ten"],
+        "algorithm_version": 1,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def post_research(client, headers, events, sequence: int):
+    return client.post(
+        "/v1/research/batches",
+        headers=headers,
+        json={
+            "schema_version": 1,
+            "batch_id": queue_batch_id(sequence),
+            "events": events,
         },
     )
 
-    accepted = client.post(
-        "/v1/research/batches",
-        headers=diagnostics_headers,
-        json={
-            "schema_version": 1,
-            "batch_id": outer_batch_id,
-            "events": [text_event, trace_event],
-        },
-    )
-    too_long = text_event | {
-        "event_id": "00000000-0000-0000-0000-000000000013",
-        "payload": {"text": "x" * 257},
-    }
-    rejected_text = client.post(
-        "/v1/research/batches",
-        headers=diagnostics_headers,
-        json={
-            "schema_version": 1,
-            "batch_id": queue_batch_id(2),
-            "events": [too_long],
-        },
-    )
-    out_of_bounds = trace_event | {
-        "event_id": "00000000-0000-0000-0000-000000000014",
-        "payload": {
-            "points": [{"x": 1.01, "y": 0.5}],
-        },
-    }
-    rejected_trace = client.post(
-        "/v1/research/batches",
-        headers=diagnostics_headers,
-        json={
-            "schema_version": 1,
-            "batch_id": queue_batch_id(3),
-            "events": [out_of_bounds],
-        },
-    )
-    extra_field = text_event | {
-        "event_id": "00000000-0000-0000-0000-000000000015",
-        "payload": {
-            "text": "sample",
-            "clipboard": "not permitted",
-        },
-    }
-    rejected_extra = client.post(
-        "/v1/research/batches",
-        headers=diagnostics_headers,
-        json={
-            "schema_version": 1,
-            "batch_id": queue_batch_id(4),
-            "events": [extra_field],
-        },
+
+def test_research_accepts_bounded_text_traces_and_corrections(
+    client, installation, diagnostics_headers
+):
+    installation_id = installation["installation_id"]
+    accepted = post_research(
+        client,
+        diagnostics_headers,
+        [
+            research_envelope(
+                installation_id,
+                "00000000-0000-0000-0000-000000000011",
+                "text_sample",
+                {"text": "bounded sample"},
+            ),
+            research_envelope(
+                installation_id,
+                "00000000-0000-0000-0000-000000000012",
+                "gesture_trace",
+                trace_payload(),
+            ),
+            research_envelope(
+                installation_id,
+                "00000000-0000-0000-0000-000000000013",
+                "research_correction",
+                correction_payload(),
+            ),
+            research_envelope(
+                installation_id,
+                "00000000-0000-0000-0000-000000000014",
+                "research_correction",
+                correction_payload(trace_id=None),
+            ),
+        ],
+        1,
     )
 
     assert accepted.status_code == 202
-    assert rejected_text.status_code == 422
-    assert rejected_trace.status_code == 422
-    assert rejected_extra.status_code == 422
+    assert accepted.json() == {"batch_id": queue_batch_id(1), "accepted": True}
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        ("text_sample", {"text": "x" * 257}),
+        ("text_sample", {"text": "sample", "clipboard": "not permitted"}),
+        ("gesture_trace", trace_payload(points=[point(1.01, 0.5)])),
+        ("gesture_trace", trace_payload(points=[point(0.5, -0.01)])),
+        ("gesture_trace", trace_payload(points=[])),
+        ("gesture_trace", trace_payload(points=[point(0.5, 0.5) for _ in range(513)])),
+        (
+            "gesture_trace",
+            trace_payload(
+                points=[point(0.5, 0.5, time_offset_ms=9), point(0.6, 0.5, time_offset_ms=1)]
+            ),
+        ),
+        ("gesture_trace", trace_payload(classification="sentence")),
+        ("gesture_trace", trace_payload(language="KLINGON")),
+        ("gesture_trace", trace_payload(layout_id="")),
+        ("gesture_trace", trace_payload(points=[point(0.5, 0.5, pointer_id=-1)])),
+        ("gesture_trace", trace_payload(algorithm_version=0)),
+        ("gesture_trace", trace_payload(trace_id="not-a-uuid")),
+        ("research_correction", correction_payload(action="silent_rewrite")),
+        ("research_correction", correction_payload(source_text="")),
+        ("research_correction", correction_payload(final_text="x" * 65)),
+        ("research_correction", correction_payload(candidates=["x"] * 6)),
+        ("research_correction", correction_payload(candidates=["x" * 65])),
+        ("research_correction", correction_payload(algorithm_version=0)),
+        ("research_correction", correction_payload() | {"sentence_context": "the secret document"}),
+        ("raw_touch_path", {"points": [point(0.0, 1.0)]}),
+    ],
+)
+def test_research_rejects_out_of_bounds_and_unknown_payloads(
+    client, installation, diagnostics_headers, event_type, payload
+):
+    response = post_research(
+        client,
+        diagnostics_headers,
+        [
+            research_envelope(
+                installation["installation_id"],
+                "00000000-0000-0000-0000-000000000020",
+                event_type,
+                payload,
+            )
+        ],
+        2,
+    )
+
+    assert response.status_code == 422
 
 
 def test_planes_use_separate_database_tables_and_object_prefixes(

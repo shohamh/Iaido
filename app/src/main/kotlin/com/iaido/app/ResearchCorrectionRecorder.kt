@@ -4,8 +4,6 @@ import android.content.Context
 import android.os.Build
 import androidx.datastore.preferences.core.Preferences
 import java.io.File
-import java.text.Normalizer
-import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,26 +11,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-
-/**
- * Discrete correction actions a caller can hand to [ResearchCorrectionRecorder.record]. Wire
- * names (used in the serialized payload) are the lowercased enum name, e.g. [CANDIDATE_SELECTED]
- * serializes as "candidate_selected".
- */
-enum class CorrectionAction {
-    CANDIDATE_SELECTED,
-    MANUAL_EDIT,
-    UNDO,
-    FLOW_CORRECTION,
-    ;
-
-    val wireName: String get() = name.lowercase(Locale.ROOT)
-}
 
 /**
  * Caller-supplied input for one finished correction action. [sourceText]/[finalText] must be only
@@ -50,48 +28,21 @@ data class CorrectionInput(
 )
 
 /**
- * Bounded, already-normalized correction example ready to serialize. Produced only by
- * [boundedCorrectionRecord] - every instance in existence has already passed the empty/oversized
- * span and candidate-count checks.
- */
-data class BoundedCorrectionRecord(
-    val correctionId: String,
-    val traceId: String?,
-    val action: CorrectionAction,
-    val sourceText: String,
-    val finalText: String,
-    val candidates: List<String>,
-    val algorithmVersion: Int,
-) {
-    /** JSON-serialized payload - used directly by tests to assert no context ever leaks in. */
-    val serialized: String get() = payloadJson().toString()
-
-    internal fun payloadJson(): JsonObject = buildJsonObject {
-        put("event_type", JsonPrimitive("research_correction"))
-        put("correction_id", JsonPrimitive(correctionId))
-        traceId?.let { put("trace_id", JsonPrimitive(it)) }
-        put("action", JsonPrimitive(action.wireName))
-        put("source_text", JsonPrimitive(sourceText))
-        put("final_text", JsonPrimitive(finalText))
-        put("candidates", JsonArray(candidates.map { JsonPrimitive(it) }))
-        put("algorithm_version", algorithmVersion)
-    }
-}
-
-/**
- * Normalizes (Unicode NFC) and bounds one [CorrectionInput] into a [BoundedCorrectionRecord], or
+ * Normalizes (Unicode NFC) and bounds one [CorrectionInput] into a [BoundedResearchCorrection], or
  * returns null when the input must be rejected outright: an empty or oversized source/final
  * span. Candidate alternatives are capped (not rejected) - oversized or blank candidates are
- * dropped from the list and the remainder is truncated to [MAX_CANDIDATES].
+ * dropped from the list and the remainder is truncated to [BoundedResearchCorrection.MAX_CANDIDATES].
  */
 internal fun boundedCorrectionRecord(
     input: CorrectionInput,
     correctionId: String = UUID.randomUUID().toString(),
-): BoundedCorrectionRecord? {
-    val source = normalizeSpan(input.sourceText) ?: return null
-    val final = normalizeSpan(input.finalText) ?: return null
-    val candidates = input.candidates.mapNotNull(::normalizeSpan).take(MAX_CANDIDATES)
-    return BoundedCorrectionRecord(
+): BoundedResearchCorrection? {
+    val source = boundedResearchSpan(input.sourceText) ?: return null
+    val final = boundedResearchSpan(input.finalText) ?: return null
+    val candidates = input.candidates
+        .mapNotNull(::boundedResearchSpan)
+        .take(BoundedResearchCorrection.MAX_CANDIDATES)
+    return BoundedResearchCorrection(
         correctionId = correctionId,
         traceId = input.traceId,
         action = input.action,
@@ -101,24 +52,6 @@ internal fun boundedCorrectionRecord(
         algorithmVersion = input.algorithmVersion,
     )
 }
-
-/**
- * Normalizes [text] to NFC and returns it, or null when it is empty or exceeds
- * [MAX_SPAN_CODE_POINTS] Unicode code points - callers reject the whole span rather than
- * truncating it into a misleading partial example.
- */
-private fun normalizeSpan(text: String): String? {
-    val normalized = Normalizer.normalize(text, Normalizer.Form.NFC)
-    if (normalized.isEmpty()) return null
-    if (normalized.codePointCount(0, normalized.length) > MAX_SPAN_CODE_POINTS) return null
-    return normalized
-}
-
-/** Hard cap on one affected source/final span, in Unicode code points. */
-internal const val MAX_SPAN_CODE_POINTS = 64
-
-/** Hard cap on the number of candidate alternatives kept per correction. */
-internal const val MAX_CANDIDATES = 5
 
 /**
  * Opt-in research correction capture: records one bounded, already-redacted correction example
@@ -136,7 +69,7 @@ internal const val MAX_CANDIDATES = 5
  */
 class ResearchCorrectionRecorder(
     private val enabled: () -> Boolean,
-    private val appendToQueue: (BoundedCorrectionRecord) -> Unit,
+    private val appendToQueue: (BoundedResearchCorrection) -> Unit,
     private val scheduleUpload: () -> Unit,
 ) {
     fun record(event: CorrectionInput) {
@@ -171,6 +104,12 @@ object ResearchCorrectionRecorderProvider {
     @Volatile
     private var consentEnabled: Boolean = false
 
+    @Volatile
+    private var eventSink: ((ResearchEvent) -> Unit)? = null
+
+    @Volatile
+    private var uploadScheduler: (() -> Unit)? = null
+
     private val sessionId = UUID.randomUUID().toString()
 
     val instance: ResearchCorrectionRecorder?
@@ -183,13 +122,32 @@ object ResearchCorrectionRecorderProvider {
         if (recorder != null) return
         val appContext = context.applicationContext
 
+        eventSink = { event -> telemetryQueue(appContext).append(buildEnvelope(appContext, event)) }
+        uploadScheduler = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) }
         recorder = ResearchCorrectionRecorder(
             enabled = ::isEnabled,
-            appendToQueue = { record -> telemetryQueue(appContext).append(buildEnvelope(appContext, record)) },
-            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) },
+            appendToQueue = { record -> eventSink?.invoke(ResearchEvent.Correction(record)) },
+            scheduleUpload = { uploadScheduler?.invoke() },
         )
 
         collectConsent(appContext.settingsStore.data)
+    }
+
+    /**
+     * Records one finished gesture trace on the research plane, bounded by the same caps the
+     * server enforces. No-ops (never throws) when research consent is disabled or when no sink is
+     * installed, so a caller can hand it every captured trace without a consent check of its own.
+     */
+    fun recordTrace(trace: ResearchTrace) {
+        try {
+            if (!consentEnabled) return
+            val bounded = boundedTrace(trace) ?: return
+            val sink = eventSink ?: return
+            sink(ResearchEvent.GestureTrace(bounded))
+            uploadScheduler?.invoke()
+        } catch (_: Exception) {
+            // Research trace capture is best effort and must never affect keyboard behavior.
+        }
     }
 
     /**
@@ -211,10 +169,17 @@ object ResearchCorrectionRecorderProvider {
         this.consentEnabled = consentEnabled
     }
 
+    /** Test-only seam: installs an explicit event sink, bypassing [initialize]'s queue wiring. */
+    internal fun installSinkForTest(sink: ((ResearchEvent) -> Unit)?) {
+        eventSink = sink
+    }
+
     /** Test-only seam: restores the singleton to its uninitialized state. */
     internal fun resetForTest() {
         recorder = null
         consentEnabled = false
+        eventSink = null
+        uploadScheduler = null
     }
 
     private fun telemetryQueue(context: Context) = TelemetryQueue(
@@ -224,7 +189,7 @@ object ResearchCorrectionRecorderProvider {
         limits = QueueLimits(),
     )
 
-    private fun buildEnvelope(context: Context, record: BoundedCorrectionRecord): TelemetryEnvelope {
+    private fun buildEnvelope(context: Context, event: ResearchEvent): TelemetryEnvelope {
         val installation = runCatching {
             TelemetryInstallationStore(context).getOrCreateInstallation {
                 TelemetryInstallation(
@@ -236,7 +201,11 @@ object ResearchCorrectionRecorderProvider {
         }.getOrNull()
         return TelemetryEnvelope(
             schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
-            eventId = record.correctionId,
+            eventId = when (event) {
+                is ResearchEvent.TextSample -> UUID.randomUUID().toString()
+                is ResearchEvent.GestureTrace -> event.trace.traceId
+                is ResearchEvent.Correction -> event.record.correctionId
+            },
             batchId = UUID.randomUUID().toString(),
             installationId = installation?.installationId ?: UUID.randomUUID().toString(),
             sessionId = sessionId,
@@ -244,8 +213,26 @@ object ResearchCorrectionRecorderProvider {
             appVersion = BuildConfig.VERSION_NAME,
             buildType = BuildConfig.BUILD_TYPE,
             androidApi = Build.VERSION.SDK_INT,
-            eventType = "research_correction",
-            payload = record.payloadJson(),
+            eventType = ResearchEventCodec.eventType(event),
+            payload = ResearchEventCodec.payload(event),
         )
     }
+}
+
+/**
+ * Converts a finalized in-memory [ResearchTrace] into the bounded wire type, or null when it
+ * cannot satisfy the wire bounds - the trace is dropped rather than truncated or sent out of
+ * bounds.
+ */
+internal fun boundedTrace(trace: ResearchTrace): BoundedResearchTrace? = try {
+    BoundedResearchTrace(
+        traceId = trace.traceId,
+        classification = trace.classification,
+        language = trace.language,
+        layoutId = trace.layoutId,
+        algorithmVersion = trace.algorithmVersion,
+        points = trace.points,
+    )
+} catch (_: IllegalArgumentException) {
+    null
 }

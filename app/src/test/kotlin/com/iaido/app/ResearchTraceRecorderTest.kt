@@ -180,6 +180,20 @@ class ResearchTraceRecorderTest {
         }
     }
 
+    @Test
+    fun `each finished trace carries its own trace id for correction correlation`() {
+        val recorder = ResearchTraceRecorder(enabled = { true })
+
+        recorder.consume(sampleTouchFrame())
+        val first = recorder.finish(ResearchTraceClassification.SWIPE, Language.ENGLISH, "qwerty")!!
+        recorder.consume(sampleTouchFrame())
+        val second = recorder.finish(ResearchTraceClassification.SWIPE, Language.ENGLISH, "qwerty")!!
+
+        assertTrue(first.traceId.isNotBlank())
+        assertTrue(second.traceId.isNotBlank())
+        assertTrue(first.traceId != second.traceId)
+    }
+
     private fun assertNotEqualsSwipe(classification: String) {
         assertTrue(classification != ResearchTraceClassification.SWIPE)
     }

@@ -1,7 +1,10 @@
 package com.iaido.app
 
 import androidx.work.NetworkType
+import com.iaido.core.language.Language
 import java.nio.file.Files
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -63,6 +66,71 @@ class TelemetryPlaneIsolationTest {
     }
 
     @Test
+    fun `research gesture traces only ever land in the research plane queue`() {
+        withRuntime { runtime ->
+            ResearchCorrectionRecorderProvider.installForTest(recorder = null, consentEnabled = true)
+            try {
+                ResearchCorrectionRecorderProvider.installSinkForTest { event ->
+                    runtime.researchQueue.append(researchEnvelope(event))
+                }
+
+                ResearchCorrectionRecorderProvider.recordTrace(sampleTrace())
+
+                val event = runtime.researchQueue.pendingBatches().single().events.single()
+                assertEquals("gesture_trace", event.eventType)
+                val trace = sampleTrace()
+                assertEquals(trace.traceId, event.payload.getValue("trace_id").jsonPrimitive.content)
+                assertEquals(1, event.payload.getValue("points").jsonArray.size)
+                assertTrue(runtime.diagnosticsQueue.pendingBatches().isEmpty())
+            } finally {
+                ResearchCorrectionRecorderProvider.resetForTest()
+            }
+        }
+    }
+
+    @Test
+    fun `a captured trace is dropped entirely while research consent is off`() {
+        withRuntime { runtime ->
+            ResearchCorrectionRecorderProvider.installForTest(recorder = null, consentEnabled = false)
+            try {
+                ResearchCorrectionRecorderProvider.installSinkForTest { event ->
+                    runtime.researchQueue.append(researchEnvelope(event))
+                }
+
+                ResearchCorrectionRecorderProvider.recordTrace(sampleTrace())
+
+                assertTrue(runtime.researchQueue.pendingBatches().isEmpty())
+                assertTrue(runtime.diagnosticsQueue.pendingBatches().isEmpty())
+            } finally {
+                ResearchCorrectionRecorderProvider.resetForTest()
+            }
+        }
+    }
+
+    @Test
+    fun `a correction of text committed by a captured gesture carries that trace id`() {
+        val trace = sampleTrace()
+        val bounded = boundedCorrectionRecord(
+            CorrectionInput(
+                action = CorrectionAction.CANDIDATE_SELECTED,
+                sourceText = "teh",
+                finalText = "the",
+                algorithmVersion = 1,
+                traceId = trace.traceId,
+            ),
+        )!!
+
+        assertEquals(trace.traceId, bounded.traceId)
+        assertEquals(
+            trace.traceId,
+            ResearchEventCodec.payload(ResearchEvent.Correction(bounded))
+                .getValue("trace_id")
+                .jsonPrimitive
+                .content,
+        )
+    }
+
+    @Test
     fun `research uploads default to unmetered wifi-only while diagnostics stays on any network`() {
         assertEquals(
             NetworkType.UNMETERED,
@@ -119,9 +187,18 @@ class TelemetryPlaneIsolationTest {
         algorithmVersion = 1,
     )
 
-    private fun correctionEnvelope(record: BoundedCorrectionRecord): TelemetryEnvelope = TelemetryEnvelope(
+    private fun sampleTrace() = ResearchTrace(
+        traceId = "10000000-0000-4000-8000-0000000000aa",
+        classification = ResearchTraceClassification.SWIPE,
+        language = Language.ENGLISH,
+        layoutId = "qwerty",
+        algorithmVersion = 1,
+        points = listOf(ResearchTraceSample(4, 0, 0L, 0.25f, 0.25f)),
+    )
+
+    private fun researchEnvelope(event: ResearchEvent): TelemetryEnvelope = TelemetryEnvelope(
         schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
-        eventId = record.correctionId,
+        eventId = "00000000-0000-0000-0000-000000000009",
         batchId = "00000000-0000-0000-0000-000000000002",
         installationId = "00000000-0000-0000-0000-000000000003",
         sessionId = "00000000-0000-0000-0000-000000000004",
@@ -129,9 +206,12 @@ class TelemetryPlaneIsolationTest {
         appVersion = "0.1.8",
         buildType = "debug",
         androidApi = 36,
-        eventType = "research_correction",
-        payload = record.payloadJson(),
+        eventType = ResearchEventCodec.eventType(event),
+        payload = ResearchEventCodec.payload(event),
     )
+
+    private fun correctionEnvelope(record: BoundedResearchCorrection): TelemetryEnvelope =
+        researchEnvelope(ResearchEvent.Correction(record))
 
     private fun diagnosticEnvelope(event: DiagnosticsEvent): TelemetryEnvelope {
         val payload = kotlinx.serialization.json.Json.parseToJsonElement(

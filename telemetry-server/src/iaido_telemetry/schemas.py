@@ -13,7 +13,7 @@ UUID_PATTERN = (
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
-MachineIdentifier = Annotated[
+UuidIdentifier = Annotated[
     str,
     Field(min_length=36, max_length=36, pattern=UUID_PATTERN),
 ]
@@ -35,6 +35,19 @@ AppVersion = Annotated[
 ]
 SchemaVersion = Literal[1]
 
+# Research bounds, mirrored by the Android recorders (ResearchTraceLimits,
+# MAX_SPAN_CODE_POINTS, MAX_CANDIDATES). Out-of-range values are rejected rather
+# than truncated; only candidate lists are capped, and only on the device.
+MAX_TRACE_POINTS = 512
+MAX_SPAN_CODE_POINTS = 64
+MAX_CANDIDATES = 5
+# MotionEvent.getActionMasked() values are 0..12; the server accepts that family
+# with headroom and rejects anything outside a single byte rather than tracking
+# Android's action constants.
+MAX_POINTER_ACTION = 255
+# An affected span (source/final text, one candidate): 1..64 Unicode code points.
+BoundedSpan = Annotated[str, Field(min_length=1, max_length=MAX_SPAN_CODE_POINTS)]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -45,7 +58,10 @@ class DiagnosticsPayload(StrictModel):
     outcome: Literal["ACCEPTED", "REJECTED", "CANCELLED"]
 
 
-class NormalizedPointer(StrictModel):
+class TracePoint(StrictModel):
+    pointer_id: int = Field(ge=0)
+    action: int = Field(ge=0, le=MAX_POINTER_ACTION)
+    time_offset_ms: int = Field(ge=0)
     x: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     y: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
 
@@ -54,19 +70,53 @@ class ResearchTextPayload(StrictModel):
     text: str = Field(min_length=1, max_length=256)
 
 
-class ResearchTracePayload(StrictModel):
-    points: list[NormalizedPointer] = Field(min_length=1, max_length=512)
+class GestureTracePayload(StrictModel):
+    trace_id: UuidIdentifier
+    classification: Literal[
+        "swipe",
+        "tap",
+        "flick",
+        "split",
+        "command",
+        "punctuation",
+        "backspace",
+        "failed",
+        "cancelled",
+    ]
+    language: Literal["ENGLISH", "HEBREW"]
+    layout_id: str = Field(min_length=1, max_length=32)
+    algorithm_version: int = Field(ge=1)
+    points: list[TracePoint] = Field(min_length=1, max_length=MAX_TRACE_POINTS)
+
+    @model_validator(mode="after")
+    def points_are_time_ordered(self) -> "GestureTracePayload":
+        offsets = [point.time_offset_ms for point in self.points]
+        if any(later < earlier for earlier, later in zip(offsets, offsets[1:])):
+            raise ValueError("trace point time offsets must be monotonic")
+        return self
 
 
-ResearchPayload = ResearchTextPayload | ResearchTracePayload
+class ResearchCorrectionPayload(StrictModel):
+    correction_id: UuidIdentifier
+    # Absent when no gesture trace was captured for the corrected span; the
+    # Android recorder omits the key entirely instead of sending null.
+    trace_id: UuidIdentifier | None = None
+    action: Literal["candidate_selected", "manual_edit", "undo", "flow_correction"]
+    source_text: BoundedSpan
+    final_text: BoundedSpan
+    candidates: list[BoundedSpan] = Field(max_length=MAX_CANDIDATES)
+    algorithm_version: int = Field(ge=1)
+
+
+ResearchPayload = ResearchTextPayload | GestureTracePayload | ResearchCorrectionPayload
 
 
 class EnvelopeFields(StrictModel):
     schema_version: SchemaVersion
-    event_id: MachineIdentifier
-    batch_id: MachineIdentifier
-    installation_id: MachineIdentifier
-    session_id: MachineIdentifier
+    event_id: UuidIdentifier
+    batch_id: UuidIdentifier
+    installation_id: UuidIdentifier
+    session_id: UuidIdentifier
     occurred_at_ms: int = Field(ge=0)
     app_version: AppVersion
     build_type: Literal["debug", "release", "profile"]
@@ -79,16 +129,16 @@ class DiagnosticsEnvelope(EnvelopeFields):
 
 
 class ResearchEnvelope(EnvelopeFields):
-    event_type: Literal["text_sample", "gesture_trace"]
+    event_type: Literal["text_sample", "gesture_trace", "research_correction"]
     payload: ResearchPayload
 
     @model_validator(mode="after")
     def payload_matches_event_type(self) -> "ResearchEnvelope":
-        expected = (
-            ResearchTextPayload
-            if self.event_type == "text_sample"
-            else ResearchTracePayload
-        )
+        expected = {
+            "text_sample": ResearchTextPayload,
+            "gesture_trace": GestureTracePayload,
+            "research_correction": ResearchCorrectionPayload,
+        }[self.event_type]
         if not isinstance(self.payload, expected):
             raise ValueError("research payload does not match event_type")
         return self

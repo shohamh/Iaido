@@ -1,6 +1,10 @@
 package com.iaido.app
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
@@ -55,18 +59,138 @@ class TelemetryEventTest {
     }
 
     @Test
-    fun `research trace uses normalized finite keyboard pointers`() {
-        val trace = ResearchEvent.GestureTrace(
-            NormalizedGestureTrace(listOf(NormalizedKeyboardPointer(0.25f, 0.75f))),
-        )
+    fun `research trace samples use normalized finite keyboard pointers`() {
+        val sample = ResearchTraceSample(pointerId = 4, action = 0, timeOffsetMs = 0L, x = 0.25f, y = 0.75f)
 
-        assertEquals(0.25f, trace.trace.points.single().x)
-        assertEquals(0.75f, trace.trace.points.single().y)
+        assertEquals(0.25f, sample.x)
+        assertEquals(0.75f, sample.y)
         assertThrows(IllegalArgumentException::class.java) {
-            NormalizedKeyboardPointer(-0.01f, 0.5f)
+            ResearchTraceSample(pointerId = 4, action = 0, timeOffsetMs = 0L, x = -0.01f, y = 0.5f)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            NormalizedKeyboardPointer(0.5f, Float.NaN)
+            ResearchTraceSample(pointerId = 4, action = 0, timeOffsetMs = 0L, x = 0.5f, y = Float.NaN)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ResearchTraceSample(pointerId = -1, action = 0, timeOffsetMs = 0L, x = 0.5f, y = 0.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ResearchTraceSample(pointerId = 0, action = 0, timeOffsetMs = -1L, x = 0.5f, y = 0.5f)
         }
     }
+
+    @Test
+    fun `bounded traces reject unknown classifications, empty points, and unordered times`() {
+        assertThrows(IllegalArgumentException::class.java) { boundedTraceOf(classification = "sentence") }
+        assertThrows(IllegalArgumentException::class.java) { boundedTraceOf(points = emptyList()) }
+        assertThrows(IllegalArgumentException::class.java) {
+            boundedTraceOf(
+                points = listOf(
+                    ResearchTraceSample(0, 2, 9L, 0.5f, 0.5f),
+                    ResearchTraceSample(0, 1, 1L, 0.5f, 0.5f),
+                ),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            boundedTraceOf(
+                points = List(BoundedResearchTrace.MAX_POINTS + 1) {
+                    ResearchTraceSample(0, 0, it.toLong(), 0.5f, 0.5f)
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `bounded corrections reject empty, oversized, and over-count spans`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            correctionOf(sourceText = "", finalText = "the")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            correctionOf(sourceText = "teh", finalText = "a".repeat(MAX_SPAN_CODE_POINTS + 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            correctionOf(sourceText = "teh", finalText = "the", candidates = List(6) { "the" })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            correctionOf(sourceText = "teh", finalText = "the", candidates = listOf("a".repeat(65)))
+        }
+    }
+
+    @Test
+    fun `research codec round trips every event shape`() {
+        val events = listOf(
+            ResearchEvent.TextSample(BoundedResearchText("bounded sample")),
+            ResearchEvent.GestureTrace(boundedTraceOf()),
+            ResearchEvent.Correction(correctionOf(sourceText = "teh", finalText = "the")),
+        )
+
+        events.forEach { event ->
+            val eventType = ResearchEventCodec.eventType(event)
+            assertEquals(event, ResearchEventCodec.decode(eventType, ResearchEventCodec.payload(event)))
+        }
+    }
+
+    @Test
+    fun `research codec rejects unknown, missing, and out-of-bounds payload fields`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ResearchEventCodec.decode("raw_touch_path", buildJsonObject {})
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ResearchEventCodec.decode(
+                ResearchEventCodec.GESTURE_TRACE,
+                buildJsonObject {
+                    put("trace_id", "trace")
+                    put("sentence_context", "the secret document")
+                },
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ResearchEventCodec.decode(
+                ResearchEventCodec.TEXT_SAMPLE,
+                buildJsonObject {
+                    put("text", "sample")
+                    put("points", JsonArray(emptyList()))
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `research correction payload omits trace id entirely when absent`() {
+        val withoutTrace = ResearchEventCodec.payload(
+            ResearchEvent.Correction(correctionOf(sourceText = "teh", finalText = "the")),
+        )
+        val withTrace = ResearchEventCodec.payload(
+            ResearchEvent.Correction(correctionOf(sourceText = "teh", finalText = "the", traceId = "trace-1")),
+        )
+
+        assertFalse(withoutTrace.containsKey("trace_id"))
+        assertEquals("trace-1", withTrace.getValue("trace_id").toString().trim('"'))
+    }
+
+    private fun boundedTraceOf(
+        classification: String = ResearchTraceClassification.SWIPE,
+        points: List<ResearchTraceSample> = listOf(ResearchTraceSample(4, 0, 0L, 0.25f, 0.25f)),
+    ) = BoundedResearchTrace(
+        traceId = "10000000-0000-4000-8000-0000000000aa",
+        classification = classification,
+        language = com.iaido.core.language.Language.ENGLISH,
+        layoutId = "qwerty",
+        algorithmVersion = 1,
+        points = points,
+    )
+
+    private fun correctionOf(
+        sourceText: String,
+        finalText: String,
+        candidates: List<String> = emptyList(),
+        traceId: String? = null,
+    ) = BoundedResearchCorrection(
+        correctionId = "10000000-0000-4000-8000-0000000000bb",
+        traceId = traceId,
+        action = CorrectionAction.MANUAL_EDIT,
+        sourceText = sourceText,
+        finalText = finalText,
+        candidates = candidates,
+        algorithmVersion = 1,
+    )
 }
