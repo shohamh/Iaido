@@ -39,6 +39,12 @@ android {
         versionCode = providers.gradleProperty("iaidoVersionCode").getOrElse("1").toInt()
         versionName = providers.gradleProperty("iaidoVersion").getOrElse("0.1.3")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // `@Ignore` is not honoured by the runner on its own here: with JUnit 4.13.2 the only
+        // JUnit on the androidTest classpath, tests annotated `@Ignore` still execute (measured on
+        // ImeReelE2eTest: both annotated tests ran and failed, `tests 7 failures 2 skipped 0`).
+        // Excluding the annotation explicitly makes `@Ignore` mean what it says, so a test blocked
+        // on a known limitation is skipped instead of failing every run.
+        testInstrumentationRunnerArguments["notAnnotation"] = "org.junit.Ignore"
         buildConfigField(
             "String",
             "IAIDO_TELEMETRY_BASE_URL",

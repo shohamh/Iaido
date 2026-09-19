@@ -89,6 +89,8 @@ class IaidoInputMethodService : InputMethodService() {
     private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
     private val editorTextChangeDetector = EditorTextChangeDetector()
     private var textObservationEnabled = false
+    /** Tracks the word being typed so it becomes an addressable session word like a swiped one. */
+    private val typedWords = TypedWordTracker()
     private var visibleWordIds: List<Int> = emptyList()
     // Recomputed only when correctionHistory actually changes (inside refreshSuggestionChips()),
     // not on every mergedReplacementOptions() call -- a live reel-drag preview fires
@@ -249,6 +251,7 @@ class IaidoInputMethodService : InputMethodService() {
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
         researchTraceId = null
+        typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -278,6 +281,7 @@ class IaidoInputMethodService : InputMethodService() {
         inputMethodLifecycleOwner.onFinishInputView()
         sessionId += 1
         researchTraceId = null
+        typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -665,6 +669,9 @@ class IaidoInputMethodService : InputMethodService() {
     private fun commitText(text: String) {
         val inputConnection = currentInputConnection ?: return
         val start = cursorPosition
+        // A commit that carries recognition candidates is a swiped word, which is recorded from
+        // those candidates below; everything else is the user typing.
+        val swipedWord = pendingCandidates != null
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, start, text)
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
@@ -682,12 +689,40 @@ class IaidoInputMethodService : InputMethodService() {
             pendingCandidates = null
             scheduleFlowCorrection()
         }
+        if (swipedWord) {
+            typedWords.reset()
+        } else {
+            val closed = typedWords.onCommitted(text, cursorBefore = start, cursorAfter = cursorPosition)
+            updateTypedWord(closed ?: typedWords.openSpan())
+        }
         refreshSuggestionChips()
+    }
+
+    /**
+     * Mirrors a typed word into the session history so every correction path a swiped word already
+     * gets - suggestion chips, the replacement reel, flow correction, learning - can address it.
+     *
+     * The word is re-recorded as it grows (the entry for the same span is dropped first, so one
+     * typed word is always exactly one session word), because the strip has to offer corrections
+     * for a word the user is still typing: recording it only when it closed left the reel with
+     * nothing to release, which is how a release either did nothing or inserted its candidate at
+     * the caret instead of replacing the word ("Hiiiiiiii").
+     */
+    private fun updateTypedWord(span: TypedWordSpan?) {
+        if (span == null || span.word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH) return
+        correctionHistory.deleteRange(span.start, span.end)
+        correctionHistory.record(
+            start = span.start,
+            end = span.end,
+            original = span.word,
+            candidates = typedWordCandidates(span.word, activeDictionary()),
+        )
     }
 
     private fun deleteSurroundingText(count: Int) {
         val inputConnection = currentInputConnection ?: return
         val oldCursor = cursorPosition
+        typedWords.onDeleted(count, cursorBefore = oldCursor)
         if (textObservationEnabled) {
             editorTextChangeDetector.expectOwnEdit(
                 start = (oldCursor - count).coerceAtLeast(0),
@@ -846,6 +881,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(first.start, second.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
         correctionHistory.join(firstId, secondId, replacement)
+        typedWords.reset()
         cursorPosition = first.start + replacement.length
         inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips()
@@ -998,6 +1034,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(word.start, word.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
         correctionHistory.replace(id, replacement)
+        typedWords.reset()
         val delta = replacement.length - word.current.length
         cursorPosition = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
         else word.start + replacement.length
