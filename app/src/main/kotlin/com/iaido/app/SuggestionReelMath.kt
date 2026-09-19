@@ -108,25 +108,26 @@ private fun Float.roundToInt(): Int = kotlin.math.round(this).toInt()
 internal const val MAX_REEL_VISIBLE_SLOTS = 3
 internal const val CHIP_HORIZONTAL_PADDING_DP = 10f
 internal const val MIN_CHIP_WIDTH_DP = 56f
-internal const val MAX_CHIP_WIDTH_DP = 140f
 internal const val REEL_ITEM_SPACING_DP = 8f
 private const val LIVE_REEL_ID_BASE = -1_000_000
 
-/** A chip's resting width: its selected word's measured width plus padding, clamped to a usable range. */
+/** A chip's resting width: its widest candidate's measured width plus padding. */
 internal fun chipReservedWidthDp(measuredTextWidthDp: Float): Float =
-    (measuredTextWidthDp + CHIP_HORIZONTAL_PADDING_DP * 2).coerceIn(MIN_CHIP_WIDTH_DP, MAX_CHIP_WIDTH_DP)
+    (measuredTextWidthDp + CHIP_HORIZONTAL_PADDING_DP * 2).coerceAtLeast(MIN_CHIP_WIDTH_DP)
+
+internal fun widestChipReservedWidthDp(measuredTextWidthsDp: List<Float>): Float =
+    chipReservedWidthDp(measuredTextWidthsDp.maxOrNull() ?: 0f)
 
 internal const val REPLACEMENT_WORD_HORIZONTAL_PADDING_DP = 5f
 internal const val MIN_REPLACEMENT_WORD_WIDTH_DP = 44f
-internal const val MAX_REPLACEMENT_WORD_WIDTH_DP = 140f
 
 /**
  * A replacement-reel word's resting width: its measured width plus tight padding, clamped so a
- * single letter isn't stretched into a wide box but a long word still gets room to be read.
+ * single letter isn't stretched into a wide box while a long word still gets room to be read.
  */
 internal fun replacementWordReservedWidthDp(measuredTextWidthDp: Float): Float =
     (measuredTextWidthDp + REPLACEMENT_WORD_HORIZONTAL_PADDING_DP * 2)
-        .coerceIn(MIN_REPLACEMENT_WORD_WIDTH_DP, MAX_REPLACEMENT_WORD_WIDTH_DP)
+        .coerceAtLeast(MIN_REPLACEMENT_WORD_WIDTH_DP)
 
 /**
  * The width to actually draw a reel row at. Never below [reservedWidthDp] (its slot's resting

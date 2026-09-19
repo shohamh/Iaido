@@ -51,8 +51,16 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `reserved chip width caps very long words so one chip cannot eat the whole strip`() {
-        assertEquals(140f, chipReservedWidthDp(measuredTextWidthDp = 500f))
+    fun `reserved chip width keeps enough room for a long word`() {
+        assertEquals(520f, chipReservedWidthDp(measuredTextWidthDp = 500f))
+    }
+
+    @Test
+    fun `reserved chip width follows the widest candidate`() {
+        assertEquals(
+            120f,
+            widestChipReservedWidthDp(measuredTextWidthsDp = listOf(10f, 100f, 50f)),
+        )
     }
 
     @Test
@@ -66,8 +74,8 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `reserved replacement word width caps long words so one word cannot dominate the row`() {
-        assertEquals(140f, replacementWordReservedWidthDp(measuredTextWidthDp = 500f))
+    fun `reserved replacement word width keeps enough room for a long word`() {
+        assertEquals(510f, replacementWordReservedWidthDp(measuredTextWidthDp = 500f))
     }
 
     @Test

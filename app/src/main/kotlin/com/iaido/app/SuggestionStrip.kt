@@ -119,23 +119,36 @@ fun SuggestionStrip(
         listState.animateScrollToItem(targetIndex)
     }
 
-    val reservedWidths = remember(ordered, bodyTextStyleKey) {
+    val joinAttachments = remember(chips, replacementOptions) {
+        attachJoinCandidates(chips, replacementOptions)
+    }
+    val reservedWidths = remember(ordered, joinAttachments, bodyTextStyleKey) {
         ordered.map { chip ->
-            val candidates = reelCandidatesForDisplay(chip)
-            val selectedIndex = reelSelectedIndexForDisplay(chip, candidates)
-            val word = candidates[selectedIndex]
-            val measuredWidthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
-            chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
+            val chipId = chip.id ?: -1
+            val joinWord = joinAttachments
+                .firstOrNull { it.firstChipId == chipId || it.lastChipId == chipId }
+                ?.option
+                ?.replacementWords
+                ?.joinToString(" ")
+            val candidates = buildList {
+                addAll(reelCandidatesForDisplay(chip))
+                joinWord?.let(::add)
+            }.distinct()
+            val measuredWidthsDp = candidates.map { word ->
+                val measuredWidthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
+                with(density) { measuredWidthPx.toDp() }.value
+            }
+            widestChipReservedWidthDp(measuredWidthsDp)
         }
     }
     val inlineReservedWidths = remember(inlineReels, bodyTextStyleKey) {
         inlineReels.map { reel ->
-            val measuredWidthPx = textMeasurer.measure(text = reel.chip.word, style = bodyStyle).size.width
-            chipReservedWidthDp(with(density) { measuredWidthPx.toDp() }.value)
+            val measuredWidthsDp = reelCandidatesForDisplay(reel.chip).map { word ->
+                val measuredWidthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
+                with(density) { measuredWidthPx.toDp() }.value
+            }
+            widestChipReservedWidthDp(measuredWidthsDp)
         }
-    }
-    val joinAttachments = remember(chips, replacementOptions) {
-        attachJoinCandidates(chips, replacementOptions)
     }
     val orderedIdToIndex = remember(ordered) {
         ordered.mapIndexed { i, orderedChip -> (orderedChip.id ?: -1) to i }.toMap()
@@ -353,11 +366,20 @@ private fun ReplacementReelGroup(
     val shape = RoundedCornerShape(16.dp)
     val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val wordReservedWidthsDp = remember(layout.renderedWords) {
-        layout.renderedWords.map { word ->
-            val widthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
-            val widthDp = with(density) { widthPx.toDp() }.value
-            replacementWordReservedWidthDp(widthDp)
+    // Reserve the largest width needed by any option at each rendered position. The preview
+    // changes options while the pointer is down, so sizing from only the current option can move
+    // the row under the gesture and leave the visible word clipped or the hit target unstable.
+    val wordReservedWidthsDp = remember(options, rtl, bodyStyle) {
+        val layouts = options.map { replacementReelLayout(it, rtl) }
+        val maxWordCount = layouts.maxOfOrNull { it.renderedWords.size } ?: 0
+        (0 until maxWordCount).map { wordIndex ->
+            val widestWordWidthDp = layouts.maxOfOrNull { candidateLayout ->
+                candidateLayout.renderedWords.getOrNull(wordIndex)?.let { word ->
+                    val widthPx = textMeasurer.measure(text = word, style = bodyStyle).size.width
+                    with(density) { widthPx.toDp() }.value
+                } ?: 0f
+            } ?: 0f
+            replacementWordReservedWidthDp(widestWordWidthDp)
         }
     }
     val spacingDp = 6f
