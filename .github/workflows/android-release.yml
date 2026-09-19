@@ -80,8 +80,8 @@ jobs:
           else
             nightly_timestamp="$(TZ=Asia/Jerusalem date +%Y%m%d%H%M)"
             nightly_tag="nightly-$nightly_timestamp"
-            nightly_title="Iaido Nightly $nightly_timestamp"
-            nightly_readable="$(TZ=Asia/Jerusalem date +'%Y-%m-%d %H:%M %Z')"
+            nightly_readable="$(TZ=Asia/Jerusalem date +'%d.%m.%Y %H:%M')"
+            nightly_title="Iaido Nightly $nightly_readable"
 
             previous_nightly_tag="$(git tag -l 'nightly-????????????' | sort | tail -n 1)"
             if [ -n "$previous_nightly_tag" ]; then
@@ -113,7 +113,7 @@ $changelog"
                 -F "force=true"
               gh release edit nightly \
                 --target "$GITHUB_SHA" \
-                --title "Legacy Iaido Nightly alias ($nightly_timestamp)" \
+                --title "Legacy Iaido Nightly alias ($nightly_readable)" \
                 --notes "Compatibility alias for $nightly_tag, built from main commit $GITHUB_SHA. Use the timestamped nightly releases for history.
 Released: $nightly_readable.
 
