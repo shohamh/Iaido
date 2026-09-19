@@ -697,27 +697,54 @@ class ImeScenario(
             (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
             (if (replacementWords == 1) "word" else "words")
         waitUntil("replacement reel before previewing '$targetDescription'") {
-            device.findObject(By.descStartsWith("Iaido replacement:")) != null
+            replacementReelStart() != null
         }
-        val reel = device.findObject(By.descStartsWith("Iaido replacement:"))
+        val start = replacementReelStart()
             ?: error("Missing replacement reel before previewing '$targetDescription'")
-        val bounds = reel.visibleBounds
-        val points = listOf(
-            PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
-            PointF((bounds.left + bounds.right) / 2f, bounds.top.toFloat() - 88f),
-        )
+        val before = editor.text()
         pendingPointerEvents = pointer.injectScreenSwipe(
-            points = points,
+            points = listOf(start, PointF(start.x, start.y - REPLACEMENT_REEL_STEP_PX)),
             cancel = cancel,
             holdBeforeMoveMs = 520L,
             onEvent = { event ->
                 if (event.action == android.view.MotionEvent.ACTION_MOVE) {
-                    waitUntil("replacement reel '$targetDescription'") {
-                        device.findObject(By.descStartsWith(targetDescription)) != null
+                    waitUntil("replacement preview for '$targetDescription'") {
+                        editor.text() != before
                     }
                 }
             },
         )
+    }
+
+    /**
+     * Start point inside the replacement reel, which the suggestion strip hosts from its leading edge.
+     *
+     * The reel's merged Compose semantics node is not published to UiAutomator's description queries on
+     * this API level (the same limitation the suggestion-reel fallback below works around), so the point
+     * is derived from the keyboard geometry [KeyboardInputView] always lays out: a 1dp language marker
+     * above the strip and a 32dp split-preview row between the strip and the swipe surface. The reel is
+     * laid out from the strip's leading edge rather than centred, so the drag starts near that edge.
+     */
+    private fun replacementReelStart(): PointF? {
+        val root = device.findObject(By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION)) ?: return null
+        val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION)) ?: return null
+        val rootBounds = runCatching { root.visibleBounds }.getOrNull() ?: return null
+        val surfaceBounds = runCatching { surface.visibleBounds }.getOrNull() ?: return null
+        val density = instrumentation.targetContext.resources.displayMetrics.density
+        val stripTop = rootBounds.top + (LANGUAGE_MARKER_HEIGHT_DP * density).toInt()
+        val stripBottom = surfaceBounds.top - (SPLIT_PREVIEW_ROW_HEIGHT_DP * density).toInt()
+        if (stripBottom <= stripTop) return null
+        val start = PointF(
+            (rootBounds.left + REPLACEMENT_REEL_START_INSET_PX).coerceAtMost(rootBounds.right - 1f),
+            (stripTop + stripBottom) / 2f,
+        )
+        check(rootBounds.contains(start.x.toInt(), start.y.toInt())) {
+            "Replacement reel start is outside the keyboard root: start=$start root=$rootBounds"
+        }
+        check(start.y < surfaceBounds.top) {
+            "Replacement reel start overlaps the swipe surface: start=$start surface=$surfaceBounds"
+        }
+        return start
     }
 
     private fun checkpoint(action: String) {
@@ -765,3 +792,15 @@ class ImeScenario(
         expectedSelection -= 1
     }
 }
+
+/** Language marker row the keyboard renders immediately above the suggestion strip. */
+private const val LANGUAGE_MARKER_HEIGHT_DP = 1f
+
+/** Split-preview row the keyboard renders between the suggestion strip and the swipe surface. */
+private const val SPLIT_PREVIEW_ROW_HEIGHT_DP = 32f
+
+/** Inset from the strip's leading edge that lands inside the left-aligned replacement reel. */
+private const val REPLACEMENT_REEL_START_INSET_PX = 80f
+
+/** Vertical drag distance that moves the reel by exactly one candidate step (36dp slot). */
+private const val REPLACEMENT_REEL_STEP_PX = 88f

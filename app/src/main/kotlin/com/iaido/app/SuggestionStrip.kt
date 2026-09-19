@@ -202,9 +202,14 @@ private fun ReplacementReelGroup(
                         dragY += amount.y
                     },
                     onDragEnd = {
+                        // `previewIndex` is captured when this gesture detector is (re)established, and
+                        // the drag itself never restarts it, so at release it still holds the index from
+                        // before the drag moved and would commit the already-selected candidate.
+                        // Recompute it from the live drag offset, as the suggestion chips do.
+                        val releasedIndex = displayedReelIndex(selectedIndex, dragY / stepPx, options.lastIndex)
                         val shouldCommit = abs(dragY) >= thresholdPx || options.size == 1
                         isDragging = false
-                        if (shouldCommit) onRelease(options[previewIndex]) else onCancel()
+                        if (shouldCommit) onRelease(options[releasedIndex]) else onCancel()
                         dragY = 0f
                     },
                     onDragCancel = {
