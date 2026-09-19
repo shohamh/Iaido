@@ -13,6 +13,7 @@ android {
     val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
     val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
     val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    val telemetryBaseUrl = providers.gradleProperty("iaidoTelemetryBaseUrl").getOrElse("")
     val releaseSigningConfigured = listOf(
         releaseKeystorePath,
         releaseKeystorePassword,
@@ -38,6 +39,11 @@ android {
         versionCode = providers.gradleProperty("iaidoVersionCode").getOrElse("1").toInt()
         versionName = providers.gradleProperty("iaidoVersion").getOrElse("0.1.3")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "String",
+            "IAIDO_TELEMETRY_BASE_URL",
+            "\"${telemetryBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
     }
 
     buildTypes {
@@ -57,6 +63,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
