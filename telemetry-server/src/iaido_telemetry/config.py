@@ -17,6 +17,11 @@ class Settings:
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
     rate_limit_max_buckets: int = 10_000
+    diagnostics_retention_days: int = 90
+    research_retention_days: int = 365
+
+    DEFAULT_DIAGNOSTICS_RETENTION_DAYS = 90
+    DEFAULT_RESEARCH_RETENTION_DAYS = 365
 
     def __post_init__(self) -> None:
         if not self.database_url:
@@ -31,6 +36,22 @@ class Settings:
             raise ValueError("rate_limit_window_seconds must be positive")
         if self.rate_limit_max_buckets <= 0:
             raise ValueError("rate_limit_max_buckets must be positive")
+        if not (
+            0 < self.diagnostics_retention_days <= self.DEFAULT_DIAGNOSTICS_RETENTION_DAYS
+        ):
+            raise ValueError(
+                "diagnostics_retention_days must be between 1 and "
+                f"{self.DEFAULT_DIAGNOSTICS_RETENTION_DAYS} (deployment config may only "
+                "shorten the default retention, never lengthen it)"
+            )
+        if not (
+            0 < self.research_retention_days <= self.DEFAULT_RESEARCH_RETENTION_DAYS
+        ):
+            raise ValueError(
+                "research_retention_days must be between 1 and "
+                f"{self.DEFAULT_RESEARCH_RETENTION_DAYS} (deployment config may only "
+                "shorten the default retention, never lengthen it)"
+            )
 
     def validate_production(self) -> None:
         if not self.database_url.startswith("postgresql+psycopg://"):
@@ -81,6 +102,12 @@ class Settings:
             ),
             rate_limit_max_buckets=int(
                 os.environ.get("IAIDO_RATE_LIMIT_MAX_BUCKETS", "10000")
+            ),
+            diagnostics_retention_days=int(
+                os.environ.get("IAIDO_DIAGNOSTICS_RETENTION_DAYS", "90")
+            ),
+            research_retention_days=int(
+                os.environ.get("IAIDO_RESEARCH_RETENTION_DAYS", "365")
             ),
         )
         settings.validate_production()

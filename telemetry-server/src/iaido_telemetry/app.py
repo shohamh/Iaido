@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import threading
 import time
@@ -10,7 +11,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.types import Message, Receive, Scope, Send
 
 from .auth import (
@@ -27,6 +28,7 @@ from .db import (
     PostgresRepository,
     TelemetryRepository,
 )
+from .exports import ExportAuthError, export_plane
 from .schemas import (
     BatchAcknowledgement,
     DeletionReceipt,
@@ -39,6 +41,48 @@ from .schemas import (
 from .storage import ObjectConflictError, ObjectStorage, S3ObjectStorage
 
 Plane = Literal["diagnostics", "research"]
+
+#: Small, bounded set of payload fields that may serve as an aggregate
+#: discriminator (e.g. the gesture outcome enum, a stable error code, a
+#: latency/candidate bucket, or a suggestion/correction action enum). Never
+#: includes free text or coordinate data, so aggregate event facts can never
+#: carry research/diagnostics payload content.
+DISCRIMINATOR_FIELDS = ("outcome", "action", "error_code", "bucket", "latency_bucket")
+
+
+def _event_discriminator(payload: dict) -> str | None:
+    for field in DISCRIMINATOR_FIELDS:
+        if field in payload:
+            return str(payload[field])
+    return None
+
+
+def delete_installation_plane(
+    database: TelemetryRepository,
+    storage: ObjectStorage,
+    installation_id: str,
+    plane: Plane,
+    *,
+    actor: str,
+) -> None:
+    """Remove one installation's data for exactly one plane.
+
+    Removes both the object-storage payloads and the database batch/event-fact
+    rows for ``plane`` in a single operation, then writes a deletion audit
+    record. Never touches the other plane's prefix or tables. Safe to call
+    repeatedly for the same installation/plane -- a second call finds nothing
+    left to remove and still succeeds (idempotent), though it still appends
+    its own audit record so the audit trail reflects every deletion attempt.
+    """
+    storage.delete_installation(plane, installation_id)
+    database.delete_batches(plane, installation_id)
+    database.delete_event_facts(plane, installation_id)
+    database.add_audit(
+        action="delete",
+        plane=plane,
+        installation_id=installation_id,
+        actor=actor,
+    )
 
 
 class RateLimiter:
@@ -295,6 +339,18 @@ def create_app(
             elif credentials_match(checksum, current.checksum):
                 return BatchAcknowledgement(batch_id=batch.batch_id)
             raise
+        else:
+            facts = [
+                (
+                    event.event_type,
+                    _event_discriminator(event.payload.model_dump(mode="json")),
+                    event.occurred_at_ms,
+                )
+                for event in batch.events
+            ]
+            database.add_event_facts(
+                plane, installation.installation_id, batch.batch_id, facts
+            )
         return BatchAcknowledgement(batch_id=batch.batch_id)
 
     @app.post(
@@ -324,13 +380,32 @@ def create_app(
         plane: Plane,
         installation: InstallationRecord = Depends(deletion_installation),
     ) -> DeletionReceipt:
-        storage.delete_installation(plane, installation.installation_id)
-        database.delete_batches(plane, installation.installation_id)
+        delete_installation_plane(
+            database, storage, installation.installation_id, plane, actor="device"
+        )
         return DeletionReceipt(
             receipt_id=deletion_receipt_id(
                 installation.deletion_credential_hash, plane
             ),
             installation_id=installation.installation_id,
+            plane=plane,
+        )
+
+    @app.delete(
+        "/v1/operator/installations/{installation_id}/{plane}",
+        response_model=DeletionReceipt,
+        dependencies=[Depends(require_operator)],
+    )
+    def operator_delete_plane(installation_id: str, plane: Plane) -> DeletionReceipt:
+        delete_installation_plane(
+            database, storage, installation_id, plane, actor="operator"
+        )
+        receipt_id = hashlib.sha256(
+            f"operator-deletion-v1:{plane}:{installation_id}".encode("utf-8")
+        ).hexdigest()
+        return DeletionReceipt(
+            receipt_id=receipt_id,
+            installation_id=installation_id,
             plane=plane,
         )
 
@@ -354,5 +429,86 @@ def create_app(
                 for record in records
             ],
         )
+
+    @app.get("/v1/operator/{plane}/export")
+    def operator_export(plane: Plane, start_ms: int, end_ms: int, request: Request):
+        token = bearer_credential(request)
+        buffer = io.StringIO()
+        try:
+            export_plane(
+                database,
+                storage,
+                active_settings,
+                plane,
+                start_ms,
+                end_ms,
+                buffer,
+                operator_token=token,
+            )
+        except ExportAuthError as error:
+            raise HTTPException(
+                status_code=401, detail="Invalid operator credential"
+            ) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return Response(content=buffer.getvalue(), media_type="application/x-ndjson")
+
+    @app.get(
+        "/v1/operator/aggregates/crash-counts",
+        dependencies=[Depends(require_operator)],
+    )
+    def crash_counts() -> dict:
+        return {
+            "plane": "diagnostics",
+            "count": database.event_counts("diagnostics", "crash"),
+        }
+
+    @app.get(
+        "/v1/operator/aggregates/runtime-error-rate",
+        dependencies=[Depends(require_operator)],
+    )
+    def runtime_error_rate() -> dict:
+        total = database.total_event_count("diagnostics")
+        errors = database.event_counts("diagnostics", "runtime_error")
+        return {
+            "plane": "diagnostics",
+            "errors": errors,
+            "total": total,
+            "rate": (errors / total) if total else 0.0,
+        }
+
+    @app.get(
+        "/v1/operator/aggregates/gesture-outcomes",
+        dependencies=[Depends(require_operator)],
+    )
+    def gesture_outcome_counts() -> dict:
+        return {
+            "plane": "diagnostics",
+            "counts": database.event_discriminator_counts(
+                "diagnostics", "gesture_outcome"
+            ),
+        }
+
+    @app.get(
+        "/v1/operator/aggregates/correction-actions",
+        dependencies=[Depends(require_operator)],
+    )
+    def correction_action_counts() -> dict:
+        return {
+            "plane": "diagnostics",
+            "counts": database.event_discriminator_counts(
+                "diagnostics", "suggestion_action"
+            ),
+        }
+
+    @app.get(
+        "/v1/operator/aggregates/latency-buckets",
+        dependencies=[Depends(require_operator)],
+    )
+    def latency_buckets() -> dict:
+        return {
+            "plane": "diagnostics",
+            "counts": database.event_discriminator_counts("diagnostics", "latency"),
+        }
 
     return app

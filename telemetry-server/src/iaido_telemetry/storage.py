@@ -19,6 +19,8 @@ class ObjectStorage(Protocol):
 
     def put_if_absent(self, key: str, payload: bytes) -> None: ...
 
+    def get(self, key: str) -> bytes: ...
+
     def delete(self, key: str) -> None: ...
 
     def delete_installation(self, plane: str, installation_id: str) -> None: ...
@@ -54,6 +56,9 @@ class LocalObjectStorage:
                 os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
+
+    def get(self, key: str) -> bytes:
+        return self._path(key).read_bytes()
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
@@ -116,6 +121,9 @@ class S3ObjectStorage:
             ].read()
             if existing != payload:
                 raise ObjectConflictError(key) from error
+
+    def get(self, key: str) -> bytes:
+        return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
