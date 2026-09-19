@@ -15,6 +15,16 @@ class ExportAuthError(Exception):
     """Raised when an export is attempted without a valid operator token."""
 
 
+def require_operator_token(settings: Settings, operator_token: str) -> None:
+    """Raise [ExportAuthError] unless ``operator_token`` matches the configured operator token.
+
+    Shared by every operator export path so a new export cannot accidentally ship without the
+    same credential check.
+    """
+    if not credentials_match(operator_token, settings.operator_token):
+        raise ExportAuthError("invalid operator credential")
+
+
 def export_plane(
     database: TelemetryRepository,
     storage: ObjectStorage,
@@ -41,8 +51,7 @@ def export_plane(
     """
     if plane not in PLANES:
         raise ValueError("unknown telemetry plane")
-    if not credentials_match(operator_token, settings.operator_token):
-        raise ExportAuthError("invalid operator credential")
+    require_operator_token(settings, operator_token)
     if start_ms > end_ms:
         raise ValueError("start_ms must not be greater than end_ms")
 

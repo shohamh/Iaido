@@ -95,5 +95,6 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
     testImplementation(libs.junit.jupiter)
+    testImplementation(testFixtures(project(":core-engine")))
     testRuntimeOnly(libs.junit.platform.launcher)
 }
