@@ -67,6 +67,39 @@ laptop). Optional overrides: `IAIDO_S3_REGION`, `IAIDO_MAX_REQUEST_BYTES`,
 `IAIDO_RATE_LIMIT_MAX_BUCKETS`, `IAIDO_DIAGNOSTICS_RETENTION_DAYS`,
 `IAIDO_RESEARCH_RETENTION_DAYS` (see the table above for defaults).
 
+### Behind a TLS-terminating proxy on the same host
+
+Publish the port to loopback only, then point the proxy at it:
+
+```yaml
+# docker-compose.override.yml
+services:
+  telemetry:
+    ports:
+      - "127.0.0.1:8000:8000"
+```
+
+```bash
+tailscale funnel --bg 8000          # or: caddy reverse-proxy / nginx
+curl -X POST https://<your-host>/v1/installations   # 201
+```
+
+Two details make this work and are easy to get wrong:
+
+- The container runs uvicorn with `--proxy-headers --forwarded-allow-ips=*`,
+  because the proxy connects from the Docker gateway rather than `127.0.0.1`.
+  Without that, uvicorn drops the proxy's `X-Forwarded-Proto: https`, the app
+  sees an `http` scheme, and `IngestionBoundaryMiddleware` answers **426**
+  for every `/v1/` route. The port mapping above is host-local, so only the
+  local proxy can reach the container to spoof that header.
+- `/` returns 404 and there is no `/health` route; probe the service with an
+  authenticated operator route such as
+  `GET /v1/operator/diagnostics/batches`, or by provisioning an installation.
+
+Plain `docker compose up --build` is enough when the service is reached from
+another compose service; it is not reachable from the host without the port
+mapping above.
+
 ## Migrations
 
 There is no separate migration tool yet: `create_app()` calls

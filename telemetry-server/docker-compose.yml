@@ -50,7 +50,12 @@ services:
     command:
       - /bin/sh
       - -ec
-      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers
+      # `--forwarded-allow-ips=*` is required behind the reverse proxy that terminates TLS: the
+      # proxy connects from the Docker gateway (not 127.0.0.1), so uvicorn's default trust list
+      # would drop the proxy's `X-Forwarded-Proto: https` and every `/v1/` request would be
+      # rejected with 426 by IngestionBoundaryMiddleware. The published port is host-local only
+      # (see the deployment docs), so only the local proxy can reach it.
+      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
     environment:
       IAIDO_DATABASE_URL: postgresql+psycopg://iaido:${IAIDO_POSTGRES_PASSWORD}@postgres:5432/iaido_telemetry
       IAIDO_S3_ENDPOINT_URL: http://minio:9000
@@ -64,7 +69,10 @@ services:
       IAIDO_RATE_LIMIT_WINDOW_SECONDS: ${IAIDO_RATE_LIMIT_WINDOW_SECONDS:-60}
       IAIDO_RATE_LIMIT_MAX_BUCKETS: ${IAIDO_RATE_LIMIT_MAX_BUCKETS:-10000}
     volumes:
-      - .:/service:ro
+      # Writable: the start command runs `pip install -e .`, which writes build metadata
+      # (`*.egg-info`, `build/`) into the mounted source tree. With `:ro` the container exits
+      # immediately with "Cannot update time stamp of directory 'src/iaido_telemetry.egg-info'".
+      - .:/service
     expose:
       - "8000"
     depends_on:
