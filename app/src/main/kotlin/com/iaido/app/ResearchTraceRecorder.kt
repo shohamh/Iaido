@@ -86,6 +86,13 @@ class ResearchTraceRecorder(
     private val limits: ResearchTraceLimits = ResearchTraceLimits(),
     private val algorithmVersion: Int = CURRENT_ALGORITHM_VERSION,
 ) {
+    /**
+     * Whether research capture is currently consented. Callers on the raw touch path read this
+     * *before* converting a `MotionEvent` into a [TouchFrame], so the default (consent-off) path
+     * performs no per-event allocation at all.
+     */
+    val isEnabled: Boolean get() = enabled()
+
     private var traceStartMs: Long? = null
     private val points = mutableListOf<ResearchTraceSample>()
     private var overCap = false

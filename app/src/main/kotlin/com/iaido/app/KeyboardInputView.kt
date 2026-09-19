@@ -245,7 +245,13 @@ fun KeyboardInputView(
                     .height(keyboardSurfaceHeight)
                     .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
-                        researchTraceRecorder?.consume(event.toTouchFrame(widthPx, surfaceHeightPx))
+                        // Consent is checked before building a TouchFrame: converting every raw
+                        // pointer event allocates a frame plus one object per pointer, and research
+                        // capture is off by default, so the default path must not allocate at all.
+                        val traceRecorder = researchTraceRecorder
+                        if (traceRecorder != null && traceRecorder.isEnabled) {
+                            traceRecorder.consume(event.toTouchFrame(widthPx, surfaceHeightPx))
+                        }
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
                                 pointerId = event.getPointerId(0)

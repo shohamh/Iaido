@@ -3,6 +3,7 @@ package com.iaido.app
 import android.view.MotionEvent
 import com.iaido.core.language.Language
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -192,6 +193,16 @@ class ResearchTraceRecorderTest {
         assertTrue(first.traceId.isNotBlank())
         assertTrue(second.traceId.isNotBlank())
         assertTrue(first.traceId != second.traceId)
+    }
+
+    @Test
+    fun `isEnabled mirrors consent so the raw touch path can skip frame allocation`() {
+        var consent = false
+        val recorder = ResearchTraceRecorder(enabled = { consent })
+
+        assertFalse(recorder.isEnabled)
+        consent = true
+        assertTrue(recorder.isEnabled)
     }
 
     private fun assertNotEqualsSwipe(classification: String) {

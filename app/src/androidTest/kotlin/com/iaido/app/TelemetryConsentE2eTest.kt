@@ -11,6 +11,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
+import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -69,6 +70,16 @@ class TelemetryConsentE2eTest {
             context.settingsStore.data.first()[cascadeDepthKey]
         }
 
+        // A build with no collector configured cannot provision installation credentials, so its
+        // enable path must roll back to disabled. Seed the enabled record a working deployment
+        // would have left behind so this test still drives the real disable path there.
+        val endpointConfigured = BuildConfig.IAIDO_TELEMETRY_BASE_URL.isNotBlank()
+        if (!endpointConfigured) {
+            runBlocking {
+                persistConsentRecord(context, TelemetryPlane.DIAGNOSTICS, enabledDiagnosticsRecord())
+            }
+        }
+
         val activity = instrumentation.startActivitySync(
             Intent(context, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
@@ -83,15 +94,25 @@ class TelemetryConsentE2eTest {
                 device.wait(Until.hasObject(By.text(diagnosticsLabel)), 5_000L),
             )
 
-            val diagnosticsSwitch = waitForSwitchNear(device, diagnosticsLabel)
-            assertFalse("Diagnostics should start disabled", diagnosticsSwitch.isChecked)
-            diagnosticsSwitch.click()
-
-            waitUntil(5_000L) { waitForSwitchNear(device, diagnosticsLabel).isChecked }
-            assertTrue(
-                "Diagnostics switch did not turn on after tapping it",
-                waitForSwitchNear(device, diagnosticsLabel).isChecked,
-            )
+            if (endpointConfigured) {
+                assertFalse(
+                    "Diagnostics should start disabled",
+                    waitForSwitchNear(device, diagnosticsLabel).isChecked,
+                )
+                toggleUntil(device, diagnosticsLabel, expected = true)
+                assertTrue(
+                    "Expected an enabled status message after provisioning the installation",
+                    device.wait(
+                        Until.hasObject(By.textContains("diagnostics telemetry enabled")),
+                        10_000L,
+                    ),
+                )
+            } else {
+                assertTrue(
+                    "Seeded diagnostics consent should render as enabled",
+                    waitUntil(10_000L) { waitForSwitchNear(device, diagnosticsLabel).isChecked },
+                )
+            }
 
             scrollToText(device, researchLabel)
             assertFalse(
@@ -100,16 +121,47 @@ class TelemetryConsentE2eTest {
             )
 
             scrollToText(device, diagnosticsLabel)
-            waitForSwitchNear(device, diagnosticsLabel).click()
-
-            waitUntil(5_000L) { !waitForSwitchNear(device, diagnosticsLabel).isChecked }
-            assertFalse(
-                "Diagnostics switch did not turn off after tapping it again",
-                waitForSwitchNear(device, diagnosticsLabel).isChecked,
+            toggleUntil(device, diagnosticsLabel, expected = false)
+            assertTrue(
+                "Expected a disabled status message after revoking diagnostics",
+                device.wait(
+                    Until.hasObject(By.textContains("disabled and pending data deleted")),
+                    10_000L,
+                ),
             )
 
-            val pendingCleared = waitUntil(5_000L) { diagnosticsQueue.pendingBatches().isEmpty() }
+            val pendingCleared = waitUntil(10_000L) { diagnosticsQueue.pendingBatches().isEmpty() }
             assertTrue("Pending diagnostics data was not deleted after disabling diagnostics", pendingCleared)
+
+            if (!endpointConfigured) {
+                scrollToText(device, diagnosticsLabel)
+                var failureShown = false
+                repeat(5) {
+                    if (failureShown) return@repeat
+                    waitForSwitchNear(device, diagnosticsLabel).click()
+                    failureShown = waitUntil(3_000L) {
+                        device.hasObject(By.textContains("Could not set up diagnostics telemetry"))
+                    }
+                }
+                assertTrue(
+                    "A build with no collector must surface the provisioning failure instead of enabling",
+                    failureShown,
+                )
+                assertFalse(
+                    "Diagnostics consent must never be shown as enabled without a collector",
+                    waitForSwitchNear(device, diagnosticsLabel).isChecked,
+                )
+                assertFalse(
+                    "Diagnostics consent must not be persisted as enabled without a collector",
+                    runBlocking {
+                        diagnosticsConsentFromPreferences(context.settingsStore.data.first()).enabled
+                    },
+                )
+                assertTrue(
+                    "A failed enable must not create pending telemetry data",
+                    diagnosticsQueue.pendingBatches().isEmpty(),
+                )
+            }
 
             assertEquals(
                 "Disabling diagnostics must not change unrelated keyboard settings",
@@ -131,6 +183,14 @@ class TelemetryConsentE2eTest {
             diagnosticsQueue.deleteAll()
         }
     }
+
+    private fun enabledDiagnosticsRecord() = ConsentRecord(
+        enabled = true,
+        consentVersion = TELEMETRY_CONSENT_POLICY_VERSION,
+        acceptedAtMs = System.currentTimeMillis(),
+        revokedAtMs = null,
+        policyDigest = telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS),
+    )
 
     private fun sampleDiagnosticsEnvelope(): TelemetryEnvelope {
         val payload = Json.parseToJsonElement(
@@ -162,23 +222,50 @@ class TelemetryConsentE2eTest {
     }
 
     /**
-     * Finds the Switch nearest the given label, walking up from the text node to its row and then
-     * searching that row for the Switch widget - mirrors how [TelemetryPlaneToggle] lays out a
-     * title/disclosure column next to a Switch in the same Row.
+     * Clicks the toggle for [label] until its checked state equals [expected], retrying a bounded
+     * number of times. A tap issued while the settings list is still settling (scroll momentum or
+     * recomposition), or while the toggle is disabled because a previous consent change is still
+     * running, is swallowed - so each attempt re-scrolls to the row, waits for the toggle to be
+     * enabled, and re-checks the observable state instead of assuming one tap landed.
+     */
+    private fun toggleUntil(device: UiDevice, label: String, expected: Boolean) {
+        repeat(8) {
+            scrollToText(device, label)
+            device.waitForIdle()
+            val toggle = waitForSwitchNear(device, label)
+            if (toggle.isChecked == expected) return
+            if (!toggle.isEnabled) {
+                waitUntil(5_000L) { waitForSwitchNear(device, label).isEnabled }
+            }
+            waitForSwitchNear(device, label).click()
+            if (waitUntil(4_000L) { waitForSwitchNear(device, label).isChecked == expected }) return
+        }
+        assertEquals(
+            "Toggle '$label' never reached checked=$expected",
+            expected,
+            waitForSwitchNear(device, label).isChecked,
+        )
+    }
+
+    /**
+     * Finds the toggle in the same row as the given label. Compose's `Switch` does not report
+     * itself as `android.widget.Switch`, so this matches on the checkable semantics the toggle
+     * exposes, prefers a toggle on the label's own row band, and only then falls back to the
+     * nearest one - so a scroll position that clips the row cannot make it click a different
+     * plane's toggle.
      */
     private fun waitForSwitchNear(device: UiDevice, label: String): UiObject2 {
-        var node = device.findObject(By.text(label))
-        var row = node
-        repeat(6) {
-            if (row?.className == "android.widget.Switch") return@repeat
-            val candidate = row?.findObject(By.clazz("android.widget.Switch"))
-            if (candidate != null) {
-                row = candidate
-                return@repeat
-            }
-            row = row?.parent
+        val labelNode = device.wait(Until.findObject(By.text(label)), 5_000L)
+            ?: error("Could not find the '$label' label")
+        val labelBounds = labelNode.visibleBounds
+        val labelCenterY = labelNode.visibleCenter.y
+        val toggles = device.findObjects(By.checkable(true))
+        val sameRow = toggles.filter {
+            abs(it.visibleCenter.y - labelCenterY) <= labelBounds.height()
         }
-        return requireNotNull(row) { "Could not find a Switch near '$label'" }
+        val toggle = (sameRow.ifEmpty { toggles })
+            .minByOrNull { abs(it.visibleCenter.y - labelCenterY) }
+        return requireNotNull(toggle) { "Could not find a toggle near '$label'" }
     }
 
     /**
