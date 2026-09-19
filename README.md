@@ -78,6 +78,12 @@ handling — `tailscale funnel --bg 8000` publishes `https://<host>.<tailnet>.ts
 loopback-published container — and the Android build then takes
 `-PiaidoTelemetryBaseUrl=https://<host>.<tailnet>.ts.net`.
 
+Open `https://<host>.<tailnet>.ts.net/` in a browser to see what has been collected: the operator
+dashboard lists both planes separately (batch and event counts, newest batches, diagnostics
+aggregates, audit log) and opens any batch to show its stored payloads. It authenticates with the
+operator token through the browser's own Basic-auth prompt (any username, the token as the
+password).
+
 Rollout status: diagnostics capture, research capture (traces plus bounded correction records),
 reviewed fixture export, and the collector are implemented. Verified locally by
 `:core-engine:test`, `:app:testDebugUnitTest`, `:app:assembleDebug`, the collector's pytest suite,

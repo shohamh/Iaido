@@ -202,6 +202,32 @@ curl -G \
   -o research-export.ndjson
 ```
 
+## Operator dashboard
+
+`GET /` renders a read-only HTML view of both planes from the same repository and object storage:
+per-plane batch and event counts, the newest batches (each linking to its own page), the
+diagnostics aggregate facts, and the audit log.
+`GET /batches/{plane}/{installation_id}/{batch_id}` shows one batch's envelope fields and every
+stored payload.
+
+Authentication is the operator token, accepted either as `Authorization: Bearer <token>` or as
+HTTP Basic - any username, the token as the password - so a browser can prompt for it directly:
+
+```
+https://<your-host>/        # the browser prompts; the username is ignored
+```
+
+Notes:
+
+- The overview is metadata only; payload text is rendered only on a batch page, where every value
+  is HTML-escaped (research records can contain readable user-typed text).
+- No JavaScript, no external assets, no new secret - the operator token is the only credential.
+- The dashboard is a separate, explicitly per-plane view; batch links always carry the plane. It is
+  not an export surface, so it never mixes the two planes into one stream.
+- `IngestionBoundaryMiddleware` only covers `/v1/`, so the dashboard is served over whatever scheme
+  the deployment terminates: keep it behind the same TLS proxy as `/v1/` and do not publish it on
+  a plaintext interface.
+
 ## Reviewed research fixtures
 
 `src/iaido_telemetry/fixture_export.py` turns operator-approved research records into one

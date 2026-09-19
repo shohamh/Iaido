@@ -22,6 +22,7 @@ from .auth import (
     issue_credential,
 )
 from .config import Settings
+from .dashboard import register_dashboard
 from .db import (
     BatchIdentityConflict,
     InstallationRecord,
@@ -510,5 +511,7 @@ def create_app(
             "plane": "diagnostics",
             "counts": database.event_discriminator_counts("diagnostics", "latency"),
         }
+
+    register_dashboard(app, active_settings, database, storage)
 
     return app
