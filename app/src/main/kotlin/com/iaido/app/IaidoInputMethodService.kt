@@ -229,6 +229,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
+        DiagnosticsTelemetryProvider.instance?.recordImeSessionStart()
         swipeTypingCoordinator.onNonSwipeInput()
         super.onStartInputView(info, restarting)
         val runtimeRevision = beginRuntimeRevision()
@@ -255,6 +256,10 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        DiagnosticsTelemetryProvider.instance?.let {
+            it.recordImeSessionFinish()
+            it.flush()
+        }
         swipeTypingCoordinator.onNonSwipeInput()
         super.onFinishInputView(finishingInput)
         inputMethodLifecycleOwner.onFinishInputView()
@@ -326,9 +331,11 @@ class IaidoInputMethodService : InputMethodService() {
                             mainHandler.post {
                                 if (sessionId != expectedSession || activeLanguage != language) return@post
                                 if (results.isEmpty()) {
+                                    trackGesture(DiagnosticsGestureKind.SWIPE, DiagnosticsOutcome.REJECTED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     return@post
                                 }
+                                trackGesture(DiagnosticsGestureKind.SWIPE, DiagnosticsOutcome.ACCEPTED)
                                 rememberCandidatesForCommittedSwipe(results)
                                 swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
                                 typingController.markSwipeCommitted()
@@ -350,12 +357,14 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onPunctuationToSpace = { punctuation ->
                         swipeTypingCoordinator.onNonSwipeInput()
+                        trackGesture(DiagnosticsGestureKind.PUNCTUATION, DiagnosticsOutcome.ACCEPTED)
                         typingController.punctuationToSpace(punctuation)
                     },
                     language = activeLanguage,
                     onLanguageSwitch = ::switchLanguage,
                     onCommand = { trigger ->
                         swipeTypingCoordinator.onNonSwipeInput()
+                        trackGesture(DiagnosticsGestureKind.COMMAND, DiagnosticsOutcome.ACCEPTED)
                         handleCommand(trigger)
                     },
                     suggestionChips = sessionChips.value,
@@ -403,6 +412,7 @@ class IaidoInputMethodService : InputMethodService() {
                                 is SplitPollOutcome.Resolved -> result.parts
                                 SplitPollOutcome.Pending -> return@postDelayed
                                 SplitPollOutcome.Cancelled -> {
+                                    trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     splitPreview.value = null
                                     return@postDelayed
@@ -414,10 +424,12 @@ class IaidoInputMethodService : InputMethodService() {
                                 mainHandler.post {
                                     if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@post
                                     if (candidates.any { it.isEmpty() }) {
+                                        trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.REJECTED)
                                         swipeTypingCoordinator.onRecognitionFailed()
                                         splitPreview.value = null
                                         return@post
                                     }
+                                    trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.ACCEPTED)
                                     rememberCandidatesForCommittedSwipe(candidates.flatten())
                                     if (parts.paths.size == 1) {
                                         swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
@@ -432,6 +444,7 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onSplitCancel = {
                         splitController.cancel()
+                        trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                         swipeTypingCoordinator.onRecognitionFailed()
                         splitPreview.value = null
                     },
@@ -821,11 +834,17 @@ class IaidoInputMethodService : InputMethodService() {
     private fun releaseReplacementOption(option: ReplacementOption): Boolean {
         val historyMatch = correctionHistory.aroundCursor(cursorPosition).zipWithNext()
             .firstOrNull { (first, second) -> listOf(first.current, second.current) == option.sourceWords }
-        if (historyMatch != null) {
+        val released = if (historyMatch != null) {
             val (first, second) = historyMatch
-            return joinSessionWords(first.id, second.id, option.replacementWords.joinToString(" "))
+            joinSessionWords(first.id, second.id, option.replacementWords.joinToString(" "))
+        } else {
+            swipeTypingCoordinator.releaseReplacement(option)
         }
-        return swipeTypingCoordinator.releaseReplacement(option)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.REPLACEMENT,
+            if (released) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
+        return released
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
@@ -839,6 +858,10 @@ class IaidoInputMethodService : InputMethodService() {
         )
         val replacement = displayCandidateForIndex(chip, candidateIndex) ?: return
         val changed = replaceSessionWord(word.id, replacement)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.SUGGESTION_PICK,
+            if (changed) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
         if (changed && candidateIndex > 0 && activeLanguage == Language.ENGLISH) {
             recordLearning(
                 signal = LearningSignal.SUGGESTION_PICK,
@@ -851,12 +874,31 @@ class IaidoInputMethodService : InputMethodService() {
     private fun undoSuggestion(displayIndex: Int) {
         val word = wordForDisplayIndex(displayIndex) ?: return
         if (!word.corrected) return
-        if (replaceSessionWord(word.id, word.original)) {
+        val undone = replaceSessionWord(word.id, word.original)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.UNDO,
+            if (undone) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
+        if (undone) {
             recordLearning(
                 signal = LearningSignal.FLOW_UNDO,
                 original = word.current,
                 replacement = word.original,
             )
+        }
+    }
+
+    private fun trackGesture(kind: DiagnosticsGestureKind, outcome: DiagnosticsOutcome) {
+        DiagnosticsTelemetryProvider.instance?.let {
+            it.recordGesture(kind, outcome)
+            it.flush()
+        }
+    }
+
+    private fun trackSuggestion(action: DiagnosticsSuggestionAction, outcome: DiagnosticsOutcome) {
+        DiagnosticsTelemetryProvider.instance?.let {
+            it.recordSuggestionAction(action, outcome)
+            it.flush()
         }
     }
 
