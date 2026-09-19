@@ -86,10 +86,12 @@ telemetry suites (`TelemetryConsentE2eTest`, `ResearchTouchCaptureE2eTest`) pass
 failures in other instrumented suites that reproduce on `main` before this work (bilingual,
 inference, and reel gesture fixtures plus the settings update action), so they are not telemetry
 regressions. The collector has also been run locally behind Tailscale Funnel and exercised from
-the emulator against a real public HTTPS endpoint: the app provisioned an installation and enabled
-diagnostics through the funnel, and the ingestion, operator-listing, plane-isolation, and
-authorization paths were exercised over that endpoint. Production ingestion stays disabled until a
-staging collector is deployed and those pre-existing instrumented failures are addressed.
+the emulator against a real public HTTPS endpoint: the app provisioned an installation, enabled
+diagnostics through the funnel, and uploaded a queued batch that the collector acknowledged
+(`TelemetryUploadE2eTest`, which skips when no collector is configured), while the ingestion,
+operator-listing, plane-isolation, and authorization paths were exercised over that endpoint.
+Production ingestion stays disabled until a staging collector is deployed and those pre-existing
+instrumented failures are addressed.
 
 ## Keyboard profile migration
 
