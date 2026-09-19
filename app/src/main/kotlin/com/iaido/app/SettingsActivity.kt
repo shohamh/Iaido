@@ -330,6 +330,8 @@ class SettingsActivity : ComponentActivity() {
                 }
             }
 
+            TelemetrySettingsSection(context = applicationContext, scope = lifecycleScope)
+
             HorizontalDivider()
             Text("Dictionary & Learning", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
