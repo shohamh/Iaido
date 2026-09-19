@@ -103,6 +103,8 @@ fun KeyboardInputView(
     manualEditCandidate: ManualEditCandidate? = null,
     onConfirmManualEdit: () -> Unit = {},
     onDismissManualEdit: () -> Unit = {},
+    researchTraceRecorder: ResearchTraceRecorder? = null,
+    onResearchTraceCaptured: (ResearchTrace) -> Unit = {},
 ) {
     BoxWithConstraints {
         val density = LocalDensity.current
@@ -122,6 +124,12 @@ fun KeyboardInputView(
         val backspaceSwipeStepPx = with(density) { BACKSPACE_SWIPE_STEP_DP.dp.toPx() }
         val backspaceGestureThresholdPx = with(density) { BACKSPACE_GESTURE_THRESHOLD_DP.dp.toPx() }
         val layout = remember(widthPx, language) { keyboardLayoutFor(keySizePx, language) }
+        val researchLayoutId = if (language == Language.HEBREW) "hebrew" else "qwerty"
+        fun finishResearchTrace(classification: String) {
+            researchTraceRecorder
+                ?.finish(classification, language, researchLayoutId)
+                ?.let(onResearchTraceCaptured)
+        }
         var points by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var trailPoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var pointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
@@ -237,6 +245,7 @@ fun KeyboardInputView(
                     .height(keyboardSurfaceHeight)
                     .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
+                        researchTraceRecorder?.consume(event.toTouchFrame(widthPx, surfaceHeightPx))
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
                                 pointerId = event.getPointerId(0)
@@ -365,6 +374,7 @@ fun KeyboardInputView(
                                     points = emptyList()
                                     pointerId = MotionEvent.INVALID_POINTER_ID
                                     startKey = null
+                                    finishResearchTrace(ResearchTraceClassification.SPLIT)
                                     true
                                 } else if (startKey == BACKSPACE_KEY) {
                                     when (backspaceMode) {
@@ -388,24 +398,39 @@ fun KeyboardInputView(
                                     points = emptyList()
                                     pointerId = MotionEvent.INVALID_POINTER_ID
                                     startKey = null
+                                    finishResearchTrace(ResearchTraceClassification.BACKSPACE)
                                     true
                                 } else {
                                     val index = event.findPointerIndex(pointerId)
                                     val completed = if (index >= 0) points + event.toGesturePoint(index) else points
                                     if (multiFingerHandled) {
                                         // The command was already emitted once when its threshold was crossed.
+                                        finishResearchTrace(ResearchTraceClassification.COMMAND)
                                     } else if (startKey == " " && event.eventTime - startTime >= 500L) {
                                         onCommand(GestureTrigger.LONG_PRESS_SPACE)
+                                        finishResearchTrace(ResearchTraceClassification.COMMAND)
                                     } else if (startKey != null) {
                                         val end = completed.lastOrNull()
                                         when {
-                                            isTapGesture(completed, keySizePx) -> onTap(startKey!!)
-                                            startKey in punctuationKeys && end != null && end.y >= keySizePx * 3 ->
+                                            isTapGesture(completed, keySizePx) -> {
+                                                onTap(startKey!!)
+                                                finishResearchTrace(ResearchTraceClassification.TAP)
+                                            }
+                                            startKey in punctuationKeys && end != null && end.y >= keySizePx * 3 -> {
                                                 onPunctuationToSpace(startKey!!)
-                                            isUpwardFlickGesture(completed, keySizePx) ->
+                                                finishResearchTrace(ResearchTraceClassification.PUNCTUATION)
+                                            }
+                                            isUpwardFlickGesture(completed, keySizePx) -> {
                                                 onFlick(startKey!!, FlickDirection.UP)
-                                            else -> onSwipe(GesturePath(completed), layout)
+                                                finishResearchTrace(ResearchTraceClassification.FLICK)
+                                            }
+                                            else -> {
+                                                onSwipe(GesturePath(completed), layout)
+                                                finishResearchTrace(ResearchTraceClassification.SWIPE)
+                                            }
                                         }
+                                    } else {
+                                        finishResearchTrace(ResearchTraceClassification.FAILED)
                                     }
                                     points = emptyList()
                                     pointerId = MotionEvent.INVALID_POINTER_ID
@@ -422,6 +447,7 @@ fun KeyboardInputView(
                                 points = emptyList()
                                 pointerId = MotionEvent.INVALID_POINTER_ID
                                 startKey = null
+                                finishResearchTrace(ResearchTraceClassification.CANCELLED)
                                 true
                             }
                             else -> true
@@ -631,6 +657,21 @@ private fun MutableList<KeyPosition>.addRow(letters: String, offset: Float, row:
 }
 
 private fun MotionEvent.toGesturePoint(index: Int) = GesturePoint(getX(index), getY(index), eventTime)
+
+/**
+ * Builds an immutable [TouchFrame] snapshot of this event, capturing every active pointer's
+ * position immediately. Never retains `this` - the caller passes the returned [TouchFrame]
+ * onward instead, since Android recycles [MotionEvent] instances after the callback returns.
+ */
+private fun MotionEvent.toTouchFrame(surfaceWidthPx: Float, surfaceHeightPx: Float): TouchFrame = TouchFrame(
+    action = actionMasked,
+    eventTimeMs = eventTime,
+    surfaceWidthPx = surfaceWidthPx,
+    surfaceHeightPx = surfaceHeightPx,
+    pointers = (0 until pointerCount).map { index ->
+        TouchPointer(pointerId = getPointerId(index), xPx = getX(index), yPx = getY(index))
+    },
+)
 
 private enum class BackspaceMode {
     NONE,
