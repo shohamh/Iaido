@@ -73,9 +73,13 @@ python -m pytest telemetry-server/tests -q
 
 Rollout status: diagnostics capture, research capture (traces plus bounded correction records),
 reviewed fixture export, and the collector are implemented. Verified locally by
-`:core-engine:test`, `:app:testDebugUnitTest`, `:app:assembleDebug`, and the collector's pytest
-suite. Production ingestion stays disabled until a staging collector is configured and the
-connected IME suites have been run against a device.
+`:core-engine:test`, `:app:testDebugUnitTest`, `:app:assembleDebug`, the collector's pytest suite,
+and `:app:connectedDebugAndroidTest` on an API 35 emulator: 56 instrumented tests run, with both
+telemetry suites (`TelemetryConsentE2eTest`, `ResearchTouchCaptureE2eTest`) passing and six
+failures in other instrumented suites that reproduce on `main` before this work (bilingual,
+inference, and reel gesture fixtures plus the settings update action), so they are not telemetry
+regressions. Production ingestion stays disabled until a staging collector is configured and those
+pre-existing instrumented failures are addressed.
 
 ## Keyboard profile migration
 
