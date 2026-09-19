@@ -67,31 +67,10 @@ jobs:
             -no-window -no-audio -no-boot-anim -no-snapshot
             -gpu swiftshader_indirect -camera-back none -camera-front none
             -memory 3072 -cores 2
-          script: |
-            set -u
-            # Run one class per gradle invocation: a class that wedges the emulator, or a failure
-            # that leaves the harness in a bad state, then costs that class only - the results of
-            # every earlier class are already on disk and get reported.
-            classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin \
-              | sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' \
-              | sort)
-            echo "Instrumented classes:"; echo "$classes"
-            failed=""
-            for class in $classes; do
-              echo "::group::$class"
-              if ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain \
-                   -Pandroid.testInstrumentationRunnerArguments.class="$class"; then
-                echo "$class: PASS"
-              else
-                echo "$class: FAIL"
-                failed="$failed $class"
-              fi
-              echo "::endgroup::"
-            done
-            if [ -n "$failed" ]; then
-              echo "::error::Instrumented classes failed:$failed"
-              exit 1
-            fi
+          # The action invokes each newline in `script` separately. Fold this into one POSIX shell
+          # command so the substitution, loop, and final status are parsed together.
+          script: >-
+            set -u; classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin | sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' | sort); echo "Instrumented classes:"; echo "$classes"; failed=""; for class in $classes; do echo "::group::$class"; if ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain -Pandroid.testInstrumentationRunnerArguments.class="$class"; then echo "$class: PASS"; else echo "$class: FAIL"; failed="$failed $class"; fi; echo "::endgroup::"; done; if [ -n "$failed" ]; then echo "::error::Instrumented classes failed:$failed"; exit 1; fi
       - name: Collect IME E2E artifacts
         if: always()
         run: |
