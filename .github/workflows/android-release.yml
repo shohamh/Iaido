@@ -93,11 +93,7 @@ jobs:
               changelog="No changes since the previous nightly."
             fi
 
-            nightly_notes="Automated nightly build from main commit $GITHUB_SHA.
-Released: $nightly_readable.
-
-### Changes since previous nightly
-$changelog"
+            nightly_notes="$(printf 'Automated nightly build from main commit %s.\nReleased: %s.\n\n### Changes since previous nightly\n%s' "$GITHUB_SHA" "$nightly_readable" "$changelog")"
 
             gh release create "$nightly_tag" app/build/outputs/apk/release/app-release.apk \
               --target "$GITHUB_SHA" \
@@ -111,14 +107,11 @@ $changelog"
               gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" \
                 -F "sha=$GITHUB_SHA" \
                 -F "force=true"
+              legacy_notes="$(printf 'Compatibility alias for %s, built from main commit %s. Use the timestamped nightly releases for history.\nReleased: %s.\n\n### Changes since previous nightly\n%s' "$nightly_tag" "$GITHUB_SHA" "$nightly_readable" "$changelog")"
               gh release edit nightly \
                 --target "$GITHUB_SHA" \
                 --title "Legacy Iaido Nightly alias ($nightly_readable)" \
-                --notes "Compatibility alias for $nightly_tag, built from main commit $GITHUB_SHA. Use the timestamped nightly releases for history.
-Released: $nightly_readable.
-
-### Changes since previous nightly
-$changelog" \
+                --notes "$legacy_notes" \
                 --prerelease
             fi
           fi
