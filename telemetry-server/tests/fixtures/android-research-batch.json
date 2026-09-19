@@ -1,0 +1,38 @@
+{
+  "batch_id": "batch-7-1750000000000-10000000-0000-4000-8000-000000000007",
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "30000000-0000-4000-8000-000000000009",
+      "batch_id": "20000000-0000-4000-8000-000000000008",
+      "installation_id": "10000000-0000-4000-8000-000000000001",
+      "session_id": "10000000-0000-4000-8000-000000000002",
+      "occurred_at_ms": 1750000000000,
+      "app_version": "0.1.4",
+      "build_type": "release",
+      "android_api": 36,
+      "event_type": "text_sample",
+      "payload": {
+        "text": "bounded sample"
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "30000000-0000-4000-8000-000000000010",
+      "batch_id": "20000000-0000-4000-8000-000000000008",
+      "installation_id": "10000000-0000-4000-8000-000000000001",
+      "session_id": "10000000-0000-4000-8000-000000000002",
+      "occurred_at_ms": 1750000000001,
+      "app_version": "0.1.4",
+      "build_type": "release",
+      "android_api": 36,
+      "event_type": "gesture_trace",
+      "payload": {
+        "points": [
+          {"x": 0.0, "y": 1.0},
+          {"x": 0.5, "y": 0.25}
+        ]
+      }
+    }
+  ]
+}

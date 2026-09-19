@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from conftest import envelope, queue_batch_id
@@ -82,25 +85,17 @@ def test_diagnostics_rejects_readable_metadata_channels(
     assert response.status_code == 422
 
 
-def test_android_shaped_research_batch_is_normalized_at_server_boundary(
+def test_android_telemetry_batch_fixture_is_accepted_without_translation(
     client, installation, diagnostics_headers
 ):
-    event = envelope(
-        installation_id=installation["installation_id"],
-        batch_id=ANDROID_EVENT_BATCH_ID,
-        event_id="30000000-0000-4000-8000-000000000009",
-        event_type="text_sample",
-        payload={"text": "bounded sample"},
-    )
-
+    fixture = Path(__file__).parent / "fixtures" / "android-research-batch.json"
+    batch = json.loads(fixture.read_text(encoding="utf-8"))
+    for event in batch["events"]:
+        event["installation_id"] = installation["installation_id"]
     response = client.post(
         "/v1/research/batches",
         headers=diagnostics_headers,
-        json={
-            "schema_version": 1,
-            "batch_id": ANDROID_QUEUE_BATCH_ID,
-            "events": [event],
-        },
+        json=batch,
     )
 
     assert response.status_code == 202
