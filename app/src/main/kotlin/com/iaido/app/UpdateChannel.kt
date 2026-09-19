@@ -14,8 +14,8 @@ enum class UpdateChannel(
     ),
     NIGHTLY(
         displayName = "Nightly",
-        apiUrl = "https://api.github.com/repos/shohamh/Iaido/releases/tags/nightly",
-        releaseTag = "nightly",
+        apiUrl = NIGHTLY_RELEASES_API_URL,
+        releaseTag = null,
     ),
 }
 

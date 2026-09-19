@@ -39,7 +39,9 @@ internal class GitHubReleaseMonitorClient(
                 ReleaseProbe.Unavailable
             } else {
                 checkResponse(connection)
-                parseReleaseProbe(readResponse(connection), channel)
+                selectReleaseJson(readResponse(connection), channel)
+                    ?.let { parseReleaseProbe(it, channel) }
+                    ?: ReleaseProbe.Unavailable
             }
         } finally {
             connection.disconnect()

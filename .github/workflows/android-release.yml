@@ -76,18 +76,27 @@ jobs:
           if [ "$RELEASE_CHANNEL" = "stable" ]; then
             gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/release/app-release.apk --verify-tag --generate-notes
           else
+            nightly_timestamp="$(TZ=Asia/Jerusalem date +%Y%m%d%H%M)"
+            nightly_tag="nightly-$nightly_timestamp"
+            nightly_title="Iaido Nightly $nightly_timestamp IDT/IST"
+            nightly_notes="Automated nightly build from main commit $GITHUB_SHA. Timestamp: $nightly_timestamp Israel time."
+
+            gh release create "$nightly_tag" app/build/outputs/apk/release/app-release.apk \
+              --target "$GITHUB_SHA" \
+              --title "$nightly_title" \
+              --prerelease \
+              --notes "$nightly_notes"
+
+            # Keep the old fixed tag working for already-installed nightly builds.
             if gh release view nightly >/dev/null 2>&1; then
               gh release upload nightly app/build/outputs/apk/release/app-release.apk --clobber
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" \
+                -F "sha=$GITHUB_SHA" \
+                -F "force=true"
               gh release edit nightly \
                 --target "$GITHUB_SHA" \
-                --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
-                --notes "Automated nightly build from main commit $GITHUB_SHA." \
+                --title "Legacy Iaido Nightly alias ($nightly_timestamp IDT/IST)" \
+                --notes "Compatibility alias for $nightly_tag, built from main commit $GITHUB_SHA. Use the timestamped nightly releases for history." \
                 --prerelease
-            else
-              gh release create nightly app/build/outputs/apk/release/app-release.apk \
-                --target "$GITHUB_SHA" \
-                --title "Iaido Nightly $GITHUB_RUN_NUMBER" \
-                --prerelease \
-                --notes "Automated nightly build from main commit $GITHUB_SHA."
             fi
           fi

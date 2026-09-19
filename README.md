@@ -22,12 +22,23 @@ rollback storage, and a compiled fallback when no update is available.
 .\gradlew.bat :core-engine:test :app:testDebugUnitTest :app:assembleDebug --no-daemon
 powershell -ExecutionPolicy Bypass -File tools\package_core_engine.ps1
 powershell -ExecutionPolicy Bypass -File tools\deploy_app.ps1 -DeviceSerial <adb-serial> -Build
+powershell -ExecutionPolicy Bypass -File tools\deploy_app.ps1 -TailscaleHost as-s25.tail555d2b.ts.net -TailscalePort 5555 -Build
+powershell -ExecutionPolicy Bypass -File tools\deploy_app.ps1 -UsbDeviceSerial <usb-adb-serial> -TailscaleHost as-s25.tail555d2b.ts.net -Build
 ```
 
 The package command writes ignored `dist/` outputs: the core-engine JAR, its
 SHA-256 checksum, and a versioned JSON manifest. Wireless ADB pairing is done
 once through Android Studio or `adb pair`; subsequent installs use the device
-serial passed to `deploy_app.ps1`.
+serial passed to `deploy_app.ps1`. For ADB over Tailscale, keep Tailscale
+connected on the phone, enable ADB TCP mode on port 5555, and pass its
+MagicDNS name with `-TailscaleHost` as shown above. If the phone uses another
+ADB port, pass that port with `-TailscalePort`.
+
+For a phone connected by USB with USB debugging enabled, use `-DeviceSerial`
+for a direct USB install. To bootstrap ADB TCP mode over USB and then continue
+through Tailscale, use `-UsbDeviceSerial` with the phone's USB ADB serial as
+shown above; the helper enables port 5555 before connecting to the Tailscale
+hostname.
 
 ## Keyboard profile migration
 

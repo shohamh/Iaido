@@ -95,7 +95,9 @@ class AppUpdateClient(
     ): AppUpdateResult {
         clearIncoming()
         val result = runCatching {
-            val release = parseRelease(readText(requestUrl))
+            val releaseJson = selectReleaseJson(readText(requestUrl), channel)
+                ?: error(APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON)
+            val release = parseRelease(releaseJson)
             if (release.isDraft || (channel == UpdateChannel.STABLE && release.isPrerelease)) {
                 error("Latest ${channel.displayName.lowercase()} release is not installable")
             }
