@@ -105,7 +105,9 @@ internal object TelemetryUploadScheduler {
             val request = OneTimeWorkRequestBuilder<TelemetryUploadWorker>()
                 .setInputData(workDataOf(INPUT_PLANE to plane.name))
                 .setConstraints(
-                    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
+                    Constraints.Builder()
+                        .setRequiredNetworkType(networkTypeFor(plane, researchWifiOnly(context)))
+                        .build(),
                 )
                 .setBackoffCriteria(
                     BackoffPolicy.EXPONENTIAL,
@@ -132,6 +134,36 @@ internal fun shouldScheduleTelemetry(endpoint: String, writeCredential: String?)
 
 internal fun telemetryWorkName(plane: TelemetryPlane): String =
     "iaido-telemetry-${plane.name.lowercase(Locale.ROOT)}"
+
+private const val RESEARCH_NETWORK_POLICY_PREFS = "telemetry_research_network_policy"
+private const val RESEARCH_WIFI_ONLY_KEY = "research_wifi_only"
+
+/**
+ * Whether research uploads should be constrained to unmetered Wi-Fi. Persisted independently of
+ * research consent (Task 6's plane isolation) in its own SharedPreferences file - toggling it
+ * never touches diagnostics' constraints, which always stay on NetworkType.CONNECTED. Defaults to
+ * true (Wi-Fi only) since research payloads are larger and more sensitive than diagnostics.
+ */
+internal fun researchWifiOnly(context: Context): Boolean =
+    context.applicationContext
+        .getSharedPreferences(RESEARCH_NETWORK_POLICY_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(RESEARCH_WIFI_ONLY_KEY, true)
+
+internal fun setResearchWifiOnly(context: Context, wifiOnly: Boolean) {
+    context.applicationContext
+        .getSharedPreferences(RESEARCH_NETWORK_POLICY_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(RESEARCH_WIFI_ONLY_KEY, wifiOnly)
+        .apply()
+}
+
+/**
+ * Upload network constraint for [plane]. Diagnostics always uses NetworkType.CONNECTED (any
+ * network); research defaults to NetworkType.UNMETERED (Wi-Fi only) unless the user has opted
+ * into uploading over metered connections via [researchWifiOnly].
+ */
+internal fun networkTypeFor(plane: TelemetryPlane, researchWifiOnly: Boolean): NetworkType =
+    if (plane == TelemetryPlane.RESEARCH && researchWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
 
 private const val INPUT_PLANE = "telemetry_plane"
 private const val TELEMETRY_QUEUE_DIRECTORY = "telemetry"

@@ -225,12 +225,14 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
     var diagnosticsBusy by remember { mutableStateOf(false) }
     var researchBusy by remember { mutableStateOf(false) }
     var showResearchConfirmation by remember { mutableStateOf(false) }
+    var researchWifiOnlyEnabled by remember { mutableStateOf(true) }
     val controller = remember(context) { buildTelemetryConsentController(context) }
 
     LaunchedEffect(Unit) {
         val preferences = context.settingsStore.data.first()
         diagnosticsRecord = diagnosticsConsentFromPreferences(preferences)
         researchRecord = researchConsentFromPreferences(preferences)
+        researchWifiOnlyEnabled = withContext(Dispatchers.IO) { researchWifiOnly(context) }
     }
 
     suspend fun refresh() {
@@ -282,6 +284,11 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         }
     }
 
+    fun setWifiOnly(wifiOnly: Boolean) {
+        researchWifiOnlyEnabled = wifiOnly
+        scope.launch { withContext(Dispatchers.IO) { setResearchWifiOnly(context, wifiOnly) } }
+    }
+
     HorizontalDivider()
     Text("Privacy & diagnostics", style = MaterialTheme.typography.titleMedium)
     Text("Both kinds of telemetry are off by default. You can turn either one off, or delete its data, at any time.")
@@ -309,6 +316,17 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         onDeletePending = { deletePending(TelemetryPlane.RESEARCH) },
         onDeleteUploaded = { deleteUploaded(TelemetryPlane.RESEARCH) },
     )
+
+    // Independent of research consent itself (Task 6's plane-isolation pattern): this only ever
+    // changes the research upload network constraint, never diagnostics', and never the consent
+    // record - it can be changed whether or not research is currently enabled.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("Upload research data on Wi-Fi only", style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = researchWifiOnlyEnabled, onCheckedChange = ::setWifiOnly)
+    }
 
     if (showResearchConfirmation) {
         AlertDialog(

@@ -211,6 +211,7 @@ class IaidoInputMethodService : InputMethodService() {
             mainHandler.post { learningDictionary.restore(persisted) }
         }
         correctionExecutor.execute { CoreEngineUpdateClient(applicationContext).checkAndInstall() }
+        runCatching { ResearchCorrectionRecorderProvider.initialize(applicationContext) }
         window.window?.decorView?.apply {
             setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
             setViewTreeSavedStateRegistryOwner(inputMethodLifecycleOwner)
@@ -784,6 +785,11 @@ class IaidoInputMethodService : InputMethodService() {
                     val current = correctionHistory.words().firstOrNull { it.id == source.id } ?: return@forEach
                     if (current.current != correction.before) return@forEach
                     if (replaceSessionWord(source.id, correction.after, preserveCursor = true)) {
+                        trackResearchCorrection(
+                            action = CorrectionAction.FLOW_CORRECTION,
+                            sourceText = correction.before,
+                            finalText = correction.after,
+                        )
                         recordLearning(
                             signal = LearningSignal.FLOW_CORRECTION,
                             original = correction.before,
@@ -844,6 +850,13 @@ class IaidoInputMethodService : InputMethodService() {
             DiagnosticsSuggestionAction.REPLACEMENT,
             if (released) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
         )
+        if (released) {
+            trackResearchCorrection(
+                action = CorrectionAction.CANDIDATE_SELECTED,
+                sourceText = option.sourceWords.joinToString(" "),
+                finalText = option.replacementWords.joinToString(" "),
+            )
+        }
         return released
     }
 
@@ -862,6 +875,14 @@ class IaidoInputMethodService : InputMethodService() {
             DiagnosticsSuggestionAction.SUGGESTION_PICK,
             if (changed) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
         )
+        if (changed) {
+            trackResearchCorrection(
+                action = CorrectionAction.CANDIDATE_SELECTED,
+                sourceText = word.current,
+                finalText = replacement,
+                candidates = chip.alternatives,
+            )
+        }
         if (changed && candidateIndex > 0 && activeLanguage == Language.ENGLISH) {
             recordLearning(
                 signal = LearningSignal.SUGGESTION_PICK,
@@ -880,6 +901,11 @@ class IaidoInputMethodService : InputMethodService() {
             if (undone) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
         )
         if (undone) {
+            trackResearchCorrection(
+                action = CorrectionAction.UNDO,
+                sourceText = word.current,
+                finalText = word.original,
+            )
             recordLearning(
                 signal = LearningSignal.FLOW_UNDO,
                 original = word.current,
@@ -898,6 +924,37 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun trackSuggestion(action: DiagnosticsSuggestionAction, outcome: DiagnosticsOutcome) {
         DiagnosticsTelemetryProvider.instance?.recordSuggestionAction(action, outcome)
+    }
+
+    // Research correction capture (Task 9): each call below fires once, at the natural completion
+    // of one discrete correction action (a candidate pick, an undo, a flow correction, a manual
+    // edit) - never from a per-touch/per-keystroke loop. ResearchCorrectionRecorder.record is
+    // already consent-gated and internally defensive; this wrapper adds a second layer so a
+    // failure here can never propagate into the correction/undo/replacement code paths above.
+    private fun trackResearchCorrection(
+        action: CorrectionAction,
+        sourceText: String,
+        finalText: String,
+        candidates: List<String> = emptyList(),
+    ) {
+        try {
+            ResearchCorrectionRecorderProvider.instance?.record(
+                CorrectionInput(
+                    action = action,
+                    sourceText = sourceText,
+                    finalText = finalText,
+                    candidates = candidates,
+                    algorithmVersion = ResearchCorrectionRecorder.CURRENT_ALGORITHM_VERSION,
+                    // No research trace is currently wired from gesture completion into this
+                    // service (see ResearchTraceRecorder's doc comment - that wiring is separate,
+                    // future work), so there is never a real trace id to attach here. Leaving this
+                    // null rather than fabricating one matches the brief's explicit fallback.
+                    traceId = null,
+                ),
+            )
+        } catch (_: Exception) {
+            // Research correction capture is best effort and must never affect keyboard behavior.
+        }
     }
 
     private fun wordForDisplayIndex(displayIndex: Int) =
@@ -936,6 +993,11 @@ class IaidoInputMethodService : InputMethodService() {
     private fun confirmManualEdit() {
         val candidate = pendingManualEdit.value ?: return
         if (candidate.original != candidate.replacement) {
+            trackResearchCorrection(
+                action = CorrectionAction.MANUAL_EDIT,
+                sourceText = candidate.original,
+                finalText = candidate.replacement,
+            )
             recordLearning(
                 signal = LearningSignal.MANUAL_EDIT,
                 original = candidate.original,
