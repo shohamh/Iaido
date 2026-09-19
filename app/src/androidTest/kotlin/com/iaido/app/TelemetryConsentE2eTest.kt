@@ -96,23 +96,17 @@ class TelemetryConsentE2eTest {
 
             if (endpointConfigured) {
                 assertFalse(
-                    "Diagnostics should start disabled",
-                    waitForSwitchNear(device, diagnosticsLabel).isChecked,
+                    "Diagnostics should start disabled (${stateDump(device, diagnosticsLabel)})",
+                    awaitToggle(device, diagnosticsLabel)?.isChecked ?: false,
                 )
                 val enabled = runCatching { toggleUntil(device, diagnosticsLabel, expected = true) }
                 if (enabled.isFailure) {
                     val stored = runBlocking {
                         diagnosticsConsentFromPreferences(context.settingsStore.data.first())
                     }
-                    val toggles = device.findObjects(By.checkable(true)).map {
-                        "${it.visibleBounds.toShortString()} checked=${it.isChecked} enabled=${it.isEnabled}"
-                    }
-                    val labelBounds = device.findObject(By.text(diagnosticsLabel))?.visibleBounds?.toShortString()
-                    val researchBounds = device.findObject(By.text(researchLabel))?.visibleBounds?.toShortString()
                     throw AssertionError(
-                        "Diagnostics toggle never enabled; stored=$stored diagnosticsLabel=$labelBounds " +
-                            "researchLabel=$researchBounds display=${device.displayWidth}x${device.displayHeight} " +
-                            "toggles=$toggles",
+                        "Diagnostics toggle never enabled; stored=$stored " +
+                            stateDump(device, diagnosticsLabel) + " " + stateDump(device, researchLabel),
                         enabled.exceptionOrNull(),
                     )
                 }
@@ -125,15 +119,15 @@ class TelemetryConsentE2eTest {
                 )
             } else {
                 assertTrue(
-                    "Seeded diagnostics consent should render as enabled",
-                    waitUntil(10_000L) { waitForSwitchNear(device, diagnosticsLabel).isChecked },
+                    "Seeded diagnostics consent should render as enabled (${stateDump(device, diagnosticsLabel)})",
+                    waitUntil(10_000L) { awaitToggle(device, diagnosticsLabel)?.isChecked == true },
                 )
             }
 
             scrollToText(device, researchLabel)
             assertFalse(
-                "Enabling diagnostics must never enable research consent",
-                waitForSwitchNear(device, researchLabel).isChecked,
+                "Enabling diagnostics must never enable research consent (${stateDump(device, researchLabel)})",
+                awaitToggle(device, researchLabel)?.isChecked ?: false,
             )
 
             scrollToText(device, diagnosticsLabel)
@@ -154,7 +148,7 @@ class TelemetryConsentE2eTest {
                 var failureShown = false
                 repeat(5) {
                     if (failureShown) return@repeat
-                    waitForSwitchNear(device, diagnosticsLabel).click()
+                    awaitToggle(device, diagnosticsLabel)?.let { clickToggleCenter(device, it) }
                     failureShown = waitUntil(3_000L) {
                         device.hasObject(By.textContains("Could not set up diagnostics telemetry"))
                     }
@@ -164,8 +158,9 @@ class TelemetryConsentE2eTest {
                     failureShown,
                 )
                 assertFalse(
-                    "Diagnostics consent must never be shown as enabled without a collector",
-                    waitForSwitchNear(device, diagnosticsLabel).isChecked,
+                    "Diagnostics consent must never be shown as enabled without a collector " +
+                        "(${stateDump(device, diagnosticsLabel)})",
+                    awaitToggle(device, diagnosticsLabel)?.isChecked ?: false,
                 )
                 assertFalse(
                     "Diagnostics consent must not be persisted as enabled without a collector",
@@ -240,30 +235,80 @@ class TelemetryConsentE2eTest {
     /**
      * Clicks the toggle for [label] until its checked state equals [expected], retrying a bounded
      * number of times. A tap issued while the settings list is still settling (scroll momentum or
-     * recomposition), or while the toggle is disabled because a previous consent change is still
-     * running, is swallowed - so each attempt re-scrolls to the row, waits for the toggle to be
-     * enabled, and re-checks the observable state instead of assuming one tap landed.
+     * recomposition), a row that is momentarily laid out without its toggle, or a toggle disabled
+     * because a previous consent change is still running would otherwise be read as "the tap did
+     * not work" - so each attempt re-locates the row, waits for the toggle to be enabled, and
+     * re-checks the observable state instead of assuming one tap landed.
      */
     private fun toggleUntil(device: UiDevice, label: String, expected: Boolean) {
         repeat(6) {
-            scrollToText(device, label)
-            device.waitForIdle()
-            if (waitForSwitchNear(device, label).isChecked == expected) return
-            waitUntil(5_000L) { waitForSwitchNear(device, label).isEnabled }
-            clickToggleCenter(device, waitForSwitchNear(device, label))
+            val toggle = awaitToggle(device, label) ?: return@repeat
+            if (toggle.isChecked == expected) return
+            if (!toggle.isEnabled) waitUntil(5_000L) { awaitToggle(device, label)?.isEnabled == true }
+            clickToggleCenter(device, awaitToggle(device, label) ?: toggle)
             assertNoResearchDialog(device)
             // Enabling a plane can involve a provisioning round trip to the collector, so give the
             // expected state a long window before deciding the tap was swallowed - clicking again
             // while a consent change is still in flight would revoke it and leave the test racing
             // the app instead of asserting it.
-            if (waitUntil(20_000L) { waitForSwitchNear(device, label).isChecked == expected }) return
-            waitUntil(15_000L) { waitForSwitchNear(device, label).isEnabled }
+            if (waitUntil(20_000L) { awaitToggle(device, label)?.isChecked == expected }) return
+            waitUntil(15_000L) { awaitToggle(device, label)?.isEnabled == true }
         }
-        assertEquals(
-            "Toggle '$label' never reached checked=$expected",
-            expected,
-            waitForSwitchNear(device, label).isChecked,
+        assertTrue(
+            "Toggle '$label' never reached checked=$expected (${stateDump(device, label)})",
+            awaitToggle(device, label)?.isChecked == expected,
         )
+    }
+
+    /**
+     * Locates the toggle for [label], scrolling and nudging the list until the row's own toggle is
+     * laid out. Returns null only after the budget is spent - callers assert on the state rather
+     * than on one particular moment of a settling list.
+     */
+    private fun awaitToggle(device: UiDevice, label: String, timeoutMs: Long = 8_000L): UiObject2? {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var nudges = 0
+        while (true) {
+            scrollToText(device, label)
+            findToggle(device, label)?.let { return it }
+            if (SystemClock.elapsedRealtime() >= deadline || nudges >= 4) return null
+            nudgeList(device)
+            nudges += 1
+        }
+    }
+
+    /**
+     * Finds the toggle on the same row as the given label, or null when the label or its toggle is
+     * not laid out. Compose's `Switch` does not report itself as `android.widget.Switch`, so this
+     * matches the checkable semantics the toggle exposes and requires a vertical overlap with the
+     * label's own row. There is no fallback to "nearest" toggle: the research toggle sits one row
+     * away, and clicking it opens a confirmation dialog instead of changing diagnostics consent.
+     */
+    private fun findToggle(device: UiDevice, label: String): UiObject2? {
+        val labelNode = device.wait(Until.findObject(By.text(label)), 2_000L) ?: return null
+        val labelBounds = labelNode.visibleBounds
+        val labelCenterY = labelNode.visibleCenter.y
+        return device.findObjects(By.checkable(true))
+            .filter { it.visibleBounds.top < labelBounds.bottom && it.visibleBounds.bottom > labelBounds.top }
+            .minByOrNull { abs(it.visibleCenter.y - labelCenterY) }
+    }
+
+    /** Moves the list by a fraction of its height, to bring a row's toggle out of a clipped edge. */
+    private fun nudgeList(device: UiDevice) {
+        val area = runCatching { device.findObject(By.scrollable(true))?.visibleBounds }.getOrNull() ?: return
+        val x = (area.left + area.right) / 2
+        val start = area.top + (area.height() * 0.55f).toInt()
+        device.swipe(x, start, x, start - (area.height() * 0.12f).toInt(), 20)
+        device.waitForIdle()
+    }
+
+    /** Diagnostic snapshot for a failing assertion: label bounds, every checkable, and screen size. */
+    private fun stateDump(device: UiDevice, label: String): String {
+        val labelBounds = device.findObject(By.text(label))?.visibleBounds?.toShortString()
+        val toggles = device.findObjects(By.checkable(true)).map {
+            "${it.visibleBounds.toShortString()} checked=${it.isChecked} enabled=${it.isEnabled}"
+        }
+        return "label=$label/$labelBounds display=${device.displayWidth}x${device.displayHeight} toggles=$toggles"
     }
 
     /**
@@ -276,27 +321,6 @@ class TelemetryConsentE2eTest {
         val bounds = toggle.visibleBounds
         device.click(bounds.centerX(), bounds.centerY())
         device.waitForIdle()
-    }
-
-    /**
-     * Finds the toggle on the same row as the given label. Compose's `Switch` does not report
-     * itself as `android.widget.Switch`, so this matches the checkable semantics the toggle
-     * exposes and requires a vertical overlap with the label's own row. There is no fallback to
-     * "nearest" toggle: the research toggle sits one row away, and clicking it opens a
-     * confirmation dialog instead of changing diagnostics consent - a wrong node must fail loudly
-     * rather than silently toggling a different plane.
-     */
-    private fun waitForSwitchNear(device: UiDevice, label: String): UiObject2 {
-        val labelNode = device.wait(Until.findObject(By.text(label)), 5_000L)
-            ?: error("Could not find the '$label' label")
-        val labelBounds = labelNode.visibleBounds
-        val labelCenterY = labelNode.visibleCenter.y
-        val toggle = device.findObjects(By.checkable(true))
-            .filter { it.visibleBounds.top < labelBounds.bottom && it.visibleBounds.bottom > labelBounds.top }
-            .minByOrNull { abs(it.visibleCenter.y - labelCenterY) }
-        return requireNotNull(toggle) {
-            "No toggle on the same row as '$label' (label=${labelBounds.toShortString()})"
-        }
     }
 
     /**
