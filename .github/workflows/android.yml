@@ -72,9 +72,9 @@ jobs:
             # Run one class per gradle invocation: a class that wedges the emulator, or a failure
             # that leaves the harness in a bad state, then costs that class only - the results of
             # every earlier class are already on disk and get reported.
-            classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin |
-              sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' |
-              sort)
+            classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin \
+              | sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' \
+              | sort)
             echo "Instrumented classes:"; echo "$classes"
             failed=""
             for class in $classes; do
