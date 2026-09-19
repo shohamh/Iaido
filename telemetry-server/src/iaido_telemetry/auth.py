@@ -31,13 +31,13 @@ def bearer_credential(request: Request) -> str:
     return credential
 
 
-def browser_credential(request: Request) -> str:
-    """Operator credential from either `Bearer <token>` or HTTP Basic `<any>:<token>`.
+def basic_or_bearer(request: Request) -> tuple[str | None, str]:
+    """Split an operator credential into `(username, secret)`.
 
-    The Basic form exists for the operator dashboard, which is opened in a browser and cannot set
-    an `Authorization: Bearer` header by hand. The username is ignored and the password is
-    compared to the operator token, so no second secret exists and a browser credential prompt is
-    the only UI needed.
+    `Bearer <token>` yields `(None, token)`, so the operator API keeps its single-token contract.
+    HTTP Basic `<username>:<password>` yields `(username, password)`, which the dashboard uses for
+    its own login; a browser sends Basic natively, so there is no session, cookie, or login form
+    to secure. The username is only meaningful for Basic - a Bearer request never carries one.
     """
     header = request.headers.get("Authorization", "")
     scheme, _, credential = header.partition(" ")
@@ -46,11 +46,11 @@ def browser_credential(request: Request) -> str:
             decoded = base64.b64decode(credential + "=" * (-len(credential) % 4)).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             decoded = ""
-        _, _, password = decoded.partition(":")
-        if password:
-            return password
-    if scheme.lower() == "bearer" and credential:
-        return credential
+        username, separator, password = decoded.partition(":")
+        if separator and username and password:
+            return username, password
+    elif scheme.lower() == "bearer" and credential:
+        return None, credential
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Operator credential required",

@@ -20,6 +20,8 @@ in code -- everything below is read from the process environment at startup
 |---|---|---|---|
 | `IAIDO_DATABASE_URL` | yes | -- | SQLAlchemy URL for the metadata database. Production must be `postgresql+psycopg://...`; anything else fails `validate_production()`. |
 | `IAIDO_OPERATOR_TOKEN` | yes | -- | Bearer token operators use for `/v1/operator/*` routes (batch listing, deletion, export, aggregates). Rotate by redeploying with a new value; there is no in-band rotation endpoint. |
+| `IAIDO_DASHBOARD_USERNAME` | no | `iaido` | Username for the operator dashboard's browser login. |
+| `IAIDO_DASHBOARD_PASSWORD` | no | `""` (reuses `IAIDO_OPERATOR_TOKEN`) | Password for the operator dashboard's browser login; at least 12 characters when set. Leave empty to reuse the operator token rather than introduce a second, possibly weaker, secret. Bearer access to `/v1/operator/*` always uses `IAIDO_OPERATOR_TOKEN` regardless of this value. |
 | `IAIDO_S3_ENDPOINT_URL` | yes (prod) | `""` | S3-compatible endpoint (MinIO locally) for the `diagnostics/` and `research/` object prefixes. |
 | `IAIDO_S3_BUCKET` | yes (prod) | `""` | Bucket that holds both prefixes. |
 | `IAIDO_S3_ACCESS_KEY` | yes (prod) | `""` | S3 access key. |
@@ -210,11 +212,22 @@ diagnostics aggregate facts, and the audit log.
 `GET /batches/{plane}/{installation_id}/{batch_id}` shows one batch's envelope fields and every
 stored payload.
 
-Authentication is the operator token, accepted either as `Authorization: Bearer <token>` or as
-HTTP Basic - any username, the token as the password - so a browser can prompt for it directly:
+Authentication is HTTP Basic with the configured dashboard login - `IAIDO_DASHBOARD_USERNAME`
+(default `iaido`) and `IAIDO_DASHBOARD_PASSWORD` (default: the operator token) - so a browser can
+prompt for it directly. `Authorization: Bearer <operator token>` also works, for scripts. A
+dashboard password set through the environment must be at least 12 characters; leaving it empty
+reuses the operator token instead of introducing a second, possibly weaker, secret.
 
 ```
-https://<your-host>/        # the browser prompts; the username is ignored
+https://<your-host>/        # the browser prompts for username and password
+```
+
+Changing the login on a running deployment is one environment change and a redeploy:
+
+```bash
+export IAIDO_DASHBOARD_USERNAME=iaido
+export IAIDO_DASHBOARD_PASSWORD='<at least 12 characters>'
+docker compose up -d telemetry
 ```
 
 Notes:

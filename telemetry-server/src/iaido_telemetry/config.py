@@ -3,11 +3,20 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# A deployment-set dashboard password must not be trivially guessable on a public dashboard;
+# leaving it unset reuses the operator token instead, which is always generated.
+MIN_DASHBOARD_PASSWORD_LENGTH = 12
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str
     operator_token: str
+    # Dashboard login. The password defaults to the operator token, so a deployment that sets
+    # nothing gains no new (and no weaker) secret; set IAIDO_DASHBOARD_PASSWORD to give the
+    # browser login its own credential.
+    dashboard_username: str = "iaido"
+    dashboard_password: str = ""
     s3_endpoint_url: str = ""
     s3_bucket: str = ""
     s3_access_key: str = ""
@@ -28,6 +37,14 @@ class Settings:
             raise ValueError("database_url is required")
         if not self.operator_token:
             raise ValueError("operator_token is required")
+        if not self.dashboard_username:
+            raise ValueError("dashboard_username must not be empty")
+        if self.dashboard_password and len(self.dashboard_password) < MIN_DASHBOARD_PASSWORD_LENGTH:
+            raise ValueError(
+                "dashboard_password must be at least "
+                f"{MIN_DASHBOARD_PASSWORD_LENGTH} characters when set (leave it empty to reuse "
+                "the operator token)"
+            )
         if self.max_request_bytes <= 0:
             raise ValueError("max_request_bytes must be positive")
         if self.rate_limit_requests <= 0:
@@ -52,6 +69,11 @@ class Settings:
                 f"{self.DEFAULT_RESEARCH_RETENTION_DAYS} (deployment config may only "
                 "shorten the default retention, never lengthen it)"
             )
+
+    @property
+    def effective_dashboard_password(self) -> str:
+        """Password the dashboard accepts: the operator token unless one is configured."""
+        return self.dashboard_password or self.operator_token
 
     def validate_production(self) -> None:
         if not self.database_url.startswith("postgresql+psycopg://"):
@@ -88,6 +110,8 @@ class Settings:
         settings = cls(
             database_url=database_url,
             operator_token=operator_token,
+            dashboard_username=os.environ.get("IAIDO_DASHBOARD_USERNAME", "iaido"),
+            dashboard_password=os.environ.get("IAIDO_DASHBOARD_PASSWORD", ""),
             s3_endpoint_url=os.environ.get("IAIDO_S3_ENDPOINT_URL", ""),
             s3_bucket=os.environ.get("IAIDO_S3_BUCKET", ""),
             s3_access_key=os.environ.get("IAIDO_S3_ACCESS_KEY", ""),

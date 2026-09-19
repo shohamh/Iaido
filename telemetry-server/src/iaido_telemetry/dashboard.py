@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from .auth import browser_credential, credentials_match
+from .auth import basic_or_bearer, credentials_match
 from .config import Settings
 from .db import TelemetryRepository
 from .storage import ObjectStorage
@@ -255,8 +255,14 @@ def register_dashboard(
     """Register the operator dashboard routes on [app]."""
 
     def require_operator(request: Request) -> None:
-        credential = browser_credential(request)
-        if not credentials_match(credential, settings.operator_token):
+        username, credential = basic_or_bearer(request)
+        if username is None:
+            authorized = credentials_match(credential, settings.operator_token)
+        else:
+            authorized = credentials_match(
+                username, settings.dashboard_username
+            ) and credentials_match(credential, settings.effective_dashboard_password)
+        if not authorized:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid operator credential",

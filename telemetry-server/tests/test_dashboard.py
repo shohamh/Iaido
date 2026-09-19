@@ -1,19 +1,26 @@
 import base64
+import dataclasses
 
 import pytest
+from fastapi.testclient import TestClient
 
-from conftest import envelope, queue_batch_id
+from iaido_telemetry.config import MIN_DASHBOARD_PASSWORD_LENGTH, Settings
+
+from conftest import build_test_app, envelope, queue_batch_id
 
 
 OPERATOR_TOKEN = "operator-test-token"
-BASIC = {
-    "Authorization": "Basic "
-    + base64.b64encode(f"operator:{OPERATOR_TOKEN}".encode("utf-8")).decode("ascii")
-}
-WRONG_BASIC = {
-    "Authorization": "Basic "
-    + base64.b64encode(b"operator:not-the-token").decode("ascii")
-}
+DEFAULT_USERNAME = "iaido"
+
+
+def basic(username: str, password: str) -> dict[str, str]:
+    encoded = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {encoded}"}
+
+
+BASIC = basic(DEFAULT_USERNAME, OPERATOR_TOKEN)
+WRONG_PASSWORD = basic(DEFAULT_USERNAME, "not-the-token")
+WRONG_USERNAME = basic("operator", OPERATOR_TOKEN)
 
 
 def post_diagnostics(client, installation, headers, sequence: int = 1):
@@ -60,10 +67,44 @@ def test_dashboard_requires_an_operator_credential(client):
     assert "basic" in response.headers["www-authenticate"].lower()
 
 
-def test_dashboard_rejects_a_wrong_operator_credential(client):
-    response = client.get("/", headers=WRONG_BASIC)
+def test_dashboard_rejects_wrong_username_or_password(client):
+    assert client.get("/", headers=WRONG_PASSWORD).status_code == 401
+    assert client.get("/", headers=WRONG_USERNAME).status_code == 401
 
-    assert response.status_code == 401
+
+def test_dashboard_uses_a_configured_login_instead_of_the_operator_token(
+    settings, object_root
+):
+    configured = dataclasses.replace(
+        settings, dashboard_username="dash", dashboard_password="correct-horse-battery-staple"
+    )
+    with TestClient(
+        build_test_app(configured, object_root), base_url="https://testserver"
+    ) as configured_client:
+        assert (
+            configured_client.get(
+                "/", headers=basic("dash", "correct-horse-battery-staple")
+            ).status_code
+            == 200
+        )
+        # The dashboard password replaces the operator token for Basic; the token itself still
+        # works as a Bearer credential on the operator API contract.
+        assert configured_client.get("/", headers=basic("dash", OPERATOR_TOKEN)).status_code == 401
+        assert configured_client.get(
+            "/", headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"}
+        ).status_code == 200
+
+
+def test_settings_reject_a_trivially_short_dashboard_password(settings):
+    with pytest.raises(ValueError, match="dashboard_password"):
+        dataclasses.replace(settings, dashboard_password="short")
+    with pytest.raises(ValueError, match="dashboard_username"):
+        dataclasses.replace(settings, dashboard_username="")
+
+    assert Settings(
+        database_url=settings.database_url, operator_token=OPERATOR_TOKEN
+    ).effective_dashboard_password == OPERATOR_TOKEN
+    assert MIN_DASHBOARD_PASSWORD_LENGTH > 0
 
 
 def test_dashboard_lists_both_planes_separately(
