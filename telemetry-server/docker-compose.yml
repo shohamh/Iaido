@@ -1,0 +1,93 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: iaido_telemetry
+      POSTGRES_USER: iaido
+      POSTGRES_PASSWORD: ${IAIDO_POSTGRES_PASSWORD:?set IAIDO_POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iaido -d iaido_telemetry"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${IAIDO_S3_ACCESS_KEY:?set IAIDO_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${IAIDO_S3_SECRET_KEY:?set IAIDO_S3_SECRET_KEY}
+    volumes:
+      - object-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${IAIDO_S3_ACCESS_KEY:?set IAIDO_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${IAIDO_S3_SECRET_KEY:?set IAIDO_S3_SECRET_KEY}
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing local/iaido-telemetry
+
+  telemetry:
+    image: python:3.13-slim
+    working_dir: /service
+    command:
+      - /bin/sh
+      - -ec
+      # `--forwarded-allow-ips=*` is required behind the reverse proxy that terminates TLS: the
+      # proxy connects from the Docker gateway (not 127.0.0.1), so uvicorn's default trust list
+      # would drop the proxy's `X-Forwarded-Proto: https` and every `/v1/` request would be
+      # rejected with 426 by IngestionBoundaryMiddleware. The published port is host-local only
+      # (see the deployment docs), so only the local proxy can reach it.
+      #
+      # `--reload` (scoped to the mounted source) makes this local stack hot reloadable: editing a
+      # module under `src/` restarts the worker in a second or two, which is why the source mount
+      # above must stay writable. Production deployments run without `--reload`.
+      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=* --reload --reload-dir /service/src
+    environment:
+      IAIDO_DATABASE_URL: postgresql+psycopg://iaido:${IAIDO_POSTGRES_PASSWORD}@postgres:5432/iaido_telemetry
+      IAIDO_S3_ENDPOINT_URL: http://minio:9000
+      IAIDO_S3_BUCKET: iaido-telemetry
+      IAIDO_S3_ACCESS_KEY: ${IAIDO_S3_ACCESS_KEY}
+      IAIDO_S3_SECRET_KEY: ${IAIDO_S3_SECRET_KEY}
+      IAIDO_S3_REGION: ${IAIDO_S3_REGION:-us-east-1}
+      IAIDO_OPERATOR_TOKEN: ${IAIDO_OPERATOR_TOKEN:?set IAIDO_OPERATOR_TOKEN in the server environment}
+      IAIDO_DASHBOARD_USERNAME: ${IAIDO_DASHBOARD_USERNAME:-iaido}
+      IAIDO_DASHBOARD_PASSWORD: ${IAIDO_DASHBOARD_PASSWORD:-}
+      IAIDO_MAX_REQUEST_BYTES: ${IAIDO_MAX_REQUEST_BYTES:-262144}
+      IAIDO_RATE_LIMIT_REQUESTS: ${IAIDO_RATE_LIMIT_REQUESTS:-120}
+      IAIDO_RATE_LIMIT_WINDOW_SECONDS: ${IAIDO_RATE_LIMIT_WINDOW_SECONDS:-60}
+      IAIDO_RATE_LIMIT_MAX_BUCKETS: ${IAIDO_RATE_LIMIT_MAX_BUCKETS:-10000}
+    volumes:
+      # Writable: the start command runs `pip install -e .`, which writes build metadata
+      # (`*.egg-info`, `build/`) into the mounted source tree. With `:ro` the container exits
+      # immediately with "Cannot update time stamp of directory 'src/iaido_telemetry.egg-info'".
+      - .:/service
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  object-data:

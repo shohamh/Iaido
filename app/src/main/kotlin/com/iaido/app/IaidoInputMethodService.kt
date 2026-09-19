@@ -57,6 +57,17 @@ class IaidoInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private val inputMethodLifecycleOwner = InputMethodLifecycleOwner()
     private var sessionId = 0
+    /**
+     * Opt-in research capture (Task 9). [researchTraceRecorder] is the service's single in-memory
+     * touch-trace buffer, handed to every rendered keyboard view; it resets itself on every
+     * `finish`, so one instance covers the whole service lifetime. [researchTraceId] is the most
+     * recent typing gesture's trace id, attached to a later correction of the text that gesture
+     * produced - never fabricated, and cleared at session boundaries.
+     */
+    private val researchTraceRecorder = ResearchTraceRecorder(
+        enabled = { ResearchCorrectionRecorderProvider.isEnabled() },
+    )
+    private var researchTraceId: String? = null
     private val languageSwitcher = LanguageSwitcher()
     private var activeLanguage = Language.ENGLISH
     internal var spacingModeForTypingCoordinator = SpacingMode.INFER_SPACES
@@ -78,6 +89,8 @@ class IaidoInputMethodService : InputMethodService() {
     private val pendingManualEdit = mutableStateOf<ManualEditCandidate?>(null)
     private val editorTextChangeDetector = EditorTextChangeDetector()
     private var textObservationEnabled = false
+    /** Tracks the word being typed so it becomes an addressable session word like a swiped one. */
+    private val typedWords = TypedWordTracker()
     private var visibleWordIds: List<Int> = emptyList()
     // Recomputed only when correctionHistory actually changes (inside refreshSuggestionChips()),
     // not on every mergedReplacementOptions() call -- a live reel-drag preview fires
@@ -211,6 +224,7 @@ class IaidoInputMethodService : InputMethodService() {
             mainHandler.post { learningDictionary.restore(persisted) }
         }
         correctionExecutor.execute { CoreEngineUpdateClient(applicationContext).checkAndInstall() }
+        runCatching { ResearchCorrectionRecorderProvider.initialize(applicationContext) }
         window.window?.decorView?.apply {
             setViewTreeLifecycleOwner(inputMethodLifecycleOwner)
             setViewTreeSavedStateRegistryOwner(inputMethodLifecycleOwner)
@@ -229,12 +243,15 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
+        DiagnosticsTelemetryProvider.instance?.recordImeSessionStart()
         swipeTypingCoordinator.onNonSwipeInput()
         super.onStartInputView(info, restarting)
         val runtimeRevision = beginRuntimeRevision()
         if (currentInputConnection != null) runtimeReadiness.markInputConnectionBound(runtimeRevision)
         info?.hintLocales = LocaleList.forLanguageTags(activeLanguage.localeTag)
         sessionId += 1
+        researchTraceId = null
+        typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -255,10 +272,16 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        DiagnosticsTelemetryProvider.instance?.let {
+            it.recordImeSessionFinish()
+            it.flush()
+        }
         swipeTypingCoordinator.onNonSwipeInput()
         super.onFinishInputView(finishingInput)
         inputMethodLifecycleOwner.onFinishInputView()
         sessionId += 1
+        researchTraceId = null
+        typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
         splitPreview.value = null
@@ -326,9 +349,11 @@ class IaidoInputMethodService : InputMethodService() {
                             mainHandler.post {
                                 if (sessionId != expectedSession || activeLanguage != language) return@post
                                 if (results.isEmpty()) {
+                                    trackGesture(DiagnosticsGestureKind.SWIPE, DiagnosticsOutcome.REJECTED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     return@post
                                 }
+                                trackGesture(DiagnosticsGestureKind.SWIPE, DiagnosticsOutcome.ACCEPTED)
                                 rememberCandidatesForCommittedSwipe(results)
                                 swipeTypingCoordinator.onRecognizedSingleSwipe(path, results)
                                 typingController.markSwipeCommitted()
@@ -350,12 +375,14 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onPunctuationToSpace = { punctuation ->
                         swipeTypingCoordinator.onNonSwipeInput()
+                        trackGesture(DiagnosticsGestureKind.PUNCTUATION, DiagnosticsOutcome.ACCEPTED)
                         typingController.punctuationToSpace(punctuation)
                     },
                     language = activeLanguage,
                     onLanguageSwitch = ::switchLanguage,
                     onCommand = { trigger ->
                         swipeTypingCoordinator.onNonSwipeInput()
+                        trackGesture(DiagnosticsGestureKind.COMMAND, DiagnosticsOutcome.ACCEPTED)
                         handleCommand(trigger)
                     },
                     suggestionChips = sessionChips.value,
@@ -403,6 +430,7 @@ class IaidoInputMethodService : InputMethodService() {
                                 is SplitPollOutcome.Resolved -> result.parts
                                 SplitPollOutcome.Pending -> return@postDelayed
                                 SplitPollOutcome.Cancelled -> {
+                                    trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     splitPreview.value = null
                                     return@postDelayed
@@ -414,10 +442,12 @@ class IaidoInputMethodService : InputMethodService() {
                                 mainHandler.post {
                                     if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@post
                                     if (candidates.any { it.isEmpty() }) {
+                                        trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.REJECTED)
                                         swipeTypingCoordinator.onRecognitionFailed()
                                         splitPreview.value = null
                                         return@post
                                     }
+                                    trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.ACCEPTED)
                                     rememberCandidatesForCommittedSwipe(candidates.flatten())
                                     if (parts.paths.size == 1) {
                                         swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
@@ -432,6 +462,7 @@ class IaidoInputMethodService : InputMethodService() {
                     },
                     onSplitCancel = {
                         splitController.cancel()
+                        trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                         swipeTypingCoordinator.onRecognitionFailed()
                         splitPreview.value = null
                     },
@@ -440,6 +471,8 @@ class IaidoInputMethodService : InputMethodService() {
                     manualEditCandidate = pendingManualEdit.value,
                     onConfirmManualEdit = ::confirmManualEdit,
                     onDismissManualEdit = { pendingManualEdit.value = null },
+                    researchTraceRecorder = researchTraceRecorder,
+                    onResearchTraceCaptured = ::onResearchTraceCaptured,
                 )
             }
         }
@@ -636,6 +669,9 @@ class IaidoInputMethodService : InputMethodService() {
     private fun commitText(text: String) {
         val inputConnection = currentInputConnection ?: return
         val start = cursorPosition
+        // A commit that carries recognition candidates is a swiped word, which is recorded from
+        // those candidates below; everything else is the user typing.
+        val swipedWord = pendingCandidates != null
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, start, text)
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
@@ -653,12 +689,40 @@ class IaidoInputMethodService : InputMethodService() {
             pendingCandidates = null
             scheduleFlowCorrection()
         }
+        if (swipedWord) {
+            typedWords.reset()
+        } else {
+            val closed = typedWords.onCommitted(text, cursorBefore = start, cursorAfter = cursorPosition)
+            updateTypedWord(closed ?: typedWords.openSpan())
+        }
         refreshSuggestionChips()
+    }
+
+    /**
+     * Mirrors a typed word into the session history so every correction path a swiped word already
+     * gets - suggestion chips, the replacement reel, flow correction, learning - can address it.
+     *
+     * The word is re-recorded as it grows (the entry for the same span is dropped first, so one
+     * typed word is always exactly one session word), because the strip has to offer corrections
+     * for a word the user is still typing: recording it only when it closed left the reel with
+     * nothing to release, which is how a release either did nothing or inserted its candidate at
+     * the caret instead of replacing the word ("Hiiiiiiii").
+     */
+    private fun updateTypedWord(span: TypedWordSpan?) {
+        if (span == null || span.word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH) return
+        correctionHistory.deleteRange(span.start, span.end)
+        correctionHistory.record(
+            start = span.start,
+            end = span.end,
+            original = span.word,
+            candidates = typedWordCandidates(span.word, activeDictionary()),
+        )
     }
 
     private fun deleteSurroundingText(count: Int) {
         val inputConnection = currentInputConnection ?: return
         val oldCursor = cursorPosition
+        typedWords.onDeleted(count, cursorBefore = oldCursor)
         if (textObservationEnabled) {
             editorTextChangeDetector.expectOwnEdit(
                 start = (oldCursor - count).coerceAtLeast(0),
@@ -771,6 +835,11 @@ class IaidoInputMethodService : InputMethodService() {
                     val current = correctionHistory.words().firstOrNull { it.id == source.id } ?: return@forEach
                     if (current.current != correction.before) return@forEach
                     if (replaceSessionWord(source.id, correction.after, preserveCursor = true)) {
+                        trackResearchCorrection(
+                            action = CorrectionAction.FLOW_CORRECTION,
+                            sourceText = correction.before,
+                            finalText = correction.after,
+                        )
                         recordLearning(
                             signal = LearningSignal.FLOW_CORRECTION,
                             original = correction.before,
@@ -812,6 +881,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(first.start, second.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
         correctionHistory.join(firstId, secondId, replacement)
+        typedWords.reset()
         cursorPosition = first.start + replacement.length
         inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips()
@@ -821,11 +891,24 @@ class IaidoInputMethodService : InputMethodService() {
     private fun releaseReplacementOption(option: ReplacementOption): Boolean {
         val historyMatch = correctionHistory.aroundCursor(cursorPosition).zipWithNext()
             .firstOrNull { (first, second) -> listOf(first.current, second.current) == option.sourceWords }
-        if (historyMatch != null) {
+        val released = if (historyMatch != null) {
             val (first, second) = historyMatch
-            return joinSessionWords(first.id, second.id, option.replacementWords.joinToString(" "))
+            joinSessionWords(first.id, second.id, option.replacementWords.joinToString(" "))
+        } else {
+            swipeTypingCoordinator.releaseReplacement(option)
         }
-        return swipeTypingCoordinator.releaseReplacement(option)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.REPLACEMENT,
+            if (released) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
+        if (released) {
+            trackResearchCorrection(
+                action = CorrectionAction.CANDIDATE_SELECTED,
+                sourceText = option.sourceWords.joinToString(" "),
+                finalText = option.replacementWords.joinToString(" "),
+            )
+        }
+        return released
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
@@ -839,6 +922,18 @@ class IaidoInputMethodService : InputMethodService() {
         )
         val replacement = displayCandidateForIndex(chip, candidateIndex) ?: return
         val changed = replaceSessionWord(word.id, replacement)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.SUGGESTION_PICK,
+            if (changed) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
+        if (changed) {
+            trackResearchCorrection(
+                action = CorrectionAction.CANDIDATE_SELECTED,
+                sourceText = word.current,
+                finalText = replacement,
+                candidates = chip.alternatives,
+            )
+        }
         if (changed && candidateIndex > 0 && activeLanguage == Language.ENGLISH) {
             recordLearning(
                 signal = LearningSignal.SUGGESTION_PICK,
@@ -851,12 +946,77 @@ class IaidoInputMethodService : InputMethodService() {
     private fun undoSuggestion(displayIndex: Int) {
         val word = wordForDisplayIndex(displayIndex) ?: return
         if (!word.corrected) return
-        if (replaceSessionWord(word.id, word.original)) {
+        val undone = replaceSessionWord(word.id, word.original)
+        trackSuggestion(
+            DiagnosticsSuggestionAction.UNDO,
+            if (undone) DiagnosticsOutcome.ACCEPTED else DiagnosticsOutcome.REJECTED,
+        )
+        if (undone) {
+            trackResearchCorrection(
+                action = CorrectionAction.UNDO,
+                sourceText = word.current,
+                finalText = word.original,
+            )
             recordLearning(
                 signal = LearningSignal.FLOW_UNDO,
                 original = word.current,
                 replacement = word.original,
             )
+        }
+    }
+
+    // Diagnostics are batched in memory (see DiagnosticsTelemetry.record) and only flushed to
+    // local storage at natural session boundaries (onFinishInputView) or once the in-memory
+    // backlog crosses DiagnosticsTelemetry.DEFAULT_MAX_PENDING_EVENTS - never as a per-event
+    // side effect here, since that would mean a disk write + WorkManager call on every gesture.
+    private fun trackGesture(kind: DiagnosticsGestureKind, outcome: DiagnosticsOutcome) {
+        DiagnosticsTelemetryProvider.instance?.recordGesture(kind, outcome)
+    }
+
+    private fun trackSuggestion(action: DiagnosticsSuggestionAction, outcome: DiagnosticsOutcome) {
+        DiagnosticsTelemetryProvider.instance?.recordSuggestionAction(action, outcome)
+    }
+
+    // Research correction capture (Task 9): each call below fires once, at the natural completion
+    // of one discrete correction action (a candidate pick, an undo, a flow correction, a manual
+    // edit) - never from a per-touch/per-keystroke loop. ResearchCorrectionRecorder.record is
+    // already consent-gated and internally defensive; this wrapper adds a second layer so a
+    // failure here can never propagate into the correction/undo/replacement code paths above.
+    private fun trackResearchCorrection(
+        action: CorrectionAction,
+        sourceText: String,
+        finalText: String,
+        candidates: List<String> = emptyList(),
+    ) {
+        try {
+            ResearchCorrectionRecorderProvider.instance?.record(
+                CorrectionInput(
+                    action = action,
+                    sourceText = sourceText,
+                    finalText = finalText,
+                    candidates = candidates,
+                    algorithmVersion = ResearchCorrectionRecorder.CURRENT_ALGORITHM_VERSION,
+                    traceId = researchTraceId,
+                ),
+            )
+        } catch (_: Exception) {
+            // Research correction capture is best effort and must never affect keyboard behavior.
+        }
+    }
+
+    /**
+     * Research trace capture (Task 9): called once per completed gesture by `KeyboardInputView`,
+     * which owns the raw touch boundary. Enqueues the bounded trace on the research plane and
+     * remembers its id when the gesture committed recognized text, so a later correction of that
+     * text can be correlated with the gesture that produced it. Diagnostics never see this data.
+     */
+    private fun onResearchTraceCaptured(trace: ResearchTrace) {
+        try {
+            ResearchCorrectionRecorderProvider.recordTrace(trace)
+            researchTraceId = trace.traceId
+                .takeIf { trace.classification in ResearchTraceClassification.TYPING }
+        } catch (_: Exception) {
+            // Research trace capture is best effort and must never affect keyboard behavior.
         }
     }
 
@@ -874,6 +1034,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(word.start, word.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
         correctionHistory.replace(id, replacement)
+        typedWords.reset()
         val delta = replacement.length - word.current.length
         cursorPosition = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
         else word.start + replacement.length
@@ -896,6 +1057,11 @@ class IaidoInputMethodService : InputMethodService() {
     private fun confirmManualEdit() {
         val candidate = pendingManualEdit.value ?: return
         if (candidate.original != candidate.replacement) {
+            trackResearchCorrection(
+                action = CorrectionAction.MANUAL_EDIT,
+                sourceText = candidate.original,
+                finalText = candidate.replacement,
+            )
             recordLearning(
                 signal = LearningSignal.MANUAL_EDIT,
                 original = candidate.original,

@@ -1,0 +1,302 @@
+package com.iaido.app
+
+import android.content.Context
+import android.os.Build
+import androidx.datastore.preferences.core.Preferences
+import java.io.File
+import java.util.ArrayDeque
+import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+
+/**
+ * Opt-in diagnostics capture: a bounded in-memory breadcrumb ring plus a small set of semantic
+ * event helpers that serialize through the existing [DiagnosticsEvent] contract.
+ *
+ * Every public method is a no-op when diagnostics consent is disabled, and no method may ever
+ * throw, telemetry failures must never affect keyboard behavior.
+ */
+class DiagnosticsTelemetry(
+    private val diagnosticsEnabled: () -> Boolean,
+    private val appendToQueue: (TelemetryEnvelope) -> Unit,
+    private val scheduleUpload: () -> Unit,
+    private val envelopeFactory: (DiagnosticsEvent) -> TelemetryEnvelope,
+    private val maxBreadcrumbs: Int = DEFAULT_MAX_BREADCRUMBS,
+    private val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
+) {
+    private val ring = ArrayDeque<DiagnosticsBreadcrumb>()
+    private val pendingEvents = mutableListOf<DiagnosticsEvent>()
+
+    /**
+     * Records a raw diagnostics event for a later [flush]. No-op unless consent is enabled.
+     *
+     * Events are only batched in memory here - callers must not call [flush] as a direct side
+     * effect of every [record]/[recordGesture] call, that would defeat the point of batching.
+     * [flush] is expected to run at natural boundaries (e.g. IME session end) instead. As a
+     * safety net against an unbounded in-memory backlog during a very long session, this also
+     * force-flushes once [pendingEvents] reaches [maxPendingEvents].
+     */
+    fun record(event: DiagnosticsEvent) {
+        runSafely {
+            if (!diagnosticsEnabled()) return@runSafely
+            pendingEvents.add(event)
+            if (pendingEvents.size >= maxPendingEvents) drainPendingEvents()
+        }
+    }
+
+    fun recordAppStart() {
+        addBreadcrumb(DiagnosticsBreadcrumb(kind = DiagnosticsBreadcrumbKind.APP_START))
+    }
+
+    fun recordImeSessionStart() {
+        addBreadcrumb(DiagnosticsBreadcrumb(kind = DiagnosticsBreadcrumbKind.IME_SESSION_START))
+    }
+
+    fun recordImeSessionFinish() {
+        addBreadcrumb(DiagnosticsBreadcrumb(kind = DiagnosticsBreadcrumbKind.IME_SESSION_FINISH))
+    }
+
+    fun recordGesture(kind: DiagnosticsGestureKind, outcome: DiagnosticsOutcome) {
+        addBreadcrumb(
+            DiagnosticsBreadcrumb(
+                kind = DiagnosticsBreadcrumbKind.GESTURE_OUTCOME,
+                gestureKind = kind,
+                outcome = outcome,
+            ),
+        )
+        record(DiagnosticsEvent.GestureOutcome(outcome = outcome))
+    }
+
+    fun recordRecognitionLatency(latencyMs: Long) {
+        addBreadcrumb(
+            DiagnosticsBreadcrumb(
+                kind = DiagnosticsBreadcrumbKind.RECOGNITION_LATENCY,
+                latencyBucket = RecognitionLatencyBucket.forMillis(latencyMs),
+            ),
+        )
+    }
+
+    fun recordSuggestionAction(action: DiagnosticsSuggestionAction, outcome: DiagnosticsOutcome) {
+        addBreadcrumb(
+            DiagnosticsBreadcrumb(
+                kind = DiagnosticsBreadcrumbKind.SUGGESTION_ACTION,
+                suggestionAction = action,
+                outcome = outcome,
+            ),
+        )
+    }
+
+    fun recordRuntimeError(code: DiagnosticsRuntimeErrorCode, throwable: Throwable) {
+        val redacted = redactThrowable(throwable)
+        addBreadcrumb(
+            DiagnosticsBreadcrumb(
+                kind = DiagnosticsBreadcrumbKind.RUNTIME_ERROR,
+                errorCode = code,
+                error = redacted,
+            ),
+        )
+        record(DiagnosticsEvent.RuntimeError(code = code, error = redacted))
+    }
+
+    /**
+     * Reports a crash envelope written by the crash handler on a previous launch, then deletes it
+     * so it is reported exactly once. No-op when diagnostics consent is disabled - nothing about a
+     * crash is serialized while the plane is off - and callers must run this off the main thread
+     * (it reads a file and appends to the queue).
+     */
+    fun reportPendingCrash(crashFile: File) {
+        runSafely {
+            if (!diagnosticsEnabled()) return@runSafely
+            val payload = runCatching { crashFile.readText() }.getOrNull() ?: return@runSafely
+            val event = runCatching { DiagnosticsEventCodec.decode(payload) }.getOrNull()
+            if (event !is DiagnosticsEvent.Crash) return@runSafely
+            record(event)
+            flush()
+            runCatching { crashFile.delete() }
+        }
+    }
+
+    /** Snapshot of the current bounded breadcrumb ring, oldest first. */
+    fun breadcrumbs(): List<DiagnosticsBreadcrumb> = runSafelyOrDefault(emptyList()) { ring.toList() }
+
+    /**
+     * Rolls any pending events into the diagnostics queue and schedules upload work.
+     *
+     * This is the natural-boundary flush (IME session end, etc.) - it must never be invoked as a
+     * per-event side effect of [record]/[recordGesture]/[recordSuggestionAction].
+     */
+    fun flush() {
+        runSafely {
+            if (!diagnosticsEnabled()) return@runSafely
+            drainPendingEvents()
+        }
+    }
+
+    /** Drains [pendingEvents] into the queue. Caller is responsible for the consent check. */
+    private fun drainPendingEvents() {
+        val events = pendingEvents.toList()
+        if (events.isEmpty()) return
+        pendingEvents.clear()
+        events.forEach { event -> appendToQueue(envelopeFactory(event)) }
+        scheduleUpload()
+    }
+
+    private fun addBreadcrumb(breadcrumb: DiagnosticsBreadcrumb) {
+        runSafely {
+            if (!diagnosticsEnabled()) return@runSafely
+            ring.addLast(breadcrumb)
+            while (ring.size > maxBreadcrumbs) ring.removeFirst()
+        }
+    }
+
+    private fun runSafely(block: () -> Unit) {
+        try {
+            block()
+        } catch (_: Exception) {
+            // Diagnostics telemetry is best effort and must never affect keyboard behavior.
+        }
+    }
+
+    private fun <T> runSafelyOrDefault(default: T, block: () -> T): T = try {
+        block()
+    } catch (_: Exception) {
+        default
+    }
+
+    companion object {
+        const val DEFAULT_MAX_BREADCRUMBS = 32
+
+        /**
+         * Upper bound on in-memory pending events between flushes. Reusing the queue's
+         * batch-size order of magnitude would be excessive for a purely in-RAM list held on the
+         * main thread, so this is a smaller dedicated cap: once reached, [record] force-flushes
+         * rather than growing without bound.
+         */
+        const val DEFAULT_MAX_PENDING_EVENTS = 40
+    }
+}
+
+/**
+ * Process-wide access point for the single [DiagnosticsTelemetry] instance used by the app and
+ * IME service. [initialize] is safe to call multiple times and from any process, but only ever
+ * installs a live instance once (callers gate the call to the default application process).
+ */
+object DiagnosticsTelemetryProvider {
+    private const val TELEMETRY_QUEUE_DIRECTORY = "telemetry"
+    private const val CRASH_FILE_NAME = "diagnostics-crash.json"
+
+    private val crashReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var telemetry: DiagnosticsTelemetry? = null
+
+    @Volatile
+    private var consentEnabled: Boolean = false
+
+    private val sessionId = UUID.randomUUID().toString()
+
+    val instance: DiagnosticsTelemetry?
+        get() = telemetry
+
+    /** Whether diagnostics consent is currently enabled, for use by the crash handler. */
+    fun isEnabled(): Boolean = consentEnabled
+
+    fun initialize(context: Context) {
+        if (telemetry != null) return
+        val appContext = context.applicationContext
+
+        telemetry = DiagnosticsTelemetry(
+            diagnosticsEnabled = ::isEnabled,
+            appendToQueue = { envelope -> telemetryQueue(appContext).append(envelope) },
+            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) },
+            envelopeFactory = { event -> buildEnvelope(appContext, event) },
+        )
+
+        collectConsent(appContext.settingsStore.data)
+    }
+
+    /**
+     * Keeps [consentEnabled] current by collecting [preferences] on a background scope, so the
+     * IME's main thread never does a synchronous DataStore read to check consent. Extracted from
+     * [initialize] so the reactive-update behavior is unit-testable with a fake [Flow] instead of
+     * a real [Context]/DataStore.
+     */
+    internal fun collectConsent(
+        preferences: Flow<Preferences>,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    ): Job = scope.launch {
+        runCatching {
+            preferences.collect { prefs -> consentEnabled = diagnosticsConsentFromPreferences(prefs).enabled }
+        }
+    }
+
+    /**
+     * Test-only seam: installs an explicit [DiagnosticsTelemetry]/consent state, bypassing
+     * [initialize]'s Context-bound wiring so provider-level tests can exercise [instance] and
+     * [isEnabled] without a real Android [Context].
+     */
+    internal fun installForTest(telemetry: DiagnosticsTelemetry?, consentEnabled: Boolean) {
+        this.telemetry = telemetry
+        this.consentEnabled = consentEnabled
+    }
+
+    /** Test-only seam: restores the singleton to its uninitialized state. */
+    internal fun resetForTest() {
+        telemetry = null
+        consentEnabled = false
+    }
+
+    private fun telemetryQueue(context: Context) = TelemetryQueue(
+        directory = File(context.filesDir, TELEMETRY_QUEUE_DIRECTORY),
+        plane = TelemetryPlane.DIAGNOSTICS,
+        clock = System::currentTimeMillis,
+        limits = QueueLimits(),
+    )
+
+    /** Where the crash handler leaves an envelope for the next launch to report. */
+    internal fun crashFile(context: Context) =
+        File(File(context.filesDir, TELEMETRY_QUEUE_DIRECTORY), CRASH_FILE_NAME)
+
+    /**
+     * Replays a crash envelope left behind by a previous launch. Runs on [crashReportScope] so
+     * application startup never blocks on file I/O, a queue append, or WorkManager scheduling.
+     */
+    fun reportPendingCrash(context: Context) {
+        val appContext = context.applicationContext
+        crashReportScope.launch {
+            runCatching { telemetry?.reportPendingCrash(crashFile(appContext)) }
+        }
+    }
+
+    private fun buildEnvelope(context: Context, event: DiagnosticsEvent): TelemetryEnvelope {
+        val installation = runCatching {
+            TelemetryInstallationStore(context).getOrCreateInstallation {
+                TelemetryInstallation(
+                    installationId = UUID.randomUUID().toString(),
+                    writeCredential = UUID.randomUUID().toString(),
+                    deletionCredential = UUID.randomUUID().toString(),
+                )
+            }
+        }.getOrNull()
+        val payload = Json.parseToJsonElement(DiagnosticsEventCodec.encode(event)) as JsonObject
+        return TelemetryEnvelope(
+            schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
+            eventId = UUID.randomUUID().toString(),
+            batchId = UUID.randomUUID().toString(),
+            installationId = installation?.installationId ?: UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            occurredAtMs = System.currentTimeMillis(),
+            appVersion = BuildConfig.VERSION_NAME,
+            buildType = BuildConfig.BUILD_TYPE,
+            androidApi = Build.VERSION.SDK_INT,
+            eventType = DiagnosticsEventCodec.eventType(event),
+            payload = payload,
+        )
+    }
+}

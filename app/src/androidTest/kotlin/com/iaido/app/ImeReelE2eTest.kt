@@ -15,6 +15,49 @@ class ImeReelE2eTest {
     val artifacts = FailureArtifactRule()
 
     @Test
+    fun releasingTheReelOfATypedWordReplacesItInsteadOfAppendingToIt() {
+        ImeScenario().also(artifacts::track).run {
+            tapKey("t")
+            tapKey("e")
+            tapKey("h")
+            val typed = state().expectedText
+            check(typed.lowercase().endsWith("teh")) { "Typed word not committed: '$typed'" }
+
+            // A typed word is addressable only because the service records it as a session word as
+            // it grows; without that the drag either did nothing or inserted its candidate at the
+            // caret instead of replacing the word.
+            val corrected = swipeSuggestion(index = 0, verticalDistancePx = -96f)
+            check(corrected != typed) {
+                "Releasing the reel of a typed word changed nothing: '$typed'"
+            }
+
+            var changes = 0
+            var previous = typed
+            repeat(4) {
+                // Once the chip has no further alternative the drag stops changing the text; that
+                // is the end of the list, not a failure. A release that *does* change the text must
+                // still replace the word rather than accumulate.
+                val now = runCatching { swipeSuggestion(index = 0, verticalDistancePx = -96f) }.getOrNull()
+                    ?: return@repeat
+                check(!Regex("(.)\\1\\1").containsMatchIn(now)) {
+                    "A release accumulated text instead of replacing the word: '$typed' -> '$now'"
+                }
+                check(!now.lowercase().contains("tehteh")) {
+                    "A release appended a second copy of the word: '$typed' -> '$now'"
+                }
+                // A single candidate (or a short join) is fine; a release sequence that keeps
+                // growing is the accumulation bug.
+                check(now.length <= 12) {
+                    "A release grew the text like an accumulation: '$typed' -> '$now'"
+                }
+                if (now != previous) changes += 1
+                previous = now
+            }
+            check(changes >= 1) { "No release ever replaced the typed word: '$typed'" }
+        }
+    }
+
+    @Test
     fun correctionReelScrollsCommitsAndRemembersTheReleasedCandidate() {
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")

@@ -1,0 +1,64 @@
+{
+  "batch_id": "batch-7-1750000000000-10000000-0000-4000-8000-000000000007",
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "30000000-0000-4000-8000-000000000009",
+      "batch_id": "20000000-0000-4000-8000-000000000008",
+      "installation_id": "10000000-0000-4000-8000-000000000001",
+      "session_id": "10000000-0000-4000-8000-000000000002",
+      "occurred_at_ms": 1750000000000,
+      "app_version": "0.1.4",
+      "build_type": "release",
+      "android_api": 36,
+      "event_type": "gesture_trace",
+      "payload": {
+        "trace_id": "3f0f6b1e-8f4a-4a1f-9a6f-9d0f1c2b3a44",
+        "classification": "swipe",
+        "language": "ENGLISH",
+        "layout_id": "qwerty",
+        "algorithm_version": 1,
+        "points": [
+          {
+            "pointer_id": 4,
+            "action": 0,
+            "time_offset_ms": 0,
+            "x": 0.25,
+            "y": 0.25
+          },
+          {
+            "pointer_id": 4,
+            "action": 2,
+            "time_offset_ms": 42,
+            "x": 0.31,
+            "y": 0.25
+          }
+        ]
+      }
+    },
+    {
+      "schema_version": 1,
+      "event_id": "30000000-0000-4000-8000-000000000010",
+      "batch_id": "20000000-0000-4000-8000-000000000008",
+      "installation_id": "10000000-0000-4000-8000-000000000001",
+      "session_id": "10000000-0000-4000-8000-000000000002",
+      "occurred_at_ms": 1750000000001,
+      "app_version": "0.1.4",
+      "build_type": "release",
+      "android_api": 36,
+      "event_type": "research_correction",
+      "payload": {
+        "correction_id": "c0d1e2f3-1111-4222-8333-444455556666",
+        "trace_id": "3f0f6b1e-8f4a-4a1f-9a6f-9d0f1c2b3a44",
+        "action": "manual_edit",
+        "source_text": "teh",
+        "final_text": "the",
+        "candidates": [
+          "the",
+          "ten"
+        ],
+        "algorithm_version": 1
+      }
+    }
+  ]
+}

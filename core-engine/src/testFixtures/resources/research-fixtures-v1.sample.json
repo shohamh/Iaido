@@ -1,0 +1,41 @@
+{
+  "fixtures": [
+    {
+      "algorithm_version": 1,
+      "classification": "swipe",
+      "fixture_id": "fixture-0001",
+      "kind": "gesture_trace",
+      "language": "ENGLISH",
+      "layout_id": "qwerty",
+      "points": [
+        {
+          "action": 0,
+          "pointer_id": 4,
+          "time_offset_ms": 0,
+          "x": 0.25,
+          "y": 0.25
+        },
+        {
+          "action": 2,
+          "pointer_id": 4,
+          "time_offset_ms": 42,
+          "x": 0.31,
+          "y": 0.25
+        }
+      ]
+    },
+    {
+      "action": "manual_edit",
+      "algorithm_version": 1,
+      "candidates": [
+        "the",
+        "ten"
+      ],
+      "fixture_id": "fixture-0002",
+      "final_text": "the",
+      "kind": "correction",
+      "source_text": "teh"
+    }
+  ],
+  "schema_version": 1
+}
