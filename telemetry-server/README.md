@@ -169,6 +169,24 @@ curl -G \
   -o research-export.ndjson
 ```
 
+## Reviewed research fixtures
+
+`src/iaido_telemetry/fixture_export.py` turns operator-approved research records into one
+deterministic, de-identified fixture bundle for core-engine and connected-IME regression tests:
+
+```python
+export_research_fixtures(database, storage, settings, start_ms, end_ms, review_manifest, output_dir, *, operator_token) -> Path
+```
+
+`review_manifest` is required (a mapping of approved content hashes, or a path to a JSON manifest
+shaped `{"approved": {"<sha256>": "<note>"}}`); a missing or empty manifest raises `ValueError`, so
+unreviewed research data can never reach a fixture file. Approved records are revalidated against
+the current research bounds, stripped of installation/session/batch ids and receive timestamps,
+ordered by content hash, and written as `research-fixtures-v1.json` with deterministic
+`fixture-0001`-style ids and one `audit_records` row (`action="export"`). The format, bounds, and
+rejection rules are documented in [`../docs/research/schema-v1.md`](../docs/research/schema-v1.md),
+with the human review workflow in [`../docs/research/README.md`](../docs/research/README.md).
+
 ## Aggregate views for operator analysis
 
 `GET /v1/operator/aggregates/{crash-counts,runtime-error-rate,gesture-outcomes,correction-actions,latency-buckets}`
@@ -246,19 +264,28 @@ PY
 
 `tests/fixtures/android-research-batch.json` is a second, ready-made sample
 you can load the same way against the `/v1/research/batches` route to
-inspect a research-plane payload -- both stay entirely inside the temporary
-SQLite database and filesystem directory created above, and are discarded
-with it.
+inspect a research-plane payload: it carries one `gesture_trace` with
+normalized pointer samples and one `research_correction` with the affected
+span, in exactly the shape the Android client sends. Both samples stay
+entirely inside the temporary SQLite database and filesystem directory
+created above, and are discarded with it.
 
 ## Tests
 
 ```bash
 python -m pytest tests/test_deletion_retention_export.py -q
+python -m pytest tests -q          # full suite: 68 tests
 ```
 
 Runs deletion (metadata + object removal, idempotency, plane isolation,
 audit records), retention (default/shortened windows, per-plane
 independence), export (plane isolation, operator-token gating, audit
-records), and aggregate-view (plane separation) coverage. Run `python -m
-pytest -q` for the full suite, including Task 3's ingestion/isolation
-tests.
+records), reviewed-fixture export (manifest gating, byte determinism,
+de-identification, bounds rejection, plane isolation), ingestion/isolation
+(both planes' schemas, bounds, and cross-plane rejection), and
+aggregate-view (plane separation) coverage.
+
+`tests/test_fixture_export.py` covers only the local export functions and
+the HTTP routes through `TestClient`; nothing here has been run against a
+deployed staging collector, and the `IAIDO_S3_*` MinIO path-style addressing
+noted above is still unverified outside the `LocalObjectStorage` test double.

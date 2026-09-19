@@ -40,6 +40,43 @@ through Tailscale, use `-UsbDeviceSerial` with the phone's USB ADB serial as
 shown above; the helper enables port 5555 before connecting to the Tailscale
 hostname.
 
+## Telemetry and research data
+
+Iaido has two independently opt-in telemetry planes, both disabled by default and revocable at any
+time from Iaido Settings → Privacy & diagnostics:
+
+- **Anonymous diagnostics** — app/IME lifecycle, gesture outcomes, latency buckets, suggestion and
+  correction action counts, runtime error codes, and redacted crash metadata. Never words,
+  candidate strings, host-editor text, clipboard contents, Android identifiers, or raw touch paths.
+- **Typing research data** — normalized keyboard touch traces (pointer ids, relative times,
+  quantized coordinates) plus the affected word/span of a correction. This plane can contain
+  readable typing content and needs its own confirmation before it can be enabled.
+
+Each plane has a separate consent record, local queue, upload endpoint, server table and object
+prefix, retention window (90 days diagnostics, 365 days research by default), and deletion path.
+Revoking a plane deletes its pending local queue and stops new capture; "Delete uploaded data"
+removes that plane's server-side data. Telemetry failures never block typing, recognition,
+correction, or settings.
+
+Builds ship with an empty `BuildConfig.IAIDO_TELEMETRY_BASE_URL`, so nothing is uploaded until a
+deployment supplies an HTTPS collector via `-PiaidoTelemetryBaseUrl=https://...`. No operator
+secret, database credential, or read credential is embedded in the APK.
+
+The collector is the separate deployable in [`telemetry-server/`](telemetry-server/README.md)
+(FastAPI, PostgreSQL, S3-compatible object storage). Reviewed research records can be turned into
+deterministic, de-identified regression fixtures — see [`docs/research/README.md`](docs/research/README.md)
+and [`docs/research/schema-v1.md`](docs/research/schema-v1.md).
+
+```powershell
+python -m pytest telemetry-server/tests -q
+```
+
+Rollout status: diagnostics capture, research capture (traces plus bounded correction records),
+reviewed fixture export, and the collector are implemented. Verified locally by
+`:core-engine:test`, `:app:testDebugUnitTest`, `:app:assembleDebug`, and the collector's pytest
+suite. Production ingestion stays disabled until a staging collector is configured and the
+connected IME suites have been run against a device.
+
 ## Keyboard profile migration
 
 Open Iaido Settings and use **Export profile** to save a versioned,
