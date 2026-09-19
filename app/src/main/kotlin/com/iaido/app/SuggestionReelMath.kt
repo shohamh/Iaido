@@ -41,17 +41,15 @@ internal fun edgeReplacementOptions(
     options: List<ReplacementOption>,
     liveReplacementOptionIds: Set<String>,
 ): List<ReplacementOption> = options.filterNot { option ->
-    val singleWordSplit = option.sourceWords.size == 1 && option.replacementWords.size > 1
     val historicalJoin = option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
         option.id !in liveReplacementOptionIds
-    singleWordSplit || historicalJoin
+    historicalJoin
 }
 
 /**
  * Builds one ordinary word reel for each word in a live same-shaped inference option group.
- * Same-shaped options stay in one ordinary word reel. Single-word structural splits are hidden
- * because they do not represent an alternative word choice; multi-word joins remain in the
- * grouped reel where they can be previewed and committed as one replacement.
+ * Same-shaped options stay in one ordinary word reel. Structural splits and multi-word joins
+ * remain in the grouped reel where they can be previewed and committed as one replacement.
  */
 internal fun inlineReplacementReels(options: List<ReplacementOption>): List<InlineReplacementReel> {
     val sourceWords = options.firstOrNull()?.sourceWords.orEmpty()

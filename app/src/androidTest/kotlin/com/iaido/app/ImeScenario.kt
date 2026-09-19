@@ -1005,7 +1005,10 @@ class ImeScenario(
         val dragDistancePx = stepPx * 1.25f
         val points = listOf(
             PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f),
-            PointF((bounds.left + bounds.right) / 2f, (bounds.top + bounds.bottom) / 2f - dragDistancePx),
+            PointF(
+                (bounds.left + bounds.right) / 2f,
+                (bounds.top + bounds.bottom) / 2f - dragDistancePx,
+            ),
         )
         pendingPointerEvents = pointer.injectScreenSwipe(
             points = points,

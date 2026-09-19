@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -357,11 +359,13 @@ private fun ReplacementReelGroup(
     val stateKey = options.joinToString { it.id }
     var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
     var isDragging by remember(stateKey) { mutableStateOf(false) }
+    var dragStartSelectedIndex by remember(stateKey) { mutableIntStateOf(selectedIndex) }
     val latestOptions = rememberUpdatedState(options)
     val latestSelectedIndex = rememberUpdatedState(selectedIndex)
     val stepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val thresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
-    val previewIndex = displayedReelIndex(selectedIndex, dragY / stepPx, options.lastIndex)
+    val previewBaseIndex = if (isDragging) dragStartSelectedIndex else selectedIndex
+    val previewIndex = displayedReelIndex(previewBaseIndex, dragY / stepPx, options.lastIndex)
     val option = options[previewIndex]
     val layout = replacementReelLayout(option, rtl)
     val description = replacementReelDescription(option, previewIndex, options.size)
@@ -402,24 +406,24 @@ private fun ReplacementReelGroup(
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-            .pointerInput(stateKey) {
-                detectVerticalDragGestures(
+            .pointerInput(Unit) {
+                detectDragGestures(
                     onDragStart = {
+                        dragStartSelectedIndex = latestSelectedIndex.value
                         dragY = 0f
                         isDragging = true
                     },
-                    onVerticalDrag = { change, amount ->
+                    onDrag = { change, amount ->
                         change.consume()
-                        dragY += amount
+                        dragY += amount.y
                     },
                     onDragEnd = {
                         // Previewing updates selectedIndex and options while this gesture is active.
                         // Keep the detector alive across that recomposition, then read the current
                         // values here so release commits the option the user is actually previewing.
                         val currentOptions = latestOptions.value
-                        val currentSelectedIndex = latestSelectedIndex.value
                         val releasedIndex = displayedReelIndex(
-                            currentSelectedIndex,
+                            dragStartSelectedIndex,
                             dragY / stepPx,
                             currentOptions.lastIndex,
                         )

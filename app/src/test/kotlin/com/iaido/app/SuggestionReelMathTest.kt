@@ -168,7 +168,7 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `single-word split candidates do not create a second grouped reel`() {
+    fun `single-word split candidates stay out of the inline reels and reach the grouped reel`() {
         val options = listOf(
             ReplacementOption(listOf("help"), listOf("help"), 1.0),
             ReplacementOption(listOf("help"), listOf("he", "lp"), 0.9),
@@ -180,7 +180,7 @@ class SuggestionReelMathTest {
             liveReplacementOptionIds = emptySet(),
         )
 
-        assertEquals(emptyList<ReplacementOption>(), edgeOptions)
+        assertEquals(listOf(options[1]), edgeOptions)
         assertEquals(listOf("help"), inlineReplacementReels(options).map { it.chip.word })
     }
 
