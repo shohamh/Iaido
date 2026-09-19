@@ -18,26 +18,85 @@ jobs:
           packages: platform-tools
       - run: ./gradlew :core-engine:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon
 
+  # The emulator job is the flaky one. Notes from the failures it has had:
+  #  - a cold AVD boot took 887 s (14.8 min) on a hosted runner, because the system image and the
+  #    AVD data are recreated for every run and the guest renders on the CPU (swiftshader);
+  #  - adb reports "device offline" for ~90 s during that boot, and the device can drop off again
+  #    mid-run, which loses every result AGP had not written yet (one run reported a single test);
+  #  - `-gpu swiftshader_indirect` is the only GPU option that works on a hosted runner (there is no
+  #    hardware GPU), so rendering stays slow: give the guest more memory/cores and let it skip
+  #    snapshots and boot animations.
+  # Hence: cache the AVD between runs, raise the boot timeout, run the suite one class at a time so
+  # a wedged class cannot hide the rest, and let artifact collection fail softly.
   instrumented:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      API_LEVEL: 35
+      AVD_TARGET: google_apis
+      AVD_ARCH: x86_64
+      AVD_PROFILE: pixel_2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Cache the AVD data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd
+            ~/.android/adbkey
+          key: avd-${{ env.API_LEVEL }}-${{ env.AVD_TARGET }}-${{ env.AVD_ARCH }}-${{ env.AVD_PROFILE }}
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain
+          api-level: ${{ env.API_LEVEL }}
+          target: ${{ env.AVD_TARGET }}
+          arch: ${{ env.AVD_ARCH }}
+          profile: ${{ env.AVD_PROFILE }}
+          # Reuse the cached AVD when the cache hit: recreating it forces a fresh system-image
+          # install and a cold boot, which is what took 887 s on the run that failed.
+          force-avd-creation: false
+          emulator-boot-timeout: 1500
+          disable-animations: true
+          emulator-options: >-
+            -no-window -no-audio -no-boot-anim -no-snapshot
+            -gpu swiftshader_indirect -camera-back none -camera-front none
+            -memory 3072 -cores 2
+          script: |
+            set -u
+            # Run one class per gradle invocation: a class that wedges the emulator, or a failure
+            # that leaves the harness in a bad state, then costs that class only - the results of
+            # every earlier class are already on disk and get reported.
+            classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin |
+              sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' |
+              sort)
+            echo "Instrumented classes:"; echo "$classes"
+            failed=""
+            for class in $classes; do
+              echo "::group::$class"
+              if ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain \
+                   -Pandroid.testInstrumentationRunnerArguments.class="$class"; then
+                echo "$class: PASS"
+              else
+                echo "$class: FAIL"
+                failed="$failed $class"
+              fi
+              echo "::endgroup::"
+            done
+            if [ -n "$failed" ]; then
+              echo "::error::Instrumented classes failed:$failed"
+              exit 1
+            fi
       - name: Collect IME E2E artifacts
         if: always()
         run: |
           mkdir -p artifacts/ime-e2e
-          adb devices
+          adb devices || true
           adb pull /sdcard/Android/data/com.iaido.app/files/ime-e2e artifacts/ime-e2e || true
           cp -R app/build/outputs/androidTest-results artifacts/ime-e2e/connected-test-results || true
           cp -R app/build/reports/androidTests artifacts/ime-e2e/connected-test-reports || true
