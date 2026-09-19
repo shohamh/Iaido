@@ -594,7 +594,12 @@ private fun SuggestionChipView(
             modifier = Modifier
                     .fillMaxSize()
                 .clipToBounds()
-                .padding(horizontal = 14.dp),
+                // Must match the padding [chipReservedWidthDp] budgets (CHIP_HORIZONTAL_PADDING_DP
+                // on each side) -- any padding applied here beyond that budget (this Box's, plus
+                // any on the candidate Text below) eats into the box's reserved width without the
+                // sizing math accounting for it, clipping legitimate multi-character words down to
+                // a sliver even though the chip itself measures wide enough on paper.
+                .padding(horizontal = CHIP_HORIZONTAL_PADDING_DP.dp),
         ) {
             val centerSlotOffset = reelCenterSlotOffset(visibleSlotCount)
             Column(
@@ -626,7 +631,6 @@ private fun SuggestionChipView(
                         ) {
                             Text(
                                 text = candidate,
-                                modifier = Modifier.padding(horizontal = 8.dp),
                                 color = foregroundColor.copy(alpha = when (distance) {
                                     0 -> 1f
                                     1 -> 0.48f

@@ -586,14 +586,20 @@ internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? 
 
 /**
  * Row/weight pairs for the space-bar row: globe and settings evenly balanced on the left, space
- * dominant and centered, backspace on the right -- left weight (0.75 + 0.75 = 1.5) equals right
- * weight (1.5), so space sits visually centered while owning the majority of the row's width.
+ * dominant and centered, backspace on the right -- left weight (1 + 1 = 2) equals right weight
+ * (2), so space sits visually centered while owning the majority of the row's width.
+ *
+ * These weights MUST sum to exactly [KEYBOARD_LETTER_ROW_COLUMN_COUNT]. [bottomRowKeyAt] treats
+ * `size` (== keySizePx == widthPx / KEYBOARD_LETTER_ROW_COLUMN_COUNT) as one weight unit and walks
+ * cumulative weights to hit-test a touch x-coordinate; that only covers the full screen width when
+ * the weights sum to the same column count used to derive `size`. A mismatch here silently breaks
+ * hit-testing for whichever key ends up rightmost (see the regression fixed alongside this test).
  */
-private fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> = listOf(
-    GLOBE_KEY to 0.75f,
-    SETTINGS_KEY to 0.75f,
-    spaceLabel to 6f,
-    BACKSPACE_KEY to 1.5f,
+internal fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> = listOf(
+    GLOBE_KEY to 1f,
+    SETTINGS_KEY to 1f,
+    spaceLabel to 7f,
+    BACKSPACE_KEY to 2f,
 )
 
 /** Letter rows for [language], with punctuation split across the left/right ends of the bottom letter row. */

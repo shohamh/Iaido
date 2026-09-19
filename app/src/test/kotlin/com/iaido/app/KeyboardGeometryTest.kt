@@ -48,25 +48,46 @@ class KeyboardGeometryTest {
 
     @Test
     fun `bottom row hit testing includes the settings button`() {
-        // Weights: globe 0.75, settings 0.75, space 6, backspace 1.5 (total 9 units).
+        // Weights: globe 1, settings 1, space 7, backspace 2 (total 11 units, matching
+        // KEYBOARD_LETTER_ROW_COLUMN_COUNT).
         assertEquals(SETTINGS_KEY, bottomRowKeyAt(1.0f * 128f, 128f, Language.ENGLISH))
-        assertEquals(" ", bottomRowKeyAt(4.5f * 128f, 128f, Language.ENGLISH))
-        assertEquals("⌫", bottomRowKeyAt(8.5f * 128f, 128f, Language.ENGLISH))
+        assertEquals(" ", bottomRowKeyAt(5.5f * 128f, 128f, Language.ENGLISH))
+        assertEquals("⌫", bottomRowKeyAt(10.5f * 128f, 128f, Language.ENGLISH))
     }
 
     @Test
     fun `bottom row space is centered with equal weight on either side`() {
-        val keys = listOf(
-            GLOBE_KEY_TEST to 0.75f,
-            SETTINGS_KEY to 0.75f,
-            "space" to 6f,
-            BACKSPACE_KEY_TEST to 1.5f,
-        )
+        val keys = bottomRowKeyWeights(spaceLabel = "space")
         val leftWeight = keys[0].second + keys[1].second
         val rightWeight = keys[3].second
         assertEquals(leftWeight, rightWeight, 0.001f)
     }
+
+    @Test
+    fun `bottom row weights sum to exactly the shared column count`() {
+        // bottomRowKeyAt treats `size` (== widthPx / KEYBOARD_LETTER_ROW_COLUMN_COUNT) as one
+        // weight unit and walks cumulative weights up to `columnCount` units. If the weights
+        // don't sum to exactly the column count, the hit-testable region falls short of the
+        // full screen width and touches near the right edge (where the last key actually
+        // renders) silently fail to resolve to any key. This regression previously broke the
+        // backspace key entirely.
+        val totalWeight = bottomRowKeyWeights(spaceLabel = " ").sumOf { it.second.toDouble() }
+        assertEquals(KEYBOARD_LETTER_ROW_COLUMN_COUNT.toDouble(), totalWeight, 0.001)
+    }
+
+    @Test
+    fun `a touch at the far right screen edge resolves to backspace`() {
+        // Realistic screen-edge coordinate: x at 99% of the full row width
+        // (columnCount * keySize == widthPx). This is exactly the scenario that silently
+        // broke when the row's weights summed to less than KEYBOARD_LETTER_ROW_COLUMN_COUNT --
+        // touches in the rightmost portion of the row fell past every cumulative threshold and
+        // resolved to null instead of the backspace key.
+        val keySize = 128f
+        val widthPx = KEYBOARD_LETTER_ROW_COLUMN_COUNT.toFloat() * keySize
+        val x = 0.99f * widthPx
+
+        assertEquals(BACKSPACE_KEY_TEST, bottomRowKeyAt(x, keySize, Language.ENGLISH))
+    }
 }
 
-private const val GLOBE_KEY_TEST = "🌐"
 private const val BACKSPACE_KEY_TEST = "⌫"
