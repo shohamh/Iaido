@@ -41,6 +41,11 @@ SchemaVersion = Literal[1]
 MAX_TRACE_POINTS = 512
 MAX_SPAN_CODE_POINTS = 64
 MAX_CANDIDATES = 5
+# Redacted exception metadata bounds: a class name, at most 16 frames of at most 160 characters,
+# and at most 32 breadcrumbs of crash context per event.
+MAX_ERROR_FRAMES = 16
+MAX_ERROR_FRAME_LENGTH = 160
+MAX_BREADCRUMBS = 32
 # MotionEvent.getActionMasked() values are 0..12; the server accepts that family
 # with headroom and rejects anything outside a single byte rather than tracking
 # Android's action constants.
@@ -53,9 +58,82 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class DiagnosticsPayload(StrictModel):
+class GestureOutcomePayload(StrictModel):
     event_type: Literal["gesture_outcome"]
     outcome: Literal["ACCEPTED", "REJECTED", "CANCELLED"]
+
+
+# Redacted exception metadata. Deliberately has no message field: exception messages can embed
+# typed text, and the diagnostics contract excludes readable words. Frames are code identifiers
+# plus a line number, with directories (and therefore user/developer paths) stripped, so a frame
+# matches `Class.method(File.kt:123)` or the `<redacted>` placeholder - never a drive letter.
+ErrorFrame = Annotated[
+    str,
+    Field(
+        max_length=MAX_ERROR_FRAME_LENGTH,
+        pattern=r"^(?:<redacted>|[A-Za-z0-9_.$<>]+\([A-Za-z0-9_.$]*:[0-9]{1,7}\))$",
+    ),
+]
+RedactedErrorCode = Literal[
+    "RECOGNITION_FAILED",
+    "CORRECTION_FAILED",
+    "COMMAND_FAILED",
+    "SETTINGS_FAILED",
+    "UNKNOWN",
+]
+BreadcrumbKind = Literal[
+    "APP_START",
+    "IME_SESSION_START",
+    "IME_SESSION_FINISH",
+    "GESTURE_OUTCOME",
+    "RECOGNITION_LATENCY",
+    "SUGGESTION_ACTION",
+    "RUNTIME_ERROR",
+]
+
+
+class RedactedError(StrictModel):
+    """Collected exception shape: the class and up to [MAX_ERROR_FRAMES] frames."""
+
+    type: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.$<>]+$")
+    frames: list[ErrorFrame] = Field(default_factory=list, max_length=MAX_ERROR_FRAMES)
+
+
+class RuntimeErrorPayload(StrictModel):
+    event_type: Literal["runtime_error"]
+    code: RedactedErrorCode
+    error: RedactedError
+
+
+class BreadcrumbRecord(StrictModel):
+    """One bounded, enum-only breadcrumb kept as crash context. Never free text."""
+
+    kind: BreadcrumbKind
+    count: int = Field(ge=1, le=10_000)
+    gesture_kind: Literal["SWIPE", "SPLIT", "PUNCTUATION", "COMMAND"] | None = None
+    outcome: Literal["ACCEPTED", "REJECTED", "CANCELLED"] | None = None
+    latency_bucket: Literal[
+        "UNDER_50_MS",
+        "FROM_50_TO_99_MS",
+        "FROM_100_TO_249_MS",
+        "FROM_250_TO_499_MS",
+        "FROM_500_TO_999_MS",
+        "OVER_1000_MS",
+    ] | None = None
+    suggestion_action: Literal["REPLACEMENT", "SUGGESTION_PICK", "UNDO"] | None = None
+    error_code: RedactedErrorCode | None = None
+    error: RedactedError | None = None
+
+
+class CrashPayload(StrictModel):
+    event_type: Literal["crash"]
+    error: RedactedError
+    breadcrumbs: list[BreadcrumbRecord] = Field(
+        default_factory=list, max_length=MAX_BREADCRUMBS
+    )
+
+
+DiagnosticsPayload = GestureOutcomePayload | RuntimeErrorPayload | CrashPayload
 
 
 class TracePoint(StrictModel):
@@ -124,8 +202,19 @@ class EnvelopeFields(StrictModel):
 
 
 class DiagnosticsEnvelope(EnvelopeFields):
-    event_type: Literal["gesture_outcome"]
+    event_type: Literal["gesture_outcome", "runtime_error", "crash"]
     payload: DiagnosticsPayload
+
+    @model_validator(mode="after")
+    def payload_matches_event_type(self) -> "DiagnosticsEnvelope":
+        expected = {
+            "gesture_outcome": GestureOutcomePayload,
+            "runtime_error": RuntimeErrorPayload,
+            "crash": CrashPayload,
+        }[self.event_type]
+        if not isinstance(self.payload, expected):
+            raise ValueError("diagnostics payload does not match event_type")
+        return self
 
 
 class ResearchEnvelope(EnvelopeFields):

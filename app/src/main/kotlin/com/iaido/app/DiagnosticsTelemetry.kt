@@ -15,78 +15,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
-/** Coarse gesture family recorded for diagnostics. No coordinates or paths ever appear here. */
-enum class DiagnosticsGestureKind {
-    SWIPE,
-    SPLIT,
-    PUNCTUATION,
-    COMMAND,
-}
-
-/** Kind of in-memory breadcrumb kept for crash context. */
-enum class DiagnosticsBreadcrumbKind {
-    APP_START,
-    IME_SESSION_START,
-    IME_SESSION_FINISH,
-    GESTURE_OUTCOME,
-    RECOGNITION_LATENCY,
-    SUGGESTION_ACTION,
-    RUNTIME_ERROR,
-}
-
-/** Suggestion/correction action family. Never carries the suggested text itself. */
-enum class DiagnosticsSuggestionAction {
-    REPLACEMENT,
-    SUGGESTION_PICK,
-    UNDO,
-}
-
-/** Redacted, enum-only runtime error classification. */
-enum class DiagnosticsRuntimeErrorCode {
-    RECOGNITION_FAILED,
-    CORRECTION_FAILED,
-    COMMAND_FAILED,
-    SETTINGS_FAILED,
-    UNKNOWN,
-}
-
-/** Coarse recognition-latency bucket. Never the raw millisecond value. */
-enum class RecognitionLatencyBucket {
-    UNDER_50_MS,
-    FROM_50_TO_99_MS,
-    FROM_100_TO_249_MS,
-    FROM_250_TO_499_MS,
-    FROM_500_TO_999_MS,
-    OVER_1000_MS,
-    ;
-
-    companion object {
-        fun forMillis(latencyMs: Long): RecognitionLatencyBucket = when {
-            latencyMs < 50L -> UNDER_50_MS
-            latencyMs < 100L -> FROM_50_TO_99_MS
-            latencyMs < 250L -> FROM_100_TO_249_MS
-            latencyMs < 500L -> FROM_250_TO_499_MS
-            latencyMs < 1_000L -> FROM_500_TO_999_MS
-            else -> OVER_1000_MS
-        }
-    }
-}
-
-/**
- * A single bounded, typed breadcrumb. Every field is an enum, a count, or an already-redacted
- * error, never editor text, candidate strings, or raw coordinates.
- */
-data class DiagnosticsBreadcrumb(
-    val kind: DiagnosticsBreadcrumbKind,
-    val count: Int = 1,
-    val gestureKind: DiagnosticsGestureKind? = null,
-    val outcome: DiagnosticsOutcome? = null,
-    val latencyBucket: RecognitionLatencyBucket? = null,
-    val suggestionAction: DiagnosticsSuggestionAction? = null,
-    val errorCode: DiagnosticsRuntimeErrorCode? = null,
-    val error: RedactedThrowable? = null,
-)
-
 /**
  * Opt-in diagnostics capture: a bounded in-memory breadcrumb ring plus a small set of semantic
  * event helpers that serialize through the existing [DiagnosticsEvent] contract.
@@ -165,13 +93,33 @@ class DiagnosticsTelemetry(
     }
 
     fun recordRuntimeError(code: DiagnosticsRuntimeErrorCode, throwable: Throwable) {
+        val redacted = redactThrowable(throwable)
         addBreadcrumb(
             DiagnosticsBreadcrumb(
                 kind = DiagnosticsBreadcrumbKind.RUNTIME_ERROR,
                 errorCode = code,
-                error = redactThrowable(throwable),
+                error = redacted,
             ),
         )
+        record(DiagnosticsEvent.RuntimeError(code = code, error = redacted))
+    }
+
+    /**
+     * Reports a crash envelope written by the crash handler on a previous launch, then deletes it
+     * so it is reported exactly once. No-op when diagnostics consent is disabled - nothing about a
+     * crash is serialized while the plane is off - and callers must run this off the main thread
+     * (it reads a file and appends to the queue).
+     */
+    fun reportPendingCrash(crashFile: File) {
+        runSafely {
+            if (!diagnosticsEnabled()) return@runSafely
+            val payload = runCatching { crashFile.readText() }.getOrNull() ?: return@runSafely
+            val event = runCatching { DiagnosticsEventCodec.decode(payload) }.getOrNull()
+            if (event !is DiagnosticsEvent.Crash) return@runSafely
+            record(event)
+            flush()
+            runCatching { crashFile.delete() }
+        }
     }
 
     /** Snapshot of the current bounded breadcrumb ring, oldest first. */
@@ -241,6 +189,9 @@ class DiagnosticsTelemetry(
  */
 object DiagnosticsTelemetryProvider {
     private const val TELEMETRY_QUEUE_DIRECTORY = "telemetry"
+    private const val CRASH_FILE_NAME = "diagnostics-crash.json"
+
+    private val crashReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
     private var telemetry: DiagnosticsTelemetry? = null
@@ -308,6 +259,21 @@ object DiagnosticsTelemetryProvider {
         limits = QueueLimits(),
     )
 
+    /** Where the crash handler leaves an envelope for the next launch to report. */
+    internal fun crashFile(context: Context) =
+        File(File(context.filesDir, TELEMETRY_QUEUE_DIRECTORY), CRASH_FILE_NAME)
+
+    /**
+     * Replays a crash envelope left behind by a previous launch. Runs on [crashReportScope] so
+     * application startup never blocks on file I/O, a queue append, or WorkManager scheduling.
+     */
+    fun reportPendingCrash(context: Context) {
+        val appContext = context.applicationContext
+        crashReportScope.launch {
+            runCatching { telemetry?.reportPendingCrash(crashFile(appContext)) }
+        }
+    }
+
     private fun buildEnvelope(context: Context, event: DiagnosticsEvent): TelemetryEnvelope {
         val installation = runCatching {
             TelemetryInstallationStore(context).getOrCreateInstallation {
@@ -329,7 +295,7 @@ object DiagnosticsTelemetryProvider {
             appVersion = BuildConfig.VERSION_NAME,
             buildType = BuildConfig.BUILD_TYPE,
             androidApi = Build.VERSION.SDK_INT,
-            eventType = "gesture_outcome",
+            eventType = DiagnosticsEventCodec.eventType(event),
             payload = payload,
         )
     }

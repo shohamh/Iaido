@@ -80,8 +80,9 @@ loopback-published container — and the Android build then takes
 
 Open `https://<host>.<tailnet>.ts.net/` in a browser to see what has been collected: the operator
 dashboard lists both planes separately (batch and event counts, newest batches, diagnostics
-aggregates, audit log) and opens any batch to show its stored payloads. The browser login is the
-configured dashboard user and password (`IAIDO_DASHBOARD_USERNAME`, default `iaido`;
+aggregates, audit log), draws gesture traces over the virtual keyboard (`/gestures`), and shows
+runtime errors and crashes with their redacted tracebacks and breadcrumbs (`/errors`). The browser
+login is the configured dashboard user and password (`IAIDO_DASHBOARD_USERNAME`, default `iaido`;
 `IAIDO_DASHBOARD_PASSWORD`, default: the operator token) — see
 [`telemetry-server/README.md`](telemetry-server/README.md).
 

@@ -1,7 +1,6 @@
 package com.iaido.app
 
 import android.app.Application
-import java.io.File
 
 internal fun isDefaultApplicationProcess(processName: String, applicationPackageName: String): Boolean =
     processName == applicationPackageName
@@ -27,16 +26,16 @@ class IaidoApplication : Application() {
         runCatching {
             DiagnosticsTelemetryProvider.initialize(this)
             DiagnosticsTelemetryProvider.instance?.recordAppStart()
+            DiagnosticsTelemetryProvider.reportPendingCrash(this)
             installTelemetryCrashHandler()
         }
     }
 
     private fun installTelemetryCrashHandler() {
         runCatching {
-            val crashFile = File(File(filesDir, "telemetry"), "diagnostics-crash.json")
             TelemetryCrashHandler.install(
                 enabled = DiagnosticsTelemetryProvider::isEnabled,
-                crashStore = BoundedFileCrashStore(crashFile),
+                crashStore = BoundedFileCrashStore(DiagnosticsTelemetryProvider.crashFile(this)),
                 breadcrumbs = { DiagnosticsTelemetryProvider.instance?.breadcrumbs() ?: emptyList() },
             )
         }

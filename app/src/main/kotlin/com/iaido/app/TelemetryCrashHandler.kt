@@ -1,10 +1,6 @@
 package com.iaido.app
 
 import java.io.File
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 
 /** Storage sink for a single bounded crash envelope. */
 interface CrashStore {
@@ -32,13 +28,17 @@ class BoundedFileCrashStore(
  * only when diagnostics consent is enabled, then always delegates to [prior] - even when the
  * consent check, envelope construction, or persistence itself fails. Crash delegation must never
  * be blocked by diagnostics capture.
+ *
+ * The envelope is exactly the wire crash payload ([DiagnosticsEventCodec] encoding of
+ * [DiagnosticsEvent.Crash]), so the next launch can decode it and enqueue it unchanged. The crash
+ * timestamp is deliberately not carried: the replayed event's `occurred_at_ms` is the report
+ * time, which keeps the envelope identical to what the server validates.
  */
 class TelemetryCrashHandler(
     private val enabled: () -> Boolean,
     private val crashStore: CrashStore,
     private val breadcrumbs: () -> List<DiagnosticsBreadcrumb> = { emptyList() },
     private val prior: Thread.UncaughtExceptionHandler?,
-    private val clock: () -> Long = System::currentTimeMillis,
 ) : Thread.UncaughtExceptionHandler {
 
     /** The last payload this handler attempted to write. Exposed for testing/inspection. */
@@ -69,40 +69,20 @@ class TelemetryCrashHandler(
             breadcrumbs()
         } catch (_: Exception) {
             emptyList()
-        }
+        }.takeLast(MAX_BREADCRUMBS)
 
-        var json = renderPayload(error, crumbs)
+        var json = DiagnosticsEventCodec.encode(
+            DiagnosticsEvent.Crash(error = error, breadcrumbs = crumbs),
+        )
         while (json.toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD_BYTES && crumbs.isNotEmpty()) {
             crumbs = crumbs.drop(1)
-            json = renderPayload(error, crumbs)
+            json = DiagnosticsEventCodec.encode(
+                DiagnosticsEvent.Crash(error = error, breadcrumbs = crumbs),
+            )
         }
 
         val bytes = json.toByteArray(Charsets.UTF_8)
         return if (bytes.size <= MAX_PAYLOAD_BYTES) json else String(bytes.copyOf(MAX_PAYLOAD_BYTES), Charsets.UTF_8)
-    }
-
-    private fun renderPayload(error: RedactedThrowable, crumbs: List<DiagnosticsBreadcrumb>): String =
-        buildJsonObject {
-            put("occurred_at_ms", JsonPrimitive(clock()))
-            put("error", renderError(error))
-            put("breadcrumbs", buildJsonArray { crumbs.forEach { add(renderBreadcrumb(it)) } })
-        }.toString()
-
-    private fun renderError(error: RedactedThrowable) = buildJsonObject {
-        put("type", JsonPrimitive(error.type))
-        put("message", error.message?.let { JsonPrimitive(it) } ?: JsonNull)
-        put("stackTrace", JsonPrimitive(error.stackTrace))
-    }
-
-    private fun renderBreadcrumb(crumb: DiagnosticsBreadcrumb) = buildJsonObject {
-        put("kind", JsonPrimitive(crumb.kind.name))
-        put("count", JsonPrimitive(crumb.count))
-        crumb.gestureKind?.let { put("gestureKind", JsonPrimitive(it.name)) }
-        crumb.outcome?.let { put("outcome", JsonPrimitive(it.name)) }
-        crumb.latencyBucket?.let { put("latencyBucket", JsonPrimitive(it.name)) }
-        crumb.suggestionAction?.let { put("suggestionAction", JsonPrimitive(it.name)) }
-        crumb.errorCode?.let { put("errorCode", JsonPrimitive(it.name)) }
-        crumb.error?.let { put("error", renderError(it)) }
     }
 
     companion object {

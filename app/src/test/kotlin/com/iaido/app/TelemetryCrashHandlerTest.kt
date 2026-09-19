@@ -26,17 +26,21 @@ class TelemetryCrashHandlerTest {
                 )
             },
             prior = prior,
-            clock = { 1_000L },
         )
 
         handler.uncaughtException(Thread.currentThread(), IllegalStateException("secret editor text"))
 
+        val payload = store.payload!!
         assertEquals(listOf("write", "delegate"), calls)
-        assertTrue(store.payload!!.contains("\"type\":\"exception\""))
-        assertTrue(store.payload!!.contains("<redacted>"))
-        assertFalse(store.payload!!.contains("secret editor text"))
-        assertFalse(store.payload!!.contains("other secret"))
-        assertTrue(store.payload!!.toByteArray().size <= TelemetryCrashHandler.MAX_PAYLOAD_BYTES)
+        // The envelope is the wire crash payload: the class name and frames are kept, and the
+        // exception message never is.
+        assertTrue(payload.contains("\"type\":\"IllegalStateException\""))
+        assertTrue(payload.contains("\"frames\":["))
+        assertTrue(DiagnosticsEventCodec.decode(payload) is DiagnosticsEvent.Crash)
+        assertFalse(payload.contains("secret editor text"))
+        assertFalse(payload.contains("other secret"))
+        assertFalse(payload.contains("C:\\Users"))
+        assertTrue(payload.toByteArray().size <= TelemetryCrashHandler.MAX_PAYLOAD_BYTES)
     }
 
     @Test

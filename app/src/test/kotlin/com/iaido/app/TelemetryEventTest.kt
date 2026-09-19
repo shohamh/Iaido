@@ -1,7 +1,10 @@
 package com.iaido.app
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -165,6 +168,84 @@ class TelemetryEventTest {
 
         assertFalse(withoutTrace.containsKey("trace_id"))
         assertEquals("trace-1", withTrace.getValue("trace_id").toString().trim('"'))
+    }
+
+    @Test
+    fun `diagnostics codec round trips gesture, runtime error, and crash events`() {
+        val error = RedactedThrowable(
+            "IllegalStateException",
+            listOf("RecognitionController.recognize(RecognitionController.kt:87)", "<redacted>"),
+        )
+        val events = listOf(
+            DiagnosticsEvent.GestureOutcome(DiagnosticsOutcome.REJECTED),
+            DiagnosticsEvent.RuntimeError(DiagnosticsRuntimeErrorCode.RECOGNITION_FAILED, error),
+            DiagnosticsEvent.Crash(
+                error = error,
+                breadcrumbs = listOf(
+                    DiagnosticsBreadcrumb(DiagnosticsBreadcrumbKind.APP_START),
+                    DiagnosticsBreadcrumb(
+                        kind = DiagnosticsBreadcrumbKind.GESTURE_OUTCOME,
+                        count = 3,
+                        gestureKind = DiagnosticsGestureKind.SWIPE,
+                        outcome = DiagnosticsOutcome.ACCEPTED,
+                    ),
+                    DiagnosticsBreadcrumb(
+                        kind = DiagnosticsBreadcrumbKind.RUNTIME_ERROR,
+                        errorCode = DiagnosticsRuntimeErrorCode.UNKNOWN,
+                        error = error,
+                    ),
+                ),
+            ),
+        )
+
+        events.forEach { event ->
+            val encoded = DiagnosticsEventCodec.encode(event)
+            assertEquals(event, DiagnosticsEventCodec.decode(encoded))
+            assertEquals(
+                DiagnosticsEventCodec.eventType(event),
+                Json.parseToJsonElement(encoded).jsonObject.getValue("event_type").jsonPrimitive.content,
+            )
+        }
+    }
+
+    @Test
+    fun `diagnostics codec rejects malformed or unbounded error payloads`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"runtime_error","code":"NOT_A_CODE","error":{"type":"X","frames":[]}}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"runtime_error","error":{"type":"X","frames":[]}}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"crash","error":{"type":"X","frames":["C:\\Users\\me\\A.kt:1"]},"breadcrumbs":[]}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"crash","error":{"type":"X","frames":[],"message":"typed secret"},"breadcrumbs":[]}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"crash","error":{"type":"X","frames":[]},"breadcrumbs":[{"kind":"APP_START","count":0}]}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEventCodec.decode(
+                """{"event_type":"crash","error":{"type":"X","frames":[]},"breadcrumbs":[{"kind":"RUNTIME_ERROR","count":1,"error_code":"UNKNOWN","sentence":"typed text"}]}""",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DiagnosticsEvent.Crash(
+                error = RedactedThrowable("X", listOf("<redacted>")),
+                breadcrumbs = List(MAX_BREADCRUMBS + 1) { DiagnosticsBreadcrumb(DiagnosticsBreadcrumbKind.APP_START) },
+            )
+        }
     }
 
     private fun boundedTraceOf(

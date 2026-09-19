@@ -208,9 +208,23 @@ curl -G \
 
 `GET /` renders a read-only HTML view of both planes from the same repository and object storage:
 per-plane batch and event counts, the newest batches (each linking to its own page), the
-diagnostics aggregate facts, and the audit log.
-`GET /batches/{plane}/{installation_id}/{batch_id}` shows one batch's envelope fields and every
-stored payload.
+diagnostics aggregate facts, research trace/correction counts, and the audit log.
+
+| Route | Contents |
+|---|---|
+| `/` | Overview: per-plane counts, newest batches, diagnostics aggregates (gesture outcomes, correction actions, latency buckets, runtime errors, crashes), research trace/correction counts, links, audit log |
+| `/gestures` | Newest research gesture traces, each drawn over the virtual keyboard the trace was captured on |
+| `/errors` | Newest diagnostics runtime errors and crashes: stable code, exception class, stack frames, and crash breadcrumbs |
+| `/batches/{plane}/{installation_id}/{batch_id}` | One batch: envelope fields plus every stored payload, with traces rendered and errors shown as tracebacks |
+
+The gesture view draws the same key geometry the keyboard uses (`KeyboardGeometry.kt`,
+`KeyboardInputView.kt`): 10 columns, four rows of equal height, three centred letter rows, and a
+weighted bottom row. Trace points are already normalized to that surface, so nothing is rescaled;
+each pointer id gets its own polyline, with a ring at the start and a filled dot at the end.
+
+Errors and crashes render from the diagnostics payloads. Diagnostics never carry exception
+*messages* - a message can embed typed text - so a reader gets the exception class, the
+`Class.method(File:line)` frames, and the enum-only breadcrumbs that led up to a crash.
 
 Authentication is HTTP Basic with the configured dashboard login - `IAIDO_DASHBOARD_USERNAME`
 (default `iaido`) and `IAIDO_DASHBOARD_PASSWORD` (default: the operator token) - so a browser can
@@ -346,7 +360,7 @@ created above, and are discarded with it.
 
 ```bash
 python -m pytest tests/test_deletion_retention_export.py -q
-python -m pytest tests -q          # full suite: 68 tests
+python -m pytest tests -q          # full suite: 102 tests
 ```
 
 Runs deletion (metadata + object removal, idempotency, plane isolation,

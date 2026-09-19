@@ -127,10 +127,14 @@ class TelemetryQueue(
 
     private fun validateForPlane(event: TelemetryEnvelope) {
         if (plane != TelemetryPlane.DIAGNOSTICS) return
-        require(event.eventType == "gesture_outcome") {
-            "Diagnostics queue only accepts gesture outcome events"
+        // Decoding both validates the payload against the diagnostics contract and rejects any
+        // research payload (its event type is unknown here), so the plane guard still holds while
+        // every diagnostics event type - gesture outcome, runtime error, crash - is accepted.
+        val decoded = DiagnosticsEventCodec.decode(event.payload.toString())
+        require(event.eventType == DiagnosticsEventCodec.eventType(decoded)) {
+            "Diagnostics envelope event type must match its payload"
         }
-        validateDiagnostics(DiagnosticsEventCodec.decode(event.payload.toString()))
+        validateDiagnostics(decoded)
     }
 
     private fun batchFiles(): List<BatchFile> = storageDirectory.listFiles { file ->

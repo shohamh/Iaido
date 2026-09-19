@@ -70,19 +70,97 @@ class DiagnosticsTelemetryTest {
     }
 
     @Test
-    fun `runtime errors are redacted before entering crash metadata`() {
-        withRuntime(enabled = true) { runtime, _, _ ->
+    fun `runtime errors keep the class and frames but queue without the message`() {
+        withRuntime(enabled = true) { runtime, queue, scheduled ->
             runtime.recordRuntimeError(
                 DiagnosticsRuntimeErrorCode.RECOGNITION_FAILED,
                 IllegalStateException("secret editor text"),
             )
+            runtime.flush()
 
             val breadcrumb = runtime.breadcrumbs().single()
             assertEquals(DiagnosticsRuntimeErrorCode.RECOGNITION_FAILED, breadcrumb.errorCode)
-            assertEquals("exception", breadcrumb.error?.type)
-            assertNull(breadcrumb.error?.message)
-            assertEquals("<redacted>", breadcrumb.error?.stackTrace)
+            assertEquals("IllegalStateException", breadcrumb.error?.type)
+            assertTrue(breadcrumb.error!!.frames.isNotEmpty())
             assertFalse(breadcrumb.toString().contains("secret editor text"))
+
+            val event = queue.pendingBatches().single().events.single()
+            assertEquals("runtime_error", event.eventType)
+            assertEquals(
+                DiagnosticsRuntimeErrorCode.RECOGNITION_FAILED,
+                DiagnosticsEventCodec.decode(event.payload.toString())
+                    .let { it as DiagnosticsEvent.RuntimeError }
+                    .code,
+            )
+            assertFalse(event.payload.toString().contains("secret editor text"))
+            assertTrue(scheduled())
+        }
+    }
+
+    @Test
+    fun `a pending crash envelope is reported once and deleted`() {
+        val directory = Files.createTempDirectory("pending-crash").toFile()
+        try {
+            val crashFile = directory.resolve("diagnostics-crash.json")
+            val error = RedactedThrowable("IllegalStateException", listOf("Foo.bar(Foo.kt:12)"))
+            crashFile.writeText(
+                DiagnosticsEventCodec.encode(
+                    DiagnosticsEvent.Crash(
+                        error = error,
+                        breadcrumbs = listOf(DiagnosticsBreadcrumb(DiagnosticsBreadcrumbKind.APP_START)),
+                    ),
+                ),
+            )
+            withRuntime(enabled = true) { runtime, queue, scheduled ->
+                runtime.reportPendingCrash(crashFile)
+                runtime.reportPendingCrash(crashFile)
+
+                val events = queue.pendingBatches().single().events
+                assertEquals(1, events.size)
+                assertEquals("crash", events.single().eventType)
+                assertFalse(crashFile.exists())
+                assertTrue(scheduled())
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a pending crash envelope is never reported while consent is off`() {
+        val directory = Files.createTempDirectory("pending-crash-disabled").toFile()
+        try {
+            val crashFile = directory.resolve("diagnostics-crash.json")
+            crashFile.writeText(
+                DiagnosticsEventCodec.encode(
+                    DiagnosticsEvent.Crash(error = RedactedThrowable("IllegalStateException", listOf("<redacted>"))),
+                ),
+            )
+            withRuntime(enabled = false) { runtime, queue, scheduled ->
+                runtime.reportPendingCrash(crashFile)
+
+                assertEquals(0, queue.pendingBatches().size)
+                assertFalse(scheduled())
+                assertTrue(crashFile.exists(), "the envelope must survive until consent is enabled again")
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a corrupt crash envelope is ignored and never queued`() {
+        val directory = Files.createTempDirectory("pending-crash-corrupt").toFile()
+        try {
+            val crashFile = directory.resolve("diagnostics-crash.json")
+            crashFile.writeText("""{"event_type":"crash","error":{"type":"X","frames":["C:\\Users\\me\\A.kt:1"]}}""")
+            withRuntime(enabled = true) { runtime, queue, _ ->
+                runtime.reportPendingCrash(crashFile)
+
+                assertEquals(0, queue.pendingBatches().size)
+            }
+        } finally {
+            directory.deleteRecursively()
         }
     }
 
@@ -143,7 +221,7 @@ class DiagnosticsTelemetryTest {
             appVersion = "0.1.3",
             buildType = "debug",
             androidApi = 36,
-            eventType = "gesture_outcome",
+            eventType = DiagnosticsEventCodec.eventType(event),
             payload = payload,
         )
     }

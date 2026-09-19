@@ -48,13 +48,16 @@ Plane = Literal["diagnostics", "research"]
 #: latency/candidate bucket, or a suggestion/correction action enum). Never
 #: includes free text or coordinate data, so aggregate event facts can never
 #: carry research/diagnostics payload content.
-DISCRIMINATOR_FIELDS = ("outcome", "action", "error_code", "bucket", "latency_bucket")
+DISCRIMINATOR_FIELDS = ("outcome", "action", "error_code", "bucket", "latency_bucket", "classification")
 
 
 def _event_discriminator(payload: dict) -> str | None:
     for field in DISCRIMINATOR_FIELDS:
         if field in payload:
             return str(payload[field])
+    error = payload.get("error")
+    if isinstance(error, dict) and "type" in error:
+        return str(error["type"])
     return None
 
 

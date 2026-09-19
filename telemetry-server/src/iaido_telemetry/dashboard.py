@@ -38,6 +38,11 @@ AGGREGATE_FACTS = (
     ("crash", "Crashes"),
 )
 
+RESEARCH_AGGREGATE_FACTS = (
+    ("gesture_trace", "Gesture traces"),
+    ("research_correction", "Corrections"),
+)
+
 STYLES = """
 body { background: #ffffff; color: #1b1b1b; font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; margin: 0 auto; max-width: 1100px; padding: 24px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
@@ -52,6 +57,11 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; colo
 pre { background: #f7f7f7; border: 1px solid #e0e0e0; padding: 8px; overflow-x: auto; }
 .note { background: #fff8e1; border: 1px solid #f0d98c; color: #1b1b1b; padding: 8px 12px; }
 .empty { color: #5f6368; font-style: italic; }
+.card { display: inline-block; vertical-align: top; width: 340px; margin: 0 16px 16px 0; }
+figure.trace { margin: 0 0 8px; }
+.error { margin: 0 0 16px; }
+.traceback { background: #f7f7f7; border: 1px solid #e0e0e0; padding: 8px; white-space: pre; }
+h4 { font-size: 13px; margin: 8px 0 4px; }
 """
 
 
@@ -85,6 +95,132 @@ def _table(headers: list[str], rows: list[list[str]], *, empty: str) -> str:
         "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows
     )
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+# --- Virtual keyboard -------------------------------------------------------
+# Mirrors app/src/main/kotlin/com/iaido/app/KeyboardGeometry.kt and KeyboardInputView.kt: a
+# 10-column, 4-row surface (each key is as tall as it is wide, so a row is 1/4 of the surface
+# height), three letter rows with centred offsets, and a weighted bottom row. Research trace
+# points are normalized to exactly that surface, so the SVG can draw the keys and the path in the
+# same [0, 1] space with no scaling.
+KEYBOARD_COLUMN_COUNT = 10
+KEYBOARD_ROW_COUNT = 4
+LETTER_ROWS = {
+    "qwerty": (("qwertyuiop", 0.0), ("asdfghjkl", 0.5), ("zxcvbnm", 1.5)),
+    "hebrew": (
+        ("\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4", 1.5),
+        ("\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3", 1.5),
+        ("\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5", 1.5),
+    ),
+}
+BOTTOM_ROWS = {
+    "qwerty": (("globe", 1.0), ("settings", 1.0), ("'", 1.0), ("?", 1.0), (",", 1.0), (".", 1.0), ("space", 3.0), ("del", 1.0)),
+    "hebrew": (("globe", 1.0), ("settings", 1.0), ("\u00b3", 1.0), ("\u00b4", 1.0), ("space", 3.0), ("del", 1.0)),
+}
+KEY_LABELS = {"globe": "\U0001F310", "settings": "\u2699", "space": "\u2423", "del": "\u232B"}
+POINTER_COLORS = ("#0b57d0", "#c5221f", "#137333", "#8430ce", "#b06000", "#0e7490")
+
+# SVG presentation lives with the stylesheet's palette; the trace is drawn as one polyline per
+# pointer so a multi-touch gesture keeps its fingers visually distinct.
+SVG_STYLE = """
+.key { fill: none; stroke: #9aa0a6; stroke-width: 0.006; }
+.key-label { fill: #5f6368; font-size: 0.055px; text-anchor: middle; dominant-baseline: middle; }
+.point { fill: #ffffff; stroke-width: 0.012; }
+.path { fill: none; stroke-width: 0.022; stroke-linecap: round; stroke-linejoin: round; }
+.frame { fill: #ffffff; stroke: #d0d0d0; stroke-width: 0.006; }
+"""
+
+
+def _svg_keys(layout_id: str) -> list[str]:
+    column_units = KEYBOARD_COLUMN_COUNT if layout_id == "qwerty" else 11
+    rows = LETTER_ROWS.get(layout_id, LETTER_ROWS["qwerty"])
+    parts: list[str] = []
+    for row_index, (letters, offset_units) in enumerate(rows):
+        top = row_index / KEYBOARD_ROW_COUNT
+        height = 1 / KEYBOARD_ROW_COUNT
+        for index, letter in enumerate(letters):
+            left = (index + offset_units) / column_units
+            width = 1 / column_units
+            parts.append(
+                f'<rect class="key" x="{left:.4f}" y="{top:.4f}" '
+                f'width="{width:.4f}" height="{height:.4f}"/>'
+                f'<text class="key-label" x="{left + width / 2:.4f}" y="{top + height / 2:.4f}">{_esc(letter)}</text>'
+            )
+    bottom_top = (KEYBOARD_ROW_COUNT - 1) / KEYBOARD_ROW_COUNT
+    bottom_height = 1 / KEYBOARD_ROW_COUNT
+    cursor = 0.0
+    keys = BOTTOM_ROWS.get(layout_id, BOTTOM_ROWS["qwerty"])
+    for index, (name, weight) in enumerate(keys):
+        left = cursor / column_units
+        is_last = index == len(keys) - 1
+        right = 1.0 if is_last else (cursor + weight) / column_units
+        cursor += weight
+        parts.append(
+            f'<rect class="key" x="{left:.4f}" y="{bottom_top:.4f}" width="{right - left:.4f}" '
+            f'height="{bottom_height:.4f}"/>'
+            f'<text class="key-label" x="{(left + right) / 2:.4f}" y="{bottom_top + bottom_height / 2:.4f}">'
+            f"{_esc(KEY_LABELS.get(name, name))}</text>"
+        )
+    return parts
+
+
+def render_keyboard_svg(payload: dict, *, size: int = 320) -> str:
+    """Draw one stored gesture trace over a virtual keyboard.
+
+    Keys come from the same geometry the keyboard uses ([LETTER_ROWS], [BOTTOM_ROWS],
+    [KEYBOARD_COLUMN_COUNT], [KEYBOARD_ROW_COUNT]); trace points are already normalized to that
+    surface, so the path is drawn in the same [0, 1] space. One polyline per pointer id keeps a
+    multi-pointer gesture readable, with a ring at the start and a filled dot at the end.
+    """
+    layout_id = payload.get("layout_id", "qwerty")
+    points = payload.get("points", [])
+    by_pointer: dict[int, list[dict]] = {}
+    for point in points:
+        by_pointer.setdefault(int(point.get("pointer_id", 0)), []).append(point)
+
+    paths = []
+    for order, (pointer_id, samples) in enumerate(sorted(by_pointer.items())):
+        colour = POINTER_COLORS[order % len(POINTER_COLORS)]
+        coordinates = " ".join(f"{float(s['x']):.4f},{float(s['y']):.4f}" for s in samples)
+        paths.append(
+            f'<polyline class="path" stroke="{colour}" points="{coordinates}"/>'
+        )
+        first, last = samples[0], samples[-1]
+        paths.append(
+            f'<circle class="point" stroke="{colour}" cx="{float(first["x"]):.4f}" '
+            f'cy="{float(first["y"]):.4f}" r="0.018"/>'
+        )
+        paths.append(
+            f'<circle class="point" fill="{colour}" stroke="{colour}" cx="{float(last["x"]):.4f}" '
+            f'cy="{float(last["y"]):.4f}" r="0.026"/>'
+        )
+
+    title = (
+        f"{payload.get('classification', 'trace')} · {layout_id} · {len(points)} points · "
+        f"{len(by_pointer)} pointer(s)"
+    )
+    return (
+        f'<svg viewBox="0 0 1 1" width="{size}" height="{size}" role="img" '
+        f'aria-label="{_esc(title)}">'
+        f"<style>{SVG_STYLE}</style>"
+        f'<rect class="frame" x="0" y="0" width="1" height="1"/>'
+        + "".join(_svg_keys(layout_id))
+        + "".join(paths)
+        + "</svg>"
+    )
+
+
+def _recent_events(database: TelemetryRepository, storage: ObjectStorage, plane: str, *, batches: int, wanted: set[str] | None = None):
+    """Yield (record, event) newest batch first, optionally filtered to [wanted] event types."""
+    records = sorted(database.list_batches(plane), key=lambda item: item.received_at_ms, reverse=True)
+    for record in records[:batches]:
+        try:
+            batch = json.loads(storage.get(record.object_key))
+        except Exception:
+            continue
+        for event in batch.get("events", []):
+            if wanted is None or event.get("event_type") in wanted:
+                yield record, event
 
 
 def render_dashboard(
@@ -147,6 +283,34 @@ def render_dashboard(
         rendered = ", ".join(f"{_esc(key)}: {_esc(value)}" for key, value in sorted(counts.items()))
         aggregate_rows.append([_esc(label), _esc(total), rendered or "-"])
     parts.append(_table(["Metric", "Events", "Breakdown"], aggregate_rows, empty="No diagnostics events recorded yet."))
+
+    parts.append("<h2>Gestures and errors</h2>")
+    parts.append(
+        "<p>Gesture traces are drawn over the keyboard surface they were captured on; runtime "
+        "errors and crashes show the exception class, its frames, and the breadcrumbs that led "
+        "up to a crash.</p>"
+    )
+    research_rows = []
+    for event_type, label in RESEARCH_AGGREGATE_FACTS:
+        total = database.event_counts("research", event_type)
+        if not total:
+            continue
+        counts = database.event_discriminator_counts("research", event_type)
+        rendered = ", ".join(f"{_esc(key)}: {_esc(value)}" for key, value in sorted(counts.items()))
+        research_rows.append([_esc(label), _esc(total), rendered or "-"])
+    parts.append(
+        _table(
+            ["Research metric", "Events", "Breakdown"],
+            research_rows,
+            empty="No research events recorded yet.",
+        )
+    )
+    parts.append(
+        f'<p><a href="/gestures">All gesture traces</a> · '
+        f'<a href="/errors">All errors and crashes</a> '
+        f"({_esc(database.event_counts('diagnostics', 'runtime_error'))} runtime error(s), "
+        f"{_esc(database.event_counts('diagnostics', 'crash'))} crash(es))</p>"
+    )
 
     parts.append("<h2>Audit log</h2>")
     parts.append(
@@ -237,13 +401,131 @@ def render_batch(
         "points.</p>"
     )
     for index, event in enumerate(batch.get("events", [])):
-        payload = json.dumps(event.get("payload", {}), indent=2, sort_keys=True, ensure_ascii=False)
+        payload = event.get("payload", {})
+        if event.get("event_type") == "gesture_trace":
+            parts.append(
+                f"<h3>#{_esc(index)} gesture_trace — {_esc(payload.get('classification', ''))} "
+                f"({_esc(payload.get('layout_id', ''))}, {_esc(len(payload.get('points', [])))} points, "
+                f"{_esc(payload.get('algorithm_version', ''))})</h3>"
+            )
+            parts.append(f'<figure class="trace">{render_keyboard_svg(payload, size=360)}</figure>')
+        elif event.get("event_type") == "runtime_error":
+            parts.append(f"<h3>#{_esc(index)} runtime_error</h3>")
+            parts.append(_error_block(payload))
+        elif event.get("event_type") == "crash":
+            parts.append(f"<h3>#{_esc(index)} crash</h3>")
+            parts.append(_error_block(payload, breadcrumbs=payload.get("breadcrumbs", [])))
+        else:
+            parts.append(f"<h3>#{_esc(index)} {_esc(event.get('event_type', '-'))}</h3>")
         parts.append(
-            f"<h3>#{_esc(index)} {_esc(event.get('event_type', '-'))}</h3>"
-            f"<pre>{_esc(payload)}</pre>"
+            f"<pre>{_esc(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))}</pre>"
         )
 
     return _page(f"{plane} batch {batch_id}", "".join(parts))
+
+
+def _breadcrumb_detail(breadcrumb: dict) -> str:
+    detail = [
+        f"{key}={breadcrumb[key]}"
+        for key in ("gesture_kind", "outcome", "latency_bucket", "suggestion_action", "error_code")
+        if breadcrumb.get(key)
+    ]
+    error = breadcrumb.get("error")
+    if isinstance(error, dict) and error.get("type"):
+        detail.append(f"error={error['type']}")
+    return ", ".join(detail)
+
+
+def _error_block(payload: dict, *, breadcrumbs: list[dict] | None = None) -> str:
+    """Render a runtime error or crash: stable code, exception class, traceback, breadcrumbs."""
+    error = payload.get("error", {})
+    frames = error.get("frames", [])
+    parts = ['<div class="error">']
+    if payload.get("code"):
+        parts.append(f'<p><strong>Code</strong> <code>{_esc(payload["code"])}</code></p>')
+    parts.append(f'<p><strong>Exception</strong> <code>{_esc(error.get("type", "-"))}</code></p>')
+    if frames:
+        traceback = "\n".join(f"    at {frame}" for frame in frames)
+        parts.append(f'<pre class="traceback">{_esc(traceback)}</pre>')
+    else:
+        parts.append('<p class="empty">No frames were recorded for this exception.</p>')
+    if breadcrumbs:
+        rows = [
+            [_esc(item.get("kind", "-")), _esc(item.get("count", "-")), _esc(_breadcrumb_detail(item))]
+            for item in breadcrumbs
+        ]
+        parts.append("<h4>Breadcrumbs (oldest first)</h4>")
+        parts.append(_table(["Kind", "Count", "Detail"], rows, empty="No breadcrumbs recorded."))
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_gestures(database: TelemetryRepository, storage: ObjectStorage, *, limit: int = 24) -> str:
+    """Render the newest stored gesture traces, each drawn over the virtual keyboard."""
+    parts = [
+        '<p><a href="/">← all batches</a></p>',
+        "<h1>Gestures</h1>",
+        '<p class="meta">Newest research traces first, drawn over the keyboard surface the trace '
+        "was captured on. The ring marks where a pointer started and the filled dot where it "
+        "ended.</p>",
+        '<p class="note">Traces are normalized to the keyboard surface; they can be correlated '
+        "with readable typing content in the same batch. Treat this page as sensitive.</p>",
+    ]
+    cards = []
+    for record, event in _recent_events(
+        database, storage, "research", batches=64, wanted={"gesture_trace"}
+    ):
+        if len(cards) >= limit:
+            break
+        payload = event.get("payload", {})
+        points = payload.get("points", [])
+        duration = max((point.get("time_offset_ms", 0) for point in points), default=0)
+        pointers = len({point.get("pointer_id", 0) for point in points})
+        cards.append(
+            '<div class="card">'
+            f'<figure class="trace">{render_keyboard_svg(payload)}</figure>'
+            f'<p><strong>{_esc(payload.get("classification", "-"))}</strong> · '
+            f'{_esc(payload.get("language", "-"))} · {_esc(payload.get("layout_id", "-"))} · '
+            f'{_esc(len(points))} points · {_esc(pointers)} pointer(s) · {_esc(duration)} ms · '
+            f'algorithm v{_esc(payload.get("algorithm_version", "-"))}</p>'
+            f'<p class="meta">{_esc(_timestamp(event.get("occurred_at_ms")))} · '
+            f'<a href="/batches/research/{_esc(record.installation_id)}/{_esc(record.batch_id)}">batch</a>'
+            "</p></div>"
+        )
+    parts.append("".join(cards) if cards else '<p class="empty">No gesture traces stored yet.</p>')
+    return _page("Iaido gestures", "".join(parts))
+
+
+def render_errors(database: TelemetryRepository, storage: ObjectStorage, *, limit: int = 50) -> str:
+    """Render the newest diagnostics runtime errors and crashes, with their tracebacks."""
+    runtime_errors = database.event_counts("diagnostics", "runtime_error")
+    crashes = database.event_counts("diagnostics", "crash")
+    parts = [
+        '<p><a href="/">← all batches</a></p>',
+        "<h1>Errors and crashes</h1>",
+        f'<p class="meta">{_esc(runtime_errors)} runtime error event(s), {_esc(crashes)} crash '
+        "event(s) recorded. Newest first.</p>",
+        '<p class="note">Diagnostics carry no exception message - only the class and file/line '
+        "frames - so nothing typed by a user can appear here. Crashes are reported on the launch "
+        "after the crash.</p>",
+    ]
+    entries = []
+    for record, event in _recent_events(
+        database, storage, "diagnostics", batches=64, wanted={"runtime_error", "crash"}
+    ):
+        if len(entries) >= limit:
+            break
+        payload = event.get("payload", {})
+        entries.append(
+            f'<h3>{_esc(event.get("event_type", "-"))} · '
+            f'{_esc(_timestamp(event.get("occurred_at_ms")))} UTC</h3>'
+            + _error_block(payload, breadcrumbs=payload.get("breadcrumbs", []))
+            + f'<p class="meta">app {_esc(event.get("app_version", "-"))} '
+            f'({_esc(event.get("build_type", "-"))}, API {_esc(event.get("android_api", "-"))}) · '
+            f'<a href="/batches/diagnostics/{_esc(record.installation_id)}/{_esc(record.batch_id)}">batch</a></p>'
+        )
+    parts.append("".join(entries) if entries else '<p class="empty">No errors or crashes stored yet.</p>')
+    return _page("Iaido errors", "".join(parts))
 
 
 def register_dashboard(
@@ -276,6 +558,22 @@ def register_dashboard(
     )
     def dashboard() -> HTMLResponse:
         return HTMLResponse(render_dashboard(database))
+
+    @app.get(
+        "/gestures",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_operator)],
+    )
+    def gestures() -> HTMLResponse:
+        return HTMLResponse(render_gestures(database, storage))
+
+    @app.get(
+        "/errors",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_operator)],
+    )
+    def errors() -> HTMLResponse:
+        return HTMLResponse(render_errors(database, storage))
 
     @app.get(
         "/batches/{plane}/{installation_id}/{batch_id}",

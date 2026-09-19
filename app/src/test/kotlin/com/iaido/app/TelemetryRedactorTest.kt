@@ -1,18 +1,26 @@
 package com.iaido.app
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TelemetryRedactorTest {
     @Test
-    fun `redacts file paths and text-like exception details`() {
+    fun `keeps the exception class and file names but never the message or a directory`() {
         val result = redactThrowable(
             IllegalStateException("typed password=secret at C:\\Users\\me\\file.kt"),
         )
+        val rendered = result.frames.joinToString("\n")
 
-        assertFalse(result.stackTrace.contains("secret"))
-        assertFalse(result.stackTrace.contains("C:\\Users\\me"))
+        assertEquals("IllegalStateException", result.type)
+        assertTrue(result.frames.isNotEmpty(), "expected at least one frame")
+        assertTrue(rendered.contains("TelemetryRedactorTest.kt:"), "expected frames from this test")
+        assertFalse(rendered.contains("secret"))
+        assertFalse(rendered.contains("C:\\Users"))
+        assertFalse(rendered.contains("file.kt"))
+        assertFalse(rendered.contains("password"))
     }
 
     @Test
@@ -22,11 +30,33 @@ class TelemetryRedactorTest {
                 "candidate=hello clipboard=world https://host.test/search?q=password at (123,456)",
             ),
         )
+        val rendered = result.frames.joinToString("\n")
 
-        assertFalse(result.stackTrace.contains("hello"))
-        assertFalse(result.stackTrace.contains("world"))
-        assertFalse(result.stackTrace.contains("host.test"))
-        assertFalse(result.stackTrace.contains("123,456"))
+        assertFalse(rendered.contains("hello"))
+        assertFalse(rendered.contains("world"))
+        assertFalse(rendered.contains("host.test"))
+        assertFalse(rendered.contains("123,456"))
+    }
+
+    @Test
+    fun `frames cannot carry an absolute path or exceed the wire bounds`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RedactedThrowable("IllegalStateException", listOf("Foo.bar(C:\\Users\\me\\A.kt:12)"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RedactedThrowable("IllegalStateException", List(MAX_ERROR_FRAMES + 1) { "Foo.bar(Foo.kt:1)" })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RedactedThrowable("", listOf("<redacted>"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RedactedThrowable("Has spaces", listOf("<redacted>"))
+        }
+
+        // A frame that no JVM can render usefully still crosses the wire as the placeholder.
+        val noFrames = redactThrowable(IllegalStateException("no frames"))
+        assertTrue(noFrames.frames.isNotEmpty())
+        assertTrue(noFrames.frames.all { it == "<redacted>" || it.matches(ERROR_FRAME_PATTERN) })
     }
 
     @Test
