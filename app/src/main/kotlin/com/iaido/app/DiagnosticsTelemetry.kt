@@ -2,12 +2,15 @@ package com.iaido.app
 
 import android.content.Context
 import android.os.Build
+import androidx.datastore.preferences.core.Preferences
 import java.io.File
 import java.util.ArrayDeque
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -97,15 +100,25 @@ class DiagnosticsTelemetry(
     private val scheduleUpload: () -> Unit,
     private val envelopeFactory: (DiagnosticsEvent) -> TelemetryEnvelope,
     private val maxBreadcrumbs: Int = DEFAULT_MAX_BREADCRUMBS,
+    private val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
 ) {
     private val ring = ArrayDeque<DiagnosticsBreadcrumb>()
     private val pendingEvents = mutableListOf<DiagnosticsEvent>()
 
-    /** Records a raw diagnostics event for the next [flush]. No-op unless consent is enabled. */
+    /**
+     * Records a raw diagnostics event for a later [flush]. No-op unless consent is enabled.
+     *
+     * Events are only batched in memory here - callers must not call [flush] as a direct side
+     * effect of every [record]/[recordGesture] call, that would defeat the point of batching.
+     * [flush] is expected to run at natural boundaries (e.g. IME session end) instead. As a
+     * safety net against an unbounded in-memory backlog during a very long session, this also
+     * force-flushes once [pendingEvents] reaches [maxPendingEvents].
+     */
     fun record(event: DiagnosticsEvent) {
         runSafely {
             if (!diagnosticsEnabled()) return@runSafely
             pendingEvents.add(event)
+            if (pendingEvents.size >= maxPendingEvents) drainPendingEvents()
         }
     }
 
@@ -164,16 +177,26 @@ class DiagnosticsTelemetry(
     /** Snapshot of the current bounded breadcrumb ring, oldest first. */
     fun breadcrumbs(): List<DiagnosticsBreadcrumb> = runSafelyOrDefault(emptyList()) { ring.toList() }
 
-    /** Rolls any pending events into the diagnostics queue and schedules upload work. */
+    /**
+     * Rolls any pending events into the diagnostics queue and schedules upload work.
+     *
+     * This is the natural-boundary flush (IME session end, etc.) - it must never be invoked as a
+     * per-event side effect of [record]/[recordGesture]/[recordSuggestionAction].
+     */
     fun flush() {
         runSafely {
             if (!diagnosticsEnabled()) return@runSafely
-            val events = pendingEvents.toList()
-            if (events.isEmpty()) return@runSafely
-            pendingEvents.clear()
-            events.forEach { event -> appendToQueue(envelopeFactory(event)) }
-            scheduleUpload()
+            drainPendingEvents()
         }
+    }
+
+    /** Drains [pendingEvents] into the queue. Caller is responsible for the consent check. */
+    private fun drainPendingEvents() {
+        val events = pendingEvents.toList()
+        if (events.isEmpty()) return
+        pendingEvents.clear()
+        events.forEach { event -> appendToQueue(envelopeFactory(event)) }
+        scheduleUpload()
     }
 
     private fun addBreadcrumb(breadcrumb: DiagnosticsBreadcrumb) {
@@ -200,6 +223,14 @@ class DiagnosticsTelemetry(
 
     companion object {
         const val DEFAULT_MAX_BREADCRUMBS = 32
+
+        /**
+         * Upper bound on in-memory pending events between flushes. Reusing the queue's
+         * batch-size order of magnitude would be excessive for a purely in-RAM list held on the
+         * main thread, so this is a smaller dedicated cap: once reached, [record] force-flushes
+         * rather than growing without bound.
+         */
+        const val DEFAULT_MAX_PENDING_EVENTS = 40
     }
 }
 
@@ -236,15 +267,38 @@ object DiagnosticsTelemetryProvider {
             envelopeFactory = { event -> buildEnvelope(appContext, event) },
         )
 
+        collectConsent(appContext.settingsStore.data)
+    }
+
+    /**
+     * Keeps [consentEnabled] current by collecting [preferences] on a background scope, so the
+     * IME's main thread never does a synchronous DataStore read to check consent. Extracted from
+     * [initialize] so the reactive-update behavior is unit-testable with a fake [Flow] instead of
+     * a real [Context]/DataStore.
+     */
+    internal fun collectConsent(
+        preferences: Flow<Preferences>,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    ): Job = scope.launch {
         runCatching {
-            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-                runCatching {
-                    appContext.settingsStore.data.collect { preferences ->
-                        consentEnabled = diagnosticsConsentFromPreferences(preferences).enabled
-                    }
-                }
-            }
+            preferences.collect { prefs -> consentEnabled = diagnosticsConsentFromPreferences(prefs).enabled }
         }
+    }
+
+    /**
+     * Test-only seam: installs an explicit [DiagnosticsTelemetry]/consent state, bypassing
+     * [initialize]'s Context-bound wiring so provider-level tests can exercise [instance] and
+     * [isEnabled] without a real Android [Context].
+     */
+    internal fun installForTest(telemetry: DiagnosticsTelemetry?, consentEnabled: Boolean) {
+        this.telemetry = telemetry
+        this.consentEnabled = consentEnabled
+    }
+
+    /** Test-only seam: restores the singleton to its uninitialized state. */
+    internal fun resetForTest() {
+        telemetry = null
+        consentEnabled = false
     }
 
     private fun telemetryQueue(context: Context) = TelemetryQueue(

@@ -888,18 +888,16 @@ class IaidoInputMethodService : InputMethodService() {
         }
     }
 
+    // Diagnostics are batched in memory (see DiagnosticsTelemetry.record) and only flushed to
+    // local storage at natural session boundaries (onFinishInputView) or once the in-memory
+    // backlog crosses DiagnosticsTelemetry.DEFAULT_MAX_PENDING_EVENTS - never as a per-event
+    // side effect here, since that would mean a disk write + WorkManager call on every gesture.
     private fun trackGesture(kind: DiagnosticsGestureKind, outcome: DiagnosticsOutcome) {
-        DiagnosticsTelemetryProvider.instance?.let {
-            it.recordGesture(kind, outcome)
-            it.flush()
-        }
+        DiagnosticsTelemetryProvider.instance?.recordGesture(kind, outcome)
     }
 
     private fun trackSuggestion(action: DiagnosticsSuggestionAction, outcome: DiagnosticsOutcome) {
-        DiagnosticsTelemetryProvider.instance?.let {
-            it.recordSuggestionAction(action, outcome)
-            it.flush()
-        }
+        DiagnosticsTelemetryProvider.instance?.recordSuggestionAction(action, outcome)
     }
 
     private fun wordForDisplayIndex(displayIndex: Int) =
