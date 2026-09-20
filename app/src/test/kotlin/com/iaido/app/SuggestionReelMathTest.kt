@@ -24,6 +24,19 @@ class SuggestionReelMathTest {
     }
 
     @Test
+    fun `cursor focus follows the selected word when moving back and forth`() {
+        val words = listOf(
+            SessionWord(1, 0, 3, "one", "one", listOf("one"), false),
+            SessionWord(2, 4, 7, "two", "two", listOf("two"), false),
+            SessionWord(3, 8, 13, "three", "three", listOf("three"), false),
+        )
+
+        assertEquals(1, suggestionStripSelection(words, cursorPosition = 1).focusedWordId)
+        assertEquals(3, suggestionStripSelection(words, cursorPosition = 9).focusedWordId)
+        assertEquals(1, suggestionStripSelection(words, cursorPosition = 1).focusedWordId)
+    }
+
+    @Test
     fun `inline reels are not rendered a second time for sentence words already in the strip`() {
         val chip = SuggestionChip(word = "what", alternatives = listOf("what", "whatever"), id = 7)
         val reels = inlineReplacementReels(
@@ -110,6 +123,16 @@ class SuggestionReelMathTest {
     @Test
     fun `reel viewport never shrinks below one slot even with no candidates`() {
         assertEquals(1, reelVisibleSlotCount(candidateCount = 0))
+    }
+
+    @Test
+    fun `a single-character word still has a visible one-option reel`() {
+        val candidates = reelCandidatesForDisplay(
+            SuggestionChip(word = "a", alternatives = emptyList(), id = 1),
+        )
+
+        assertEquals(listOf("a"), candidates)
+        assertEquals(1, reelVisibleSlotCount(candidates.size))
     }
 
     @Test

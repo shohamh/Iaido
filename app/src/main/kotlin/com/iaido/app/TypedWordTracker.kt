@@ -83,7 +83,7 @@ internal class TypedWordTracker {
     private fun isSingleLetter(text: String) = text.length == 1 && text[0].isLetter()
 
     companion object {
-        /** A single letter is not worth offering corrections for. */
-        const val MIN_TYPED_WORD_LENGTH = 2
+        /** Every typed word, including a one-letter word, must remain addressable by the strip. */
+        const val MIN_TYPED_WORD_LENGTH = 1
     }
 }

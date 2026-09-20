@@ -4,6 +4,7 @@ import com.iaido.core.dictionary.WordEntry
 
 /** How many typed-word alternatives a chip offers, besides the typed word itself. */
 internal const val DEFAULT_TYPED_WORD_CANDIDATES = 4
+private const val MIN_TYPED_WORD_CANDIDATE_LENGTH = 2
 
 /**
  * Correction candidates for a word the user typed: dictionary entries that share its prefix, and
@@ -21,7 +22,7 @@ internal fun typedWordCandidates(
     dictionary: List<WordEntry>,
     limit: Int = DEFAULT_TYPED_WORD_CANDIDATES,
 ): List<String> {
-    if (word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH || limit <= 0) return emptyList()
+    if (word.length < MIN_TYPED_WORD_CANDIDATE_LENGTH || limit <= 0) return emptyList()
     val prefixMatches = ArrayList<WordEntry>()
     val nearMatches = ArrayList<WordEntry>()
     for (entry in dictionary) {

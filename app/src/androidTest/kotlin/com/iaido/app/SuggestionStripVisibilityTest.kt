@@ -125,4 +125,37 @@ class SuggestionStripVisibilityTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Iaido suggestion 3").assertIsDisplayed()
     }
+
+    @Test
+    fun focusedWordIsScrolledBackIntoViewWhenTheCursorMovesBackAndForth() {
+        var focusedId by mutableIntStateOf(1)
+
+        composeRule.setContent {
+            MaterialTheme {
+                SuggestionStrip(
+                    chips = (1..8).map { id ->
+                        SuggestionChip(
+                            word = "word$id",
+                            alternatives = listOf("word$id", "option$id"),
+                            selectedIndex = 0,
+                            id = id,
+                        )
+                    },
+                    rtl = false,
+                    focusedChipId = focusedId,
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 0").assertIsDisplayed()
+
+        composeRule.runOnIdle { focusedId = 8 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 7").assertIsDisplayed()
+
+        composeRule.runOnIdle { focusedId = 2 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1").assertIsDisplayed()
+    }
 }

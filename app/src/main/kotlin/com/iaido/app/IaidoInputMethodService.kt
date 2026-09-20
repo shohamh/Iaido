@@ -98,7 +98,7 @@ class IaidoInputMethodService : InputMethodService() {
     /** Tracks the word being typed so it becomes an addressable session word like a swiped one. */
     private val typedWords = TypedWordTracker()
     private var visibleWordIds: List<Int> = emptyList()
-    private var focusedWordId: Int? = null
+    private val focusedWordId = mutableStateOf<Int?>(null)
     // Recomputed only when correctionHistory actually changes (inside refreshSuggestionChips()),
     // not on every mergedReplacementOptions() call -- a live reel-drag preview fires
     // onReplacementOptionsChanged on every frame but never touches correctionHistory, so
@@ -264,7 +264,7 @@ class IaidoInputMethodService : InputMethodService() {
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
-        focusedWordId = null
+        focusedWordId.value = null
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
@@ -295,7 +295,7 @@ class IaidoInputMethodService : InputMethodService() {
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
-        focusedWordId = null
+        focusedWordId.value = null
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
@@ -395,7 +395,7 @@ class IaidoInputMethodService : InputMethodService() {
                         handleCommand(trigger)
                     },
                     suggestionChips = sessionChips.value,
-                    focusedChipId = focusedWordId,
+                    focusedChipId = focusedWordId.value,
                     replacementOptions = replacementOptions.value,
                     liveReplacementOptionIds = liveReplacementOptionIds.value,
                     showCandidateScores = showCandidateScores.value,
@@ -865,7 +865,7 @@ class IaidoInputMethodService : InputMethodService() {
         val selection = suggestionStripSelection(correctionHistory.words(), cursorPosition)
         val words = selection.words
         visibleWordIds = words.map { it.id }
-        focusedWordId = selection.focusedWordId
+        focusedWordId.value = selection.focusedWordId
         sessionChips.value = words.map { word ->
             SuggestionChip(
                 word = word.current,

@@ -23,12 +23,16 @@ class TypedWordTrackerTest {
     }
 
     @Test
-    fun `a multi-character commit ends the token without recording it`() {
+    fun `a multi-character commit closes the preceding typed letter`() {
         val tracker = TypedWordTracker()
         tracker.onCommitted("h", cursorBefore = 0, cursorAfter = 1)
 
-        // A swiped word arrives whole; it is recorded from its recognition candidates instead.
-        assertNull(tracker.onCommitted("ello", cursorBefore = 1, cursorAfter = 5))
+        // A swiped word is recorded separately by the service, but the tracker still closes the
+        // typed token that preceded it.
+        assertEquals(
+            TypedWordSpan(0, 1, "h"),
+            tracker.onCommitted("ello", cursorBefore = 1, cursorAfter = 5),
+        )
         assertFalse(tracker.isTracking)
     }
 
@@ -78,11 +82,14 @@ class TypedWordTrackerTest {
     }
 
     @Test
-    fun `a single letter is not worth recording`() {
+    fun `a single letter closes into a recordable word span`() {
         val tracker = TypedWordTracker()
         tracker.onCommitted("h", cursorBefore = 0, cursorAfter = 1)
 
-        assertNull(tracker.onCommitted(" ", cursorBefore = 1, cursorAfter = 2))
+        assertEquals(
+            TypedWordSpan(start = 0, end = 1, word = "h"),
+            tracker.onCommitted(" ", cursorBefore = 1, cursorAfter = 2),
+        )
     }
 
     @Test
