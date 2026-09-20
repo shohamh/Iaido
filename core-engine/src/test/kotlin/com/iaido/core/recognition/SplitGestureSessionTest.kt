@@ -20,10 +20,10 @@ class SplitGestureSessionTest {
         session.end(2, 220, "th")
 
         assertEquals(null, session.poll(569))
-        val parts = session.poll(570)
-        assertEquals(listOf("th", "ere"), parts?.parts)
-        assertEquals(listOf(100L, 120L), parts?.touchDownAtMs)
-        assertEquals(350L, parts?.graceWindowMs)
+        val parts = session.poll(570) ?: error("completed poll must emit split parts")
+        assertEquals(listOf("th", "ere"), parts.parts)
+        assertEquals(listOf(100L, 120L), parts.touchDownAtMs)
+        assertEquals(350L, parts.graceWindowMs)
     }
 
     @Test

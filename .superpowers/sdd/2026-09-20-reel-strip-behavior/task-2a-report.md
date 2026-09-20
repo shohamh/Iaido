@@ -24,6 +24,18 @@ Changed only `SplitGestureSession.kt`, the already-present Task 2A updates in `S
 
 The focused test remains blocked until the future Task 2 tests are implemented or excluded from the test compilation task. No app coordinator, `GestureUnit`, or `InferenceSegmenter` changes were made.
 
+## Re-review fix: completed poll NPE
+
+- Fixed `SplitGestureSession.poll()` to capture `pendingGraceWindowMs` in `emittedGraceWindowMs` before `clear()` resets it, preserving the value in the emitted `SplitWordParts` event.
+- Strengthened the normal completed-poll regression test so it fails if `poll()` returns null instead of merely propagating nullable assertions.
+- Preserved the future RED tests, `.ci-art/`, and docs without modification.
+
+## Verification
+
+- `.\gradlew.bat :core-engine:compileKotlin --no-daemon --console=plain` — passed.
+- `git diff --check` — passed.
+- The blocked `:core-engine:test --tests '*SplitGestureSessionTest'` task was not rerun per re-review instruction; its prior attempt remained blocked during `compileTestKotlin` by preserved future RED tests.
+
 ## Review fix: captured grace window
 
 - Captured the grace-window value when the first completed part starts the pending event, and reused it for both the deadline and emitted `SplitWordParts.graceWindowMs`.

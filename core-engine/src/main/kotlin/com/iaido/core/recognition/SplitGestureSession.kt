@@ -97,12 +97,13 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         val deadline = graceDeadlineMs ?: return null
         if (active.isNotEmpty() || atMs < deadline) return null
         val result = completed.sortedBy { it.touchOrder }
+        val emittedGraceWindowMs = pendingGraceWindowMs ?: return null
         clear()
         return SplitWordParts(
             parts = result.map { it.letters },
             paths = result.map { it.path },
             touchDownAtMs = result.map { it.touchDownAtMs },
-            graceWindowMs = pendingGraceWindowMs!!,
+            graceWindowMs = emittedGraceWindowMs,
         )
     }
 
