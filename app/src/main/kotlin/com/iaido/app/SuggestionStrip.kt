@@ -137,7 +137,14 @@ fun SuggestionStrip(
         val focusedIndex = focusedChipId?.let { id -> ordered.indexOfFirst { it.id == id } }
             ?.takeIf { it >= 0 }
         val targetChipIndex = focusedIndex ?: autoScrollTargetIndex(ordered.size, rtl)
-        val targetIndex = (if (leadingExtraItem) 1 else 0) + inlineExtraItems + targetChipIndex
+        val replacementIndex = when {
+            splitOrLiveReplacementOptions.isEmpty() -> null
+            rtl -> 0
+            else -> ordered.size + inlineReels.size
+        }
+        val targetIndex = replacementIndex ?: (
+            (if (leadingExtraItem) 1 else 0) + inlineExtraItems + targetChipIndex
+            )
         listState.animateScrollToItem(targetIndex)
     }
 

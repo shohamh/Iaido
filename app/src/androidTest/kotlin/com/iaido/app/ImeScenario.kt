@@ -1119,12 +1119,27 @@ class ImeScenario(
             device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
             val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
             val leadingChipExists = device.findObject(By.descStartsWith("Iaido suggestion 0")) != null
-            if (strip != null && !leadingChipExists) {
+            if (strip != null) {
                 val stripBounds = strip.visibleBounds
+                // The live replacement slot follows the sentence chips in LTR. Bring that
+                // trailing item into the viewport before using geometry; otherwise a valid slot
+                // can be outside the current LazyRow window while its accessibility node is
+                // still unpublished.
+                val stripY = ((stripBounds.top + stripBounds.bottom) / 2f).toInt()
+                device.swipe(stripBounds.right - 4, stripY, stripBounds.left + 4, stripY, 12)
+                device.waitForIdle()
+                device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
+                // A live replacement slot is appended after the sentence chips in LTR. When
+                // LazyRow has not published its children yet, use the appropriate edge rather
+                // than dragging the first sentence reel. The old fallback only handled the
+                // slot-only case, so a typed prefix could make releaseReplacement silently drag
+                // the wrong chip and leave the editor unchanged.
+                val fallbackWidth = 180
+                val left = (stripBounds.right - fallbackWidth).coerceAtLeast(stripBounds.left + 1)
                 return android.graphics.Rect(
-                    (stripBounds.left + 20).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+                    left.coerceIn(stripBounds.left + 1, stripBounds.right - 1),
                     stripBounds.top + 10,
-                    (stripBounds.left + 140).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
+                    (left + fallbackWidth).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
                     stripBounds.top + 170,
                 )
             }
