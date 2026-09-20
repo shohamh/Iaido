@@ -37,6 +37,26 @@ Status: complete; no further build was started after the user requested an immed
 The connected build reported instrumented Kotlin compilation as up-to-date. No additional long
 build or connected suite was started after the interruption.
 
+## Review fix: replacement-reel candidate extraction
+
+- Addressed the P1 review finding in `ImeScenario.reelStripSnapshot`: `candidateText` now comes
+  only from the reel node's displayed text/descendants. The accessibility `stateDescription` is
+  retained separately on `ReelStripEntry` and is never considered candidate text.
+- Root cause: replacement reels publish the instructional state description
+  `Swipe vertically to preview; release to commit`, while their actual candidate words are rendered
+  as descendant text. The former state-description-first extraction could therefore falsely satisfy
+  a candidate assertion with that instruction.
+- A focused behavioral test is not practical at this helper seam yet: the Task 1 helper is not
+  exercised by the existing E2E tests, and replacement nodes are known to be absent from the
+  accessibility tree until directly touched. The targeted compile check covers the changed helper.
+
+### Review-fix verification
+
+1. `./gradlew.bat --no-daemon --max-workers=2 :app:compileDebugAndroidTestKotlin --console=plain`
+   - Passed with exit code 0.
+2. `git diff --check`
+   - Passed after the scoped change.
+
 ## Self-review and concerns
 
 - The scoped diff contains only the Task 1 helper, approved spec artifact, and this report.

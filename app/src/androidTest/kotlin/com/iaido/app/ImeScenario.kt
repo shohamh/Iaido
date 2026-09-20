@@ -669,9 +669,9 @@ class ImeScenario(
                 ) {
                     val bounds = node.visibleBounds
                     val stateDescription = stateDescriptions[semanticNodeKey(contentDescription, bounds)].orEmpty()
-                    val candidateText = stateDescription.substringBefore(';').trim()
-                        .takeIf(String::isNotEmpty)
-                        ?: descendantText(node).firstOrNull()
+                    // stateDescription identifies interaction state, not the displayed candidate:
+                    // replacement reels publish an instruction there. Read only visible node text.
+                    val candidateText = descendantText(node).firstOrNull()
                     check(!candidateText.isNullOrBlank()) {
                         "Reel node '$contentDescription' has no candidate text: " +
                             "stateDescription='$stateDescription' bounds=$bounds"
