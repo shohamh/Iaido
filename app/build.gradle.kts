@@ -13,6 +13,7 @@ android {
     val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
     val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
     val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    val configuredApplicationId = providers.gradleProperty("iaidoApplicationId").getOrElse("com.iaido.app")
     val telemetryBaseUrl = providers.gradleProperty("iaidoTelemetryBaseUrl").getOrElse("")
     val releaseSigningConfigured = listOf(
         releaseKeystorePath,
@@ -33,7 +34,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.iaido.app"
+        applicationId = configuredApplicationId
         minSdk = 31
         targetSdk = 36
         versionCode = providers.gradleProperty("iaidoVersionCode").getOrElse("1").toInt()
