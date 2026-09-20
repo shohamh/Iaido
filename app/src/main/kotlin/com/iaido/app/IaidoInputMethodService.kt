@@ -434,16 +434,19 @@ class IaidoInputMethodService : InputMethodService() {
                         splitController.finish(pointerId, path, layout, atMs)
                         val expectedSession = sessionId
                         val expectedLanguage = activeLanguage
-                        splitGraceHandler.postDelayed({
-                            if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@postDelayed
+                        fun pollSplit() {
+                            if (sessionId != expectedSession || activeLanguage != expectedLanguage) return
                             val parts = when (val result = swipeTypingCoordinator.poll(System.currentTimeMillis())) {
                                 is SplitPollOutcome.Resolved -> result.parts
-                                SplitPollOutcome.Pending -> return@postDelayed
+                                SplitPollOutcome.Pending -> {
+                                    splitGraceHandler.postDelayed({ pollSplit() }, 50L)
+                                    return
+                                }
                                 SplitPollOutcome.Cancelled -> {
                                     trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     splitPreview.value = null
-                                    return@postDelayed
+                                    return
                                 }
                             }
                             val dictionary = activeDictionary()
@@ -469,7 +472,8 @@ class IaidoInputMethodService : InputMethodService() {
                                     splitPreview.value = null
                                 }
                             }
-                        }, 351L)
+                        }
+                        splitGraceHandler.postDelayed({ pollSplit() }, 351L)
                     },
                     onSplitCancel = {
                         splitController.cancel()
