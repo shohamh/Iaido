@@ -74,8 +74,40 @@ class SwipeTypingCoordinator(
         candidates: List<List<ScoredCandidate>>,
     ) {
         if (parts.size != 2) return onRecognitionFailed()
-        if (candidates.size != parts.size || candidates.any { it.isEmpty() }) return onRecognitionFailed()
-        accept(GestureUnit(nextId(), parts, candidates, concurrent = true))
+        onRecognizedMultiPathResult(
+            parts = parts,
+            candidates = candidates,
+            touchDownAtMs = parts.indices.map(Int::toLong),
+            graceWindowMs = DEFAULT_GRACE_WINDOW_MS,
+        )
+    }
+
+    fun onRecognizedMultiPathResult(
+        parts: List<GesturePath>,
+        candidates: List<List<ScoredCandidate>>,
+        touchDownAtMs: List<Long>,
+        graceWindowMs: Long,
+    ) {
+        if (
+            parts.size !in 1..4 ||
+            candidates.size != parts.size ||
+            candidates.any { it.isEmpty() } ||
+            touchDownAtMs.size != parts.size ||
+            touchDownAtMs.zipWithNext().any { (previous, current) -> previous > current } ||
+            graceWindowMs < 0L
+        ) return onRecognitionFailed()
+
+        if (parts.size == 1) return onRecognizedSingleSwipe(parts.single(), candidates.single())
+        accept(
+            GestureUnit(
+                id = nextId(),
+                paths = parts,
+                candidates = candidates,
+                concurrent = true,
+                touchDownAtMs = touchDownAtMs,
+                graceWindowMs = graceWindowMs,
+            ),
+        )
     }
 
     fun onNonSwipeInput() = finalizeAndClear()
@@ -248,4 +280,8 @@ class SwipeTypingCoordinator(
     private fun GestureUnit.topWords(): List<String> = candidates.map { candidates -> candidates.first().word.word }
 
     private fun nextId(): String = "swipe-${nextUnitId++}"
+
+    private companion object {
+        const val DEFAULT_GRACE_WINDOW_MS = 350L
+    }
 }

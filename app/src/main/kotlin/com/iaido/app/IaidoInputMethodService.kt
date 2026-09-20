@@ -459,11 +459,12 @@ class IaidoInputMethodService : InputMethodService() {
                                     }
                                     trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.ACCEPTED)
                                     rememberCandidatesForCommittedSwipe(candidates.flatten())
-                                    if (parts.paths.size == 1) {
-                                        swipeTypingCoordinator.onRecognizedSingleSwipe(parts.paths.single(), candidates.single())
-                                    } else {
-                                        swipeTypingCoordinator.onRecognizedTwoFingerResult(parts.paths, candidates)
-                                    }
+                                    swipeTypingCoordinator.onRecognizedMultiPathResult(
+                                        parts = parts.paths,
+                                        candidates = candidates,
+                                        touchDownAtMs = parts.touchDownAtMs,
+                                        graceWindowMs = parts.graceWindowMs,
+                                    )
                                     typingController.markSwipeCommitted()
                                     splitPreview.value = null
                                 }

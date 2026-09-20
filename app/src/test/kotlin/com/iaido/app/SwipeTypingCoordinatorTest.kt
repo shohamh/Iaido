@@ -342,7 +342,7 @@ class SwipeTypingCoordinatorTest {
     @Test
     fun `poll returns the resolved split result through the coordinator seam`() {
         val editor = FakeEditor()
-        val expected = SplitWordParts(listOf("in"), listOf(path(1)))
+        val expected = SplitWordParts(listOf("in"), listOf(path(1)), listOf(100L), 350L)
         val coordinator = coordinator(
             editor,
             SpacingMode.INFER_SPACES,
@@ -369,6 +369,43 @@ class SwipeTypingCoordinatorTest {
         assertEquals(SplitPollOutcome.Pending, coordinator.poll(350L))
         coordinator.onNonSwipeInput()
         assertEquals("in", editor.text)
+    }
+
+    @Test
+    fun `malformed multi path metadata deterministically finalizes the active inference run`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        coordinator.onRecognizedMultiPathResult(
+            parts = listOf(path(3), path(4)),
+            candidates = listOf(listOf(candidate("th")), listOf(candidate("ere"))),
+            touchDownAtMs = listOf(100L),
+            graceWindowMs = 350L,
+        )
+
+        assertEquals("in", editor.text)
+        assertEquals(listOf(listOf("in")), finalized)
+    }
+
+    @Test
+    fun `recognized three path result is accepted as one gesture event`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(editor, SpacingMode.MANUAL, dictionary("in", "the", "re"))
+
+        coordinator.onRecognizedMultiPathResult(
+            parts = listOf(path(1), path(2), path(3)),
+            candidates = listOf(
+                listOf(candidate("in")),
+                listOf(candidate("the")),
+                listOf(candidate("re")),
+            ),
+            touchDownAtMs = listOf(100L, 120L, 140L),
+            graceWindowMs = 350L,
+        )
+
+        assertEquals("inthere", editor.text)
     }
 
     private fun coordinator(
