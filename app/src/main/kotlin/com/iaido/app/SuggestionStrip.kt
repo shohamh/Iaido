@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.iaido.core.recognition.SuggestionChip
@@ -543,7 +544,7 @@ private fun SuggestionChipView(
 ) {
     val baseAlternatives = reelCandidatesForDisplay(chip)
     val alternatives = if (joinCandidate != null) {
-        baseAlternatives + joinCandidate.replacementWords.joinToString(" ")
+        (baseAlternatives + joinCandidate.replacementWords.joinToString(" ")).distinct()
     } else {
         baseAlternatives
     }
@@ -600,8 +601,9 @@ private fun SuggestionChipView(
             .semantics(mergeDescendants = true) {
                 contentDescription = "Iaido suggestion $index"
                 stateDescription = buildString {
-                    append(currentWord)
-                    if (alternatives.size > 1) append("; option ${displayedIndex + 1} of ${alternatives.size}; swipe vertically to change")
+                    append("reelId=${chip.id ?: index}; source=${chip.word}; displayed=$currentWord")
+                    append("; option ${displayedIndex + 1} of ${alternatives.size}")
+                    if (alternatives.size > 1) append("; swipe vertically to change")
                 }
             }
             .clip(shape)
@@ -718,8 +720,8 @@ private fun SuggestionChipView(
                                 text = candidate,
                                 color = foregroundColor.copy(alpha = when (distance) {
                                     0 -> 1f
-                                    1 -> 0.48f
-                                    else -> 0.2f
+                                    1 -> 0.72f
+                                    else -> 0.48f
                                 }),
                                 style = if (distance == 0) {
                                     MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
@@ -727,6 +729,8 @@ private fun SuggestionChipView(
                                     MaterialTheme.typography.bodyMedium
                                 },
                                 maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Clip,
                             )
                             candidateScores[candidate]?.let { score ->
                                     Text(
