@@ -49,7 +49,7 @@ class SuggestionStripVisibilityTest {
         }
 
         repeat(4) {
-            composeRule.onNodeWithContentDescription("Iaido suggestion 0")
+            composeRule.onNodeWithContentDescription("Iaido suggestion 0", substring = true)
                 .performTouchInput {
                     val delta = with(density) { 28.dp.toPx() * 1.25f }
                     val center = this.center
@@ -89,9 +89,9 @@ class SuggestionStripVisibilityTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Iaido suggestion 0")
+        composeRule.onNodeWithContentDescription("Iaido suggestion 0", substring = true)
             .assertHeightIsEqualTo(56.dp)
-        composeRule.onNodeWithContentDescription("Iaido suggestion 1")
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1", substring = true)
             .assertHeightIsEqualTo(28.dp)
         composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION)
             .assertHeightIsEqualTo(56.dp)
@@ -119,11 +119,11 @@ class SuggestionStripVisibilityTest {
         }
 
         composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Iaido suggestion 1").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1", substring = true).assertIsDisplayed()
 
         composeRule.runOnIdle { focusedId = 4 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Iaido suggestion 3").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 3", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -148,14 +148,14 @@ class SuggestionStripVisibilityTest {
         }
 
         composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Iaido suggestion 0").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 0", substring = true).assertIsDisplayed()
 
         composeRule.runOnIdle { focusedId = 8 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Iaido suggestion 7").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 7", substring = true).assertIsDisplayed()
 
         composeRule.runOnIdle { focusedId = 2 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Iaido suggestion 1").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1", substring = true).assertIsDisplayed()
     }
 }

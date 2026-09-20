@@ -295,7 +295,7 @@ class ImeScenario(
 
     fun tapSuggestion(index: Int, correctedText: String? = null) {
         require(index >= 0) { "Suggestion index cannot be negative" }
-        val suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+        val suggestion = device.findObject(By.descStartsWith("Iaido suggestion $index"))
             ?: error("Missing suggestion $index")
         val bounds = suggestion.visibleBounds
         pendingPointerEvents = pointer.injectScreenSwipe(
@@ -342,7 +342,7 @@ class ImeScenario(
     }
 
     private fun tryLocateReelSwipeTarget(index: Int, verticalDistancePx: Float): ReelSwipeTarget {
-        var suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+            var suggestion = device.findObject(By.descStartsWith("Iaido suggestion $index"))
         if (suggestion == null) {
             // Not found here can mean two different things: the accessibility tree is merely
             // stale (a node exists on screen but UiAutomator hasn't published it -- the case the
@@ -363,7 +363,7 @@ class ImeScenario(
             // beforehand.
             editor.moveCursorLeft()
             device.waitForIdle()
-            suggestion = device.findObject(By.desc("Iaido suggestion $index"))
+            suggestion = device.findObject(By.descStartsWith("Iaido suggestion $index"))
         }
         if (suggestion != null) {
             val bounds = suggestion.visibleBounds
@@ -671,14 +671,18 @@ class ImeScenario(
                     val stateDescription = stateDescriptions[semanticNodeKey(contentDescription, bounds)].orEmpty()
                     // stateDescription identifies interaction state, not the displayed candidate:
                     // replacement reels publish an instruction there. Read only visible node text.
-                    val candidateText = descendantText(node).firstOrNull()
+                    val candidateText = displayedCandidateFromContent(contentDescription)
+                        ?: displayedCandidateFromState(stateDescription)
+                        ?: descendantText(node).firstOrNull()
                     check(!candidateText.isNullOrBlank()) {
                         "Reel node '$contentDescription' has no candidate text: " +
                             "stateDescription='$stateDescription' bounds=$bounds"
                     }
                     add(
                         ReelStripEntry(
-                            reelId = contentDescription,
+                            reelId = reelIdFromContent(contentDescription)
+                                ?: reelIdFromState(stateDescription)
+                                ?: contentDescription,
                             candidateText = candidateText,
                             stateDescription = stateDescription,
                             bounds = Rect(bounds),
@@ -691,6 +695,22 @@ class ImeScenario(
         }
         return ReelStripSnapshot(reels)
     }
+
+    private fun reelIdFromState(stateDescription: String): String? =
+        Regex("(?:^|; )reelId=([^;]+)").find(stateDescription)?.groupValues?.get(1)
+
+    private fun reelIdFromContent(contentDescription: String): String? =
+        Regex("(?:^| )reelId=([^ ]+)").find(contentDescription)?.groupValues?.get(1)
+
+    private fun displayedCandidateFromContent(contentDescription: String): String? =
+        Regex("(?:^| )displayed=(.+)$").find(contentDescription)?.groupValues?.get(1)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+
+    private fun displayedCandidateFromState(stateDescription: String): String? =
+        Regex("(?:^|; )displayed=([^;]+)").find(stateDescription)?.groupValues?.get(1)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
 
     /** Polls the real editor and strip state, then captures a settled diagnostic screenshot. */
     fun awaitImeState(
@@ -1097,7 +1117,7 @@ class ImeScenario(
         while (true) {
             device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
             val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
-            val leadingChipExists = device.findObject(By.desc("Iaido suggestion 0")) != null
+            val leadingChipExists = device.findObject(By.descStartsWith("Iaido suggestion 0")) != null
             if (strip != null && !leadingChipExists) {
                 val stripBounds = strip.visibleBounds
                 return android.graphics.Rect(

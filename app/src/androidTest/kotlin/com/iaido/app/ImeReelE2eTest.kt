@@ -123,6 +123,30 @@ class ImeReelE2eTest {
         }
     }
 
+    @Test
+    fun typedOneCharacterAndSentenceWordsEachHaveOneVisibleStableReel() {
+        ImeScenario().also(artifacts::track).run {
+            tapKey("a")
+            val oneCharacter = reelStripSnapshot()
+            check(oneCharacter.reels.size == 1) {
+                "Expected one reel for the one-character word, got ${oneCharacter.reels}"
+            }
+            check(oneCharacter.reels.single().candidateText.equals("A", ignoreCase = true)) {
+                "One-character reel did not expose its current word: $oneCharacter"
+            }
+
+            tapSpace(checkpointEach = false)
+            tapKey("b")
+            val sentence = reelStripSnapshot()
+            check(sentence.reels.size == 2) {
+                "Expected one reel per sentence word without duplicates, got ${sentence.reels}"
+            }
+            check(sentence.orderedReelIds.distinct().size == sentence.orderedReelIds.size) {
+                "Sentence reel IDs were duplicated: ${sentence.orderedReelIds}"
+            }
+        }
+    }
+
     @Ignore(
         "UiAutomator does not publish untouched LazyRow children reliably after several IME " +
             "swipes; the deterministic Compose focus regression covers the same auto-scroll " +
@@ -142,7 +166,7 @@ class ImeReelE2eTest {
                 androidx.test.InstrumentationRegistry.getInstrumentation(),
             )
             device.waitForIdle()
-            check(device.findObject(androidx.test.uiautomator.By.desc("Iaido suggestion 3")) != null) {
+            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido suggestion 3")) != null) {
                 "Newest chip (index 3, 'ninja') is not visible without further scrolling after four words"
             }
         }
@@ -185,7 +209,7 @@ class ImeReelE2eTest {
             val device = androidx.test.uiautomator.UiDevice.getInstance(
                 androidx.test.InstrumentationRegistry.getInstrumentation(),
             )
-            check(device.findObject(androidx.test.uiautomator.By.desc("Iaido suggestion 1")) == null) {
+            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido suggestion 1")) == null) {
                 "Second source chip is still present after the join committed"
             }
         }

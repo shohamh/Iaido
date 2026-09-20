@@ -179,7 +179,11 @@ fun SuggestionStrip(
             .fillMaxWidth()
             .height(stripHeight + 8.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
+            .semantics {
+                contentDescription = SUGGESTION_STRIP_DESCRIPTION
+                stateDescription = "focusedReelId=${focusedChipId ?: "none"}; " +
+                    "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}"
+            },
         horizontalArrangement = Arrangement.spacedBy(REEL_ITEM_SPACING_DP.dp),
     ) {
         if (splitOrLiveReplacementOptions.isNotEmpty() && rtl) {
@@ -599,7 +603,7 @@ private fun SuggestionChipView(
             .overflowGrow(reservedWidthDp, drawWidthDp, growsForward)
             .height(viewportHeight)
             .semantics(mergeDescendants = true) {
-                contentDescription = "Iaido suggestion $index"
+                contentDescription = "Iaido suggestion $index reelId=${chip.id ?: index} displayed=$currentWord"
                 stateDescription = buildString {
                     append("reelId=${chip.id ?: index}; source=${chip.word}; displayed=$currentWord")
                     append("; option ${displayedIndex + 1} of ${alternatives.size}")
