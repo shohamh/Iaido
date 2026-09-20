@@ -12,5 +12,6 @@ object ImeScenarioData {
         TWO_FINGER_BOUNDARY("two_finger_boundary"),
         SIX_UNIT("six_unit"),
         LOW_CONFIDENCE("low_confidence"),
+        TYPED_REEL("typed_reel"),
     }
 }

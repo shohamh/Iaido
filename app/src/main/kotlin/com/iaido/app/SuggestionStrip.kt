@@ -79,10 +79,6 @@ fun SuggestionStrip(
     val groupedReplacementOptions = remember(replacementOptions, inlineOptionIds) {
         replacementOptions.filterNot { it.id in inlineOptionIds }
     }
-    val chipSlotCount = ordered.maxOfOrNull {
-        reelVisibleSlotCount(reelCandidatesForDisplay(it).size)
-    }
-        ?: reelVisibleSlotCount(0)
     // Historical joins move into the source-chip reel once those chips are present; a still-live
     // multi-word join remains visible here until the transaction resolves. A single-source split
     // is shown on its source chip whenever that chip is present.
@@ -103,22 +99,17 @@ fun SuggestionStrip(
             attachedReplacementOptionIds,
         )
     }
-    val inlineSlotCount = inlineReels.maxOfOrNull { reel ->
-        reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size)
-    } ?: 0
     val replacementSlotCount = if (splitOrLiveReplacementOptions.isEmpty()) {
         0
     } else {
         reelVisibleSlotCount(splitOrLiveReplacementOptions.size)
     }
-    val visibleSlotCount = maxOf(chipSlotCount, inlineSlotCount, replacementSlotCount)
-    val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     // The outer strip's height is pinned to the maximum possible slot count so the strip
     // (and therefore the whole keyboard, which wraps its height around it) never grows or
-    // shrinks at runtime as chips with different candidate counts appear and clear. Chips
-    // and reel groups below still use the per-render `viewportHeight`/`visibleSlotCount` for
-    // their own internal centering.
+    // shrinks at runtime as chips with different candidate counts appear and clear. Each reel
+    // below uses its own candidate count so shorter reels do not expose empty slots.
     val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
+    val replacementViewportHeight = (REEL_STEP_DP * replacementSlotCount).dp
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
@@ -178,7 +169,7 @@ fun SuggestionStrip(
                 ReplacementReelSlot(
                     options = splitOrLiveReplacementOptions,
                     rtl = rtl,
-                    viewportHeight = viewportHeight,
+                    viewportHeight = replacementViewportHeight,
                     onPreview = onReplacementPreview,
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
@@ -192,7 +183,7 @@ fun SuggestionStrip(
                     InlineReplacementChip(
                         reel = reel,
                         index = ordered.size + index,
-                        visibleSlotCount = visibleSlotCount,
+                        visibleSlotCount = reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size),
                         reservedWidthDp = inlineReservedWidths[inlineReels.lastIndex - index],
                         onRelease = onReplacementRelease,
                         showCandidateScores = showCandidateScores,
@@ -227,10 +218,14 @@ fun SuggestionStrip(
                 growsForward -> reservedWidths.getOrNull(index + 1)
                 else -> reservedWidths.getOrNull(index - 1)
             }
+            val chipCandidates = buildList {
+                addAll(reelCandidatesForDisplay(chip))
+                join?.option?.replacementWords?.joinToString(" ")?.let(::add)
+            }.distinct()
             SuggestionChipView(
                 chip = chip,
                 index = index,
-                visibleSlotCount = visibleSlotCount,
+                visibleSlotCount = reelVisibleSlotCount(chipCandidates.size),
                 modifier = Modifier.animateItem(),
                 reservedWidthDp = reservedWidths[index],
                 neighborReservedWidthDp = neighborReservedWidthDp,
@@ -249,7 +244,7 @@ fun SuggestionStrip(
                     InlineReplacementChip(
                         reel = reel,
                         index = ordered.size + index,
-                        visibleSlotCount = visibleSlotCount,
+                        visibleSlotCount = reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size),
                         reservedWidthDp = inlineReservedWidths[index],
                         onRelease = onReplacementRelease,
                         showCandidateScores = showCandidateScores,
@@ -262,7 +257,7 @@ fun SuggestionStrip(
                 ReplacementReelSlot(
                     options = splitOrLiveReplacementOptions,
                     rtl = rtl,
-                    viewportHeight = viewportHeight,
+                    viewportHeight = replacementViewportHeight,
                     onPreview = onReplacementPreview,
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,

@@ -53,6 +53,26 @@ class TypedWordCandidatesTest {
     }
 
     @Test
+    fun `typed prefixes refresh their reel candidates after every letter`() {
+        assertEquals(
+            listOf("his", "him", "himself"),
+            typedWordCandidates(
+                "hi",
+                dictionary + WordEntry("himself", 100.0),
+                limit = 3,
+            ),
+        )
+        assertEquals(
+            listOf("himself", "his", "hi"),
+            typedWordCandidates(
+                "him",
+                dictionary + WordEntry("himself", 100.0),
+                limit = 3,
+            ),
+        )
+    }
+
+    @Test
     fun `one edit covers insertions, deletions, and substitutions`() {
         assertTrue(isOneEditAway("the", "the"))
         assertTrue(isOneEditAway("the", "them"))

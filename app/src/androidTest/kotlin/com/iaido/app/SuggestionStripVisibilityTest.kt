@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -77,5 +78,50 @@ class SuggestionStripVisibilityTest {
                 .compress(Bitmap.CompressFormat.PNG, 100, output)
         }
         composeRule.onNodeWithText("option-4", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun reelsUseTheirOwnCandidateCountForHeight() {
+        composeRule.setContent {
+            MaterialTheme {
+                SuggestionStrip(
+                    chips = listOf(
+                        SuggestionChip(
+                            word = "one",
+                            alternatives = listOf("two", "three"),
+                            selectedIndex = 0,
+                            id = 1,
+                        ),
+                        SuggestionChip(
+                            word = "only",
+                            alternatives = listOf("only"),
+                            selectedIndex = 0,
+                            id = 2,
+                        ),
+                    ),
+                    rtl = false,
+                )
+            }
+        }
+
+        val screenshot = File(
+            InstrumentationRegistry.getInstrumentation().targetContext
+                .getExternalFilesDir("ime-e2e/checkpoints"),
+            "suggestion-strip-per-reel-height.png",
+        ).apply { parentFile?.mkdirs() }
+        screenshot.outputStream().use { output ->
+            composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION)
+                .captureToImage()
+                .asAndroidBitmap()
+                .compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("cp ${screenshot.absolutePath} /sdcard/Download/suggestion-strip-per-reel-height-node.png")
+            .close()
+
+        composeRule.onNodeWithContentDescription("Iaido suggestion 0")
+            .assertHeightIsEqualTo(84.dp)
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1")
+            .assertHeightIsEqualTo(28.dp)
     }
 }

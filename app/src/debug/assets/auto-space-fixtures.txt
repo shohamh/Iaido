@@ -36,3 +36,8 @@ six_unit|word|ynum|100000
 
 low_confidence|word|plain|100
 low_confidence|word|plan|99
+
+typed_reel|word|hi|100
+typed_reel|word|his|90
+typed_reel|word|him|80
+typed_reel|word|himself|70
