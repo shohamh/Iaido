@@ -3,6 +3,7 @@ package com.iaido.app
 import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
 
 class SuggestionReelMathTest {
@@ -127,6 +128,38 @@ class SuggestionReelMathTest {
 
         assertEquals(listOf("H", "he", "Hello"), candidates)
         assertEquals("Hello", candidates[selectedIndex])
+    }
+
+    @Test
+    fun `reel keeps daytime visible alongside its real alternative`() {
+        val chip = SuggestionChip(
+            word = "daytime",
+            alternatives = listOf("daylight"),
+            selectedIndex = 0,
+        )
+
+        val candidates = reelCandidatesForDisplay(chip)
+
+        assertEquals(listOf("daylight", "daytime"), candidates)
+        assertEquals(1, reelSelectedIndexForDisplay(chip, candidates))
+    }
+
+    @Test
+    fun `reel state identity changes when a current word gains another real candidate`() {
+        val chip = SuggestionChip(
+            word = "daytime",
+            alternatives = listOf("daylight"),
+            selectedIndex = 0,
+            id = 7,
+        )
+
+        val originalCandidates = reelCandidatesForDisplay(chip)
+        val refreshedCandidates = originalCandidates + "daybreak"
+
+        assertNotEquals(
+            reelStateKey(chip, originalCandidates),
+            reelStateKey(chip, refreshedCandidates),
+        )
     }
 
     @Test

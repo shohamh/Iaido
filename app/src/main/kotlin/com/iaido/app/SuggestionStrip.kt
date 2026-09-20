@@ -478,6 +478,30 @@ internal fun reelSelectedIndexForDisplay(
 ): Int = candidates.indexOf(chip.word).takeIf { it >= 0 }
     ?: chip.selectedIndex.coerceIn(0, candidates.lastIndex.coerceAtLeast(0))
 
+/**
+ * Resets reel interaction state when the candidate set changes, even if the current word stays
+ * the same. A refreshed candidate list must not inherit an offset from the previous list.
+ */
+internal fun reelStateKey(
+    chip: SuggestionChip,
+    candidates: List<String>,
+    identity: Any = chip.id ?: "word",
+): String = buildString {
+    append(identity)
+    append('|')
+    append(chip.word.length)
+    append(':')
+    append(chip.word)
+    append('|')
+    append(chip.selectedIndex)
+    candidates.forEach { candidate ->
+        append('|')
+        append(candidate.length)
+        append(':')
+        append(candidate)
+    }
+}
+
 @Composable
 private fun SuggestionChipView(
     chip: SuggestionChip,
@@ -503,7 +527,7 @@ private fun SuggestionChipView(
     }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val stateKey = chip.id ?: index
+    val stateKey = reelStateKey(chip, alternatives, chip.id ?: index)
     val reelOffset = remember(stateKey) { Animatable(0f) }
     var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
     var isDragging by remember(stateKey) { mutableStateOf(false) }
@@ -527,7 +551,7 @@ private fun SuggestionChipView(
     }
     val foregroundColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    LaunchedEffect(chip.id, chip.word, selectedIndex) {
+    LaunchedEffect(stateKey) {
         dragY = 0f
         isDragging = false
         reelOffset.snapTo(0f)
@@ -561,7 +585,7 @@ private fun SuggestionChipView(
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = shape,
             )
-            .pointerInput(chip.id, chip.word, selectedIndex) {
+            .pointerInput(stateKey) {
                 detectVerticalDragGestures(
                     onDragStart = {
                         scope.launch { reelOffset.stop() }
@@ -626,6 +650,19 @@ private fun SuggestionChipView(
                 // a sliver even though the chip itself measures wide enough on paper.
                 .padding(horizontal = CHIP_HORIZONTAL_PADDING_DP.dp),
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(14.dp)
+                    .background(Brush.verticalGradient(listOf(containerColor, containerColor.copy(alpha = 0f)))),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(14.dp)
+                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(containerColor.copy(alpha = 0f), containerColor))),
+            )
             val centerSlotOffset = reelCenterSlotOffset(visibleSlotCount)
             Column(
                 modifier = Modifier
@@ -679,19 +716,6 @@ private fun SuggestionChipView(
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .background(Brush.verticalGradient(listOf(containerColor, containerColor.copy(alpha = 0f)))),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .align(androidx.compose.ui.Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(containerColor.copy(alpha = 0f), containerColor))),
-            )
         }
     }
 }
