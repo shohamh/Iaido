@@ -31,26 +31,32 @@ class MultiPathOrderHypothesisTest {
             ),
             hypotheses.map { hypothesis -> hypothesis.candidates.map { it.single().word.word } },
         )
-        assertEquals(40L, hypotheses.single { it.swappedPair == PathPair(0, 2) }.touchDownDeltaMs)
+        assertEquals(listOf(40L, 40L, 40L, 40L), hypotheses.map { it.touchDownDeltaMs })
     }
 
     @Test
-    fun `uses the grace window to calculate continuous swap closeness`() {
+    fun `uses one event span and continuous timing weight for every competing hypothesis`() {
         val near = MultiPathOrderHypothesis.forEvent(
             paths = listOf(path(0), path(1)),
             candidates = listOf(candidates("a"), candidates("b")),
             touchDownAtMs = listOf(100L, 135L),
             graceWindowMs = 350L,
-        ).single { it.swappedPair != null }
+        )
         val wide = MultiPathOrderHypothesis.forEvent(
             paths = listOf(path(0), path(1)),
             candidates = listOf(candidates("a"), candidates("b")),
             touchDownAtMs = listOf(100L, 500L),
             graceWindowMs = 350L,
-        ).single { it.swappedPair != null }
+        )
 
-        assertEquals(0.9, near.languageEvidenceWeight, 0.000001)
-        assertEquals(0.0, wide.languageEvidenceWeight, 0.000001)
+        assertEquals(listOf(35L, 35L), near.map { it.touchDownDeltaMs })
+        near.forEach { hypothesis ->
+            assertEquals(0.9, hypothesis.languageEvidenceWeight, 0.000001)
+        }
+        assertEquals(listOf(400L, 400L), wide.map { it.touchDownDeltaMs })
+        wide.forEach { hypothesis ->
+            assertEquals(0.0, hypothesis.languageEvidenceWeight, 0.000001)
+        }
     }
 
     @Test

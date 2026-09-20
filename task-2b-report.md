@@ -67,3 +67,55 @@ on the prior candidate/DP path and broadens only concurrent multi-path handling.
   negative. Applying the approved timing multiplier moves a down-weighted negative term toward
   zero; the focused near/wide fixture uses positive synthetic frequency evidence. A production
   fixture should explicitly confirm the intended ranking with shipped-frequency-scale values.
+
+## Review fix: shared event timing and ranked candidate combinations
+
+The Task 2B review findings were addressed without changing the app RED test or the protected docs
+and `.ci-art` artifacts.
+
+### Implementation
+
+- `MultiPathOrderHypothesis.forEvent` now measures one event-level touch-down span as
+  `lastTouchDown - firstTouchDown`, normalizes it with
+  `1 - clamp(eventSpan / graceWindow, 0, 1)`, and assigns the same span and language-evidence
+  weight to the observed order and every pair swap. `swappedPair` remains separate provenance.
+- `InferenceSegmenter.rawCandidatesFor` now enumerates the Cartesian product of every hypothesis's
+  bounded ranked path-candidate lists. This retains lower-ranked merged and boundary-preserving
+  alternatives instead of selecting only the first candidate from each path.
+- Candidate path-fit scores are still summed without timing scaling. The shared timing weight still
+  applies only to dictionary-frequency and context evidence.
+- Focused coverage now includes event-level near/wide timing, probability-scale negative
+  log-frequency behavior, lower-ranked merged and boundary alternatives, and deterministic lexical
+  ordering across all equal-scoring path-candidate combinations. Existing three-path pairwise,
+  internal-pair, and cross-event coverage remains intact.
+
+### RED evidence
+
+Command:
+
+```powershell
+.\gradlew.bat :core-engine:test --tests "com.iaido.core.recognition.InferenceSegmenterTest" --tests "com.iaido.core.recognition.MultiPathOrderHypothesisTest" --rerun-tasks --no-daemon --max-workers=2 --console=plain
+```
+
+Result against unchanged production code: `BUILD FAILED`; 24 tests executed with six expected
+failures. The failures covered both shared event-span assertions, near/wide negative-frequency
+timing, the lower-frequency swap guard, lower-ranked merged/boundary alternatives, and complete
+deterministic candidate combinations.
+
+### GREEN and compile evidence
+
+The same focused command completed with exit code 0. Fresh JUnit XML reported:
+
+- `InferenceSegmenterTest`: 20 tests, 0 failures, 0 errors, 0 skipped.
+- `MultiPathOrderHypothesisTest`: 4 tests, 0 failures, 0 errors, 0 skipped.
+
+Compile command:
+
+```powershell
+.\gradlew.bat :core-engine:compileKotlin --rerun-tasks --no-daemon --max-workers=2 --console=plain
+```
+
+Result: exit code 0.
+
+`git diff --check -- core-engine` also exited 0; Git emitted only the repository's existing
+LF-to-CRLF conversion warnings.

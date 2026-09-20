@@ -1,7 +1,6 @@
 package com.iaido.core.recognition
 
 import com.iaido.core.gesture.GesturePath
-import kotlin.math.abs
 
 /** Identifies the two observed path positions exchanged by a reorder hypothesis. */
 data class PathPair(
@@ -33,8 +32,9 @@ data class MultiPathOrderHypothesis(
 
     companion object {
         /**
-         * Uses `1 - clamp(delta / graceWindow, 0, 1)` for reordered language evidence.
-         * Path-fit scores are deliberately not scaled by this timing value.
+         * Uses the event span `lastTouchDown - firstTouchDown` for every competing order and
+         * applies `1 - clamp(span / graceWindow, 0, 1)` to language evidence. Path-fit scores are
+         * deliberately not scaled by this event-level timing value.
          */
         fun forEvent(
             paths: List<GesturePath>,
@@ -50,25 +50,26 @@ data class MultiPathOrderHypothesis(
             }
             require(graceWindowMs >= 0L) { "Grace window must not be negative" }
 
+            val eventSpanMs = touchDownAtMs.last() - touchDownAtMs.first()
+            val eventLanguageEvidenceWeight = languageEvidenceWeight(eventSpanMs, graceWindowMs)
             val observed = MultiPathOrderHypothesis(
                 paths = paths,
                 candidates = candidates,
                 swappedPair = null,
-                touchDownDeltaMs = 0L,
-                languageEvidenceWeight = 1.0,
+                touchDownDeltaMs = eventSpanMs,
+                languageEvidenceWeight = eventLanguageEvidenceWeight,
             )
             val swaps = buildList {
                 for (firstIndex in 0 until paths.lastIndex) {
                     for (secondIndex in firstIndex + 1 until paths.size) {
                         val pair = PathPair(firstIndex, secondIndex)
-                        val delta = abs(touchDownAtMs[firstIndex] - touchDownAtMs[secondIndex])
                         add(
                             MultiPathOrderHypothesis(
                                 paths = paths.swapped(firstIndex, secondIndex),
                                 candidates = candidates.swapped(firstIndex, secondIndex),
                                 swappedPair = pair,
-                                touchDownDeltaMs = delta,
-                                languageEvidenceWeight = languageEvidenceWeight(delta, graceWindowMs),
+                                touchDownDeltaMs = eventSpanMs,
+                                languageEvidenceWeight = eventLanguageEvidenceWeight,
                             ),
                         )
                     }

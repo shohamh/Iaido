@@ -95,18 +95,79 @@ class InferenceSegmenterTest {
         val near = InferenceSegmenter(confidenceMargin = 0.0).rank(
             units = listOf(multiPathUnit("near", listOf("a", "b"), listOf(100L, 135L))),
             previousWords = emptyList(),
-            dictionary = listOf(WordEntry("ab", 1.0), WordEntry("ba", 100.0)),
+            dictionary = listOf(WordEntry("ab", 0.01), WordEntry("ba", 0.1)),
         )
         val wide = InferenceSegmenter(confidenceMargin = 0.0).rank(
             units = listOf(multiPathUnit("wide", listOf("a", "b"), listOf(100L, 500L))),
             previousWords = emptyList(),
-            dictionary = listOf(WordEntry("ab", 1.0), WordEntry("ba", 100.0)),
+            dictionary = listOf(WordEntry("ab", 0.01), WordEntry("ba", 0.1)),
         )
 
         assertEquals(listOf("ba"), near.first().words)
         assertEquals(PathPair(0, 1), near.first().hypothesisMetadata.single().swappedPair)
+        assertEquals(35L, near.first().hypothesisMetadata.single().touchDownDeltaMs)
+        assertEquals(0.9, near.first().hypothesisMetadata.single().languageEvidenceWeight, 0.000001)
         assertEquals(listOf("ab"), wide.first().words)
         assertEquals(null, wide.first().hypothesisMetadata.single().swappedPair)
+        assertEquals(400L, wide.first().hypothesisMetadata.single().touchDownDeltaMs)
+        assertEquals(0.0, wide.first().hypothesisMetadata.single().languageEvidenceWeight, 0.000001)
+    }
+
+    @Test
+    fun `shared timing weight does not reward a lower frequency swap with negative log evidence`() {
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(multiPathUnit("negative-log", listOf("a", "b"), listOf(100L, 135L))),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("ab", 0.01), WordEntry("ba", 0.008)),
+        )
+
+        assertEquals(listOf("ab"), options.first().words)
+        assertEquals(null, options.first().hypothesisMetadata.single().swappedPair)
+        assertEquals(0.9, options.first().hypothesisMetadata.single().languageEvidenceWeight, 0.000001)
+    }
+
+    @Test
+    fun `concurrent paths retain lower ranked merged and boundary alternatives`() {
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(
+                multiCandidatePathUnit(
+                    id = "lower-ranked",
+                    pathCandidates = listOf(
+                        listOf("x" to 4.0, "in" to 3.0),
+                        listOf("y" to 4.0, "to" to 3.0),
+                    ),
+                    touchDownAtMs = listOf(100L, 120L),
+                ),
+            ),
+            previousWords = emptyList(),
+            dictionary = dictionary("in", "to", "into"),
+        )
+
+        assertTrue(options.any { option -> option.words == listOf("into") })
+        assertTrue(options.any { option -> option.words == listOf("in", "to") })
+    }
+
+    @Test
+    fun `equal scoring concurrent candidate combinations use deterministic lexical order`() {
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(
+                multiCandidatePathUnit(
+                    id = "ties",
+                    pathCandidates = listOf(
+                        listOf("b" to 1.0, "a" to 1.0),
+                        listOf("d" to 1.0, "c" to 1.0),
+                    ),
+                    touchDownAtMs = listOf(100L, 120L),
+                ),
+            ),
+            previousWords = emptyList(),
+            dictionary = dictionary("ac", "ad", "bc", "bd"),
+        )
+
+        assertEquals(
+            listOf(listOf("ac"), listOf("ad"), listOf("bc"), listOf("bd")),
+            options.map { option -> option.words },
+        )
     }
 
     @Test
@@ -317,6 +378,21 @@ class InferenceSegmenterTest {
         id = id,
         paths = words.indices.map { path },
         candidates = words.map { word -> listOf(ScoredCandidate(WordEntry(word, 1.0), 1.0)) },
+        concurrent = true,
+        touchDownAtMs = touchDownAtMs,
+        graceWindowMs = 350L,
+    )
+
+    private fun multiCandidatePathUnit(
+        id: String,
+        pathCandidates: List<List<Pair<String, Double>>>,
+        touchDownAtMs: List<Long>,
+    ): GestureUnit = GestureUnit(
+        id = id,
+        paths = pathCandidates.indices.map { path },
+        candidates = pathCandidates.map { candidates ->
+            candidates.map { (word, score) -> ScoredCandidate(WordEntry(word, 1.0), score) }
+        },
         concurrent = true,
         touchDownAtMs = touchDownAtMs,
         graceWindowMs = 350L,

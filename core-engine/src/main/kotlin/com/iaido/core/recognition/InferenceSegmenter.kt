@@ -171,28 +171,29 @@ class InferenceSegmenter(
                 candidates = rankedPaths,
                 touchDownAtMs = unit.touchDownAtMs,
                 graceWindowMs = unit.graceWindowMs,
-            ).map { hypothesis ->
-                val selected = hypothesis.candidates.map { candidates -> candidates.first() }
-                val parts = selected.map { candidate -> candidate.word.word }
-                val concatenated = parts.joinToString(separator = "")
-                val merged = if (parts.size == 2) {
-                    SplitWordMerger().mergeParts(parts, dictionary).firstOrNull()?.word
-                } else {
-                    dictionary.firstOrNull { entry -> entry.word == concatenated }?.word
-                }
-                // The concatenated fallback remains available to dictionarySegmentations(), which
-                // yields the boundary-preserving path words when each one is in the dictionary.
-                RawCandidate(
-                    text = merged ?: concatenated,
-                    score = selected.sumOf { candidate -> candidate.score },
-                    hypothesisMetadata = listOf(
-                        HypothesisMetadata(
-                            swappedPair = hypothesis.swappedPair,
-                            touchDownDeltaMs = hypothesis.touchDownDeltaMs,
-                            languageEvidenceWeight = hypothesis.languageEvidenceWeight,
+            ).flatMap { hypothesis ->
+                candidateCombinations(hypothesis.candidates).map { selected ->
+                    val parts = selected.map { candidate -> candidate.word.word }
+                    val concatenated = parts.joinToString(separator = "")
+                    val merged = if (parts.size == 2) {
+                        SplitWordMerger().mergeParts(parts, dictionary).firstOrNull()?.word
+                    } else {
+                        dictionary.firstOrNull { entry -> entry.word == concatenated }?.word
+                    }
+                    // The concatenated fallback remains available to dictionarySegmentations(),
+                    // which yields boundary-preserving words for every ranked path combination.
+                    RawCandidate(
+                        text = merged ?: concatenated,
+                        score = selected.sumOf { candidate -> candidate.score },
+                        hypothesisMetadata = listOf(
+                            HypothesisMetadata(
+                                swappedPair = hypothesis.swappedPair,
+                                touchDownDeltaMs = hypothesis.touchDownDeltaMs,
+                                languageEvidenceWeight = hypothesis.languageEvidenceWeight,
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
         } else {
             rankedPaths.single().map { candidate ->
@@ -213,6 +214,14 @@ class InferenceSegmenter(
             .map { (_, candidates) -> candidates.maxBy { it.score } }
             .sortedWith(rawComparator)
             .take(maxAlternatives)
+    }
+
+    private fun candidateCombinations(
+        rankedPaths: List<List<ScoredCandidate>>,
+    ): List<List<ScoredCandidate>> = rankedPaths.fold(listOf(emptyList())) { combinations, ranked ->
+        combinations.flatMap { prefix ->
+            ranked.map { candidate -> prefix + candidate }
+        }
     }
 
     private fun dictionarySegmentations(
