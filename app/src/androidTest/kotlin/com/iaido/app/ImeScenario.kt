@@ -32,6 +32,7 @@ data class ReelStripEntry(
 
 data class ReelStripSnapshot(
     val reels: List<ReelStripEntry>,
+    val focusedReelId: String? = null,
 ) {
     val orderedReelIds: List<String> get() = reels.map(ReelStripEntry::reelId)
     val candidateTextByReelId: Map<String, String> get() =
@@ -287,6 +288,15 @@ class ImeScenario(
         }
     }
 
+    fun moveCursorRight(count: Int = 1, checkpointEach: Boolean = true) {
+        require(count >= 0) { "Cursor movement count cannot be negative" }
+        repeat(count) {
+            editor.pressKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+            expectedSelection = (expectedSelection + 1).coerceAtMost(expectedText.length)
+            if (checkpointEach) checkpoint("moveCursorRight")
+        }
+    }
+
     fun waitForCorrection(expected: String) {
         editor.waitForText(expected)
         expectedText = expected
@@ -378,7 +388,7 @@ class ImeScenario(
             ?: error("Missing keyboard root while locating suggestion $index")
         val surface = device.findObject(By.desc(KeyboardWindowLocator.SURFACE_DESCRIPTION))
             ?: error("Missing keyboard surface while locating suggestion $index")
-        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+            val strip = device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
             ?: error("Missing suggestion strip while locating suggestion $index")
         val stripBounds = strip.visibleBounds
         val rootBounds = root.visibleBounds
@@ -659,7 +669,7 @@ class ImeScenario(
 
     /** Reads the currently published suggestion-strip semantics without using gesture geometry. */
     fun reelStripSnapshot(): ReelStripSnapshot {
-        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+        val strip = device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
             ?: error("Missing suggestion strip '$SUGGESTION_STRIP_DESCRIPTION'")
         val stateDescriptions = publishedStateDescriptions()
         val reels = buildList {
@@ -694,7 +704,19 @@ class ImeScenario(
             }
             strip.children.forEach(::visit)
         }
-        return ReelStripSnapshot(reels)
+        val stripContent = strip.contentDescription.orEmpty()
+        val stripState = stateDescriptions[semanticNodeKey(stripContent, strip.visibleBounds)].orEmpty()
+        val focusedReelId = Regex("(?:^|[; ])focusedReelId=([^; ]+)")
+            .find(stripContent)
+            ?.groupValues
+            ?.get(1)
+            ?.takeUnless { it == "none" }
+            ?: Regex("(?:^|; )focusedReelId=([^;]+)")
+                .find(stripState)
+            ?.groupValues
+            ?.get(1)
+            ?.takeUnless { it == "none" }
+        return ReelStripSnapshot(reels, focusedReelId)
     }
 
     private fun reelIdFromState(stateDescription: String): String? =
@@ -1117,7 +1139,7 @@ class ImeScenario(
         val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
         while (true) {
             device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
-            val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+        val strip = device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
             val leadingChipExists = device.findObject(By.descStartsWith("Iaido suggestion 0")) != null
             if (strip != null) {
                 val stripBounds = strip.visibleBounds

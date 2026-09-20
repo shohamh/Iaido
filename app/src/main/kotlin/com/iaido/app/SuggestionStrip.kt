@@ -187,7 +187,9 @@ fun SuggestionStrip(
             .height(stripHeight + 8.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics {
-                contentDescription = SUGGESTION_STRIP_DESCRIPTION
+                contentDescription = SUGGESTION_STRIP_DESCRIPTION +
+                    " focusedReelId=${focusedChipId ?: "none"}; " +
+                    "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}"
                 stateDescription = "focusedReelId=${focusedChipId ?: "none"}; " +
                     "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}"
             },

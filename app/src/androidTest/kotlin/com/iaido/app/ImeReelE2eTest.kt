@@ -147,6 +147,69 @@ class ImeReelE2eTest {
         }
     }
 
+    @Test
+    fun eachTypedLetterRefreshesTheSameReelWithoutCreatingDuplicates() {
+        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.TYPED_REEL).also(artifacts::track).run {
+            tapKey("h")
+            val afterH = reelStripSnapshot()
+            check(afterH.reels.size == 1) { "Expected one reel after first letter: $afterH" }
+            val reelId = afterH.orderedReelIds.single()
+            check(afterH.reels.single().candidateText.equals("H", ignoreCase = true)) {
+                "First typed letter is not the displayed candidate: $afterH"
+            }
+
+            tapKey("i")
+            val afterHi = reelStripSnapshot()
+            check(afterHi.orderedReelIds == listOf(reelId)) {
+                "Typing the second letter created or reordered a reel: before=$afterH after=$afterHi"
+            }
+            check(afterHi.reels.single().candidateText.equals("Hi", ignoreCase = true)) {
+                "Typed reel did not refresh to the current word: $afterHi"
+            }
+
+            tapKey("m")
+            val afterHim = reelStripSnapshot()
+            check(afterHim.orderedReelIds == listOf(reelId)) {
+                "Typing the third letter duplicated the reel: $afterHim"
+            }
+            check(afterHim.reels.single().candidateText.equals("Him", ignoreCase = true)) {
+                "Typed reel did not refresh after the third letter: $afterHim"
+            }
+        }
+    }
+
+    @Test
+    fun movingTheCursorBackAndForwardChangesFocusedReelWithoutChangingOrder() {
+        ImeScenario().also(artifacts::track).run {
+            tapKey("a", checkpointEach = false)
+            tapSpace(checkpointEach = false)
+            tapKey("b", checkpointEach = false)
+            tapSpace(checkpointEach = false)
+            tapKey("c", checkpointEach = false)
+            val atEnd = reelStripSnapshot()
+            check(atEnd.reels.size == 3) { "Expected three sentence reels: $atEnd" }
+            val originalOrder = atEnd.orderedReelIds
+
+            moveCursorLeft(2, checkpointEach = false)
+            val atMiddle = reelStripSnapshot()
+            check(atMiddle.orderedReelIds == originalOrder) {
+                "Cursor movement reordered sentence reels: $atEnd -> $atMiddle"
+            }
+            check(atMiddle.focusedReelId == originalOrder[1]) {
+                "Cursor did not focus the middle word: $atMiddle"
+            }
+
+            moveCursorRight(1, checkpointEach = false)
+            val forward = reelStripSnapshot()
+            check(forward.orderedReelIds == originalOrder) {
+                "Moving the cursor forward changed reel order: $forward"
+            }
+            check(forward.focusedReelId == originalOrder[2]) {
+                "Cursor did not return focus to the last word: $forward"
+            }
+        }
+    }
+
     @Ignore(
         "UiAutomator does not publish untouched LazyRow children reliably after several IME " +
             "swipes; the deterministic Compose focus regression covers the same auto-scroll " +

@@ -93,7 +93,7 @@ class SuggestionStripVisibilityTest {
             .assertHeightIsEqualTo(56.dp)
         composeRule.onNodeWithContentDescription("Iaido suggestion 1", substring = true)
             .assertHeightIsEqualTo(28.dp)
-        composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION)
+        composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION, substring = true)
             .assertHeightIsEqualTo(56.dp)
     }
 
