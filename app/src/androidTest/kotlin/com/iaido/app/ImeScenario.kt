@@ -240,7 +240,8 @@ class ImeScenario(
 
     fun openSettingsFromKeyboard() {
         pendingPointerEvents = editor.tapMarkedKey(keyDescription("settings"))
-        check(device.wait(Until.hasObject(By.text("Iaido Settings")), 5_000L)) {
+        val settingsTitle = if (BuildConfig.DEBUG) "Iaido Debug Settings" else "Iaido Settings"
+        check(device.wait(Until.hasObject(By.text(settingsTitle)), 5_000L)) {
             "Settings activity did not open from the keyboard settings button"
         }
     }

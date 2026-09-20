@@ -44,9 +44,10 @@ class SettingsImeReelE2eTest {
         // A cold Compose launch on the emulator can spend several seconds compiling the
         // Settings screen before it becomes visible.  Waiting only five seconds made this
         // screenshot test capture the launcher and report that the preview was missing.
+        val settingsTitle = if (BuildConfig.DEBUG) "Iaido Debug Settings" else "Iaido Settings"
         assertTrue(
             "Iaido Settings screen did not become visible",
-            device.wait(Until.hasObject(By.text("Iaido Settings")), 20_000L),
+            device.wait(Until.hasObject(By.text(settingsTitle)), 20_000L),
         )
         val preview = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 20_000L)
         assertTrue("Live preview field was not found", preview != null)

@@ -193,7 +193,10 @@ class SettingsActivity : ComponentActivity() {
                 modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-            Text("Iaido Settings", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+            Text(
+                if (BuildConfig.DEBUG) "Iaido Debug Settings" else "Iaido Settings",
+                style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+            )
             Text("Try the keyboard behavior here before leaving settings.")
             OutlinedTextField(
                 value = preview,

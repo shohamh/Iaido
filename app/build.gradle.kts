@@ -57,6 +57,10 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["appLabel"] = "Iaido Debug"
+            manifestPlaceholders["settingsLabel"] = "Iaido Debug Settings"
+        }
         getByName("release") {
             if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("iaidoRelease")
