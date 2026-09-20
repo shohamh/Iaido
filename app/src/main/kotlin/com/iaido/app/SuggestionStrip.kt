@@ -62,6 +62,7 @@ const val SUGGESTION_STRIP_DESCRIPTION = "Iaido suggestion strip"
 fun SuggestionStrip(
     chips: List<SuggestionChip>,
     rtl: Boolean,
+    focusedChipId: Int? = null,
     replacementOptions: List<ReplacementOption> = emptyList(),
     liveReplacementOptionIds: Set<String> = emptySet(),
     showCandidateScores: Boolean = false,
@@ -71,8 +72,14 @@ fun SuggestionStrip(
     onReplacementRelease: (ReplacementOption) -> Unit = {},
     onReplacementCancel: () -> Unit = {},
 ) {
-    val ordered = if (rtl) chips.asReversed() else chips
-    val inlineReels = remember(replacementOptions) { inlineReplacementReels(replacementOptions) }
+    val allInlineReels = remember(replacementOptions) { inlineReplacementReels(replacementOptions) }
+    val renderedChips = remember(chips, allInlineReels) {
+        mergeInlineCandidatesIntoChips(chips, allInlineReels)
+    }
+    val ordered = if (rtl) renderedChips.asReversed() else renderedChips
+    val inlineReels = remember(renderedChips, allInlineReels) {
+        inlineReelsWithoutSentenceChipDuplicates(renderedChips, allInlineReels)
+    }
     val inlineOptionIds = remember(replacementOptions) {
         inlineReplacementOptionIds(replacementOptions)
     }
@@ -82,8 +89,8 @@ fun SuggestionStrip(
     // Historical joins move into the source-chip reel once those chips are present; a still-live
     // multi-word join remains visible here until the transaction resolves. A single-source split
     // is shown on its source chip whenever that chip is present.
-    val replacementAttachments = remember(chips, replacementOptions) {
-        attachReplacementCandidates(chips, replacementOptions)
+    val replacementAttachments = remember(renderedChips, replacementOptions) {
+        attachReplacementCandidates(renderedChips, replacementOptions)
     }
     val attachedReplacementOptionIds = remember(replacementAttachments) {
         replacementAttachments.map { it.option.id }.toSet()
@@ -104,11 +111,17 @@ fun SuggestionStrip(
     } else {
         reelVisibleSlotCount(splitOrLiveReplacementOptions.size)
     }
-    // The outer strip's height is pinned to the maximum possible slot count so the strip
-    // (and therefore the whole keyboard, which wraps its height around it) never grows or
-    // shrinks at runtime as chips with different candidate counts appear and clear. Each reel
-    // below uses its own candidate count so shorter reels do not expose empty slots.
-    val pinnedStripHeight = (REEL_STEP_DP * MAX_REEL_VISIBLE_SLOTS).dp
+    // Size the strip to the tallest reel it actually contains. A fixed three-row container left
+    // visible blank space below one- and two-option reels, especially after a cursor move left
+    // the selected word with fewer candidates. Individual reels still use their own count below.
+    val stripVisibleSlotCount = remember(ordered, inlineReels, replacementSlotCount) {
+        buildList {
+            addAll(ordered.map { reelVisibleSlotCount(reelCandidatesForDisplay(it).size) })
+            addAll(inlineReels.map { reelVisibleSlotCount(reelCandidatesForDisplay(it.chip).size) })
+            replacementSlotCount.takeIf { it > 0 }?.let(::add)
+        }.maxOrNull() ?: 1
+    }
+    val stripHeight = (REEL_STEP_DP * stripVisibleSlotCount).dp
     val replacementViewportHeight = (REEL_STEP_DP * replacementSlotCount).dp
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -116,10 +129,14 @@ fun SuggestionStrip(
     val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
     val bodyTextStyleKey = bodyStyle
 
-    LaunchedEffect(ordered.map { it.id }, rtl) {
+    LaunchedEffect(ordered.map { it.id }, rtl, focusedChipId, inlineReels.size) {
         if (ordered.isEmpty()) return@LaunchedEffect
         val leadingExtraItem = splitOrLiveReplacementOptions.isNotEmpty() && rtl
-        val targetIndex = (if (leadingExtraItem) 1 else 0) + autoScrollTargetIndex(ordered.size, rtl)
+        val inlineExtraItems = if (rtl) inlineReels.size else 0
+        val focusedIndex = focusedChipId?.let { id -> ordered.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+        val targetChipIndex = focusedIndex ?: autoScrollTargetIndex(ordered.size, rtl)
+        val targetIndex = (if (leadingExtraItem) 1 else 0) + inlineExtraItems + targetChipIndex
         listState.animateScrollToItem(targetIndex)
     }
 
@@ -159,7 +176,7 @@ fun SuggestionStrip(
         state = listState,
         modifier = Modifier
             .fillMaxWidth()
-            .height(pinnedStripHeight + 8.dp)
+            .height(stripHeight + 8.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics { contentDescription = SUGGESTION_STRIP_DESCRIPTION },
         horizontalArrangement = Arrangement.spacedBy(REEL_ITEM_SPACING_DP.dp),

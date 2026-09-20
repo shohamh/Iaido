@@ -2,12 +2,73 @@ package com.iaido.app
 
 import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
+import com.iaido.core.recognition.SessionWord
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SuggestionReelMathTest {
+    @Test
+    fun `strip keeps every sentence word and focuses the word under the cursor`() {
+        val words = listOf(
+            SessionWord(1, 0, 3, "one", "one", listOf("one"), false),
+            SessionWord(2, 4, 7, "two", "two", listOf("two"), false),
+            SessionWord(3, 8, 13, "three", "three", listOf("three"), false),
+        )
+
+        val selection = suggestionStripSelection(words, cursorPosition = 5)
+
+        assertEquals(listOf(1, 2, 3), selection.words.map { it.id })
+        assertEquals(2, selection.focusedWordId)
+    }
+
+    @Test
+    fun `inline reels are not rendered a second time for sentence words already in the strip`() {
+        val chip = SuggestionChip(word = "what", alternatives = listOf("what", "whatever"), id = 7)
+        val reels = inlineReplacementReels(
+            listOf(
+                ReplacementOption(listOf("what"), listOf("what"), 1.0),
+                ReplacementOption(listOf("what"), listOf("whatever"), 0.9),
+            ),
+        )
+
+        assertEquals(
+            emptyList<InlineReplacementReel>(),
+            inlineReelsWithoutSentenceChipDuplicates(listOf(chip), reels),
+        )
+    }
+
+    @Test
+    fun `live inline candidates merge into the existing sentence reel before duplicate removal`() {
+        val chip = SuggestionChip(word = "what", alternatives = listOf("what"), id = 7)
+        val reel = inlineReplacementReels(
+            listOf(
+                ReplacementOption(listOf("what"), listOf("what"), 1.0),
+                ReplacementOption(listOf("what"), listOf("whatever"), 0.9),
+            ),
+        ).single()
+
+        val merged = mergeInlineCandidatesIntoChips(listOf(chip), listOf(reel))
+
+        assertEquals(listOf("what", "whatever"), merged.single().alternatives)
+    }
+
+    @Test
+    fun `inline reels include independent replacement groups without leaking them to the edge slot`() {
+        val options = listOf(
+            ReplacementOption(listOf("hello"), listOf("hello"), 1.0),
+            ReplacementOption(listOf("hello"), listOf("help"), 0.9),
+            ReplacementOption(listOf("world"), listOf("world"), 1.0),
+            ReplacementOption(listOf("world"), listOf("word"), 0.8),
+        )
+
+        assertEquals(listOf("hello", "world"), inlineReplacementReels(options).map { it.chip.word })
+        assertTrue(inlineReplacementReels(options).all { it.chip.id!! < 0 })
+        assertEquals(options.map { it.id }.toSet(), inlineReplacementOptionIds(options))
+        assertTrue(edgeReplacementOptions(options.filterNot { it.id in inlineReplacementOptionIds(options) }, emptySet()).isEmpty())
+    }
+
     @Test
     fun `dragging up advances through alternatives and clamps at the ends`() {
         assertEquals(2, displayedReelIndex(selectedIndex = 1, dragOffsetSteps = -1.2f, maxIndex = 2))

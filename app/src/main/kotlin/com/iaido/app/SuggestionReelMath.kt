@@ -1,8 +1,24 @@
 package com.iaido.app
 
 import com.iaido.core.recognition.ReplacementOption
+import com.iaido.core.recognition.SessionWord
 import com.iaido.core.recognition.SuggestionChip
 import java.util.Locale
+
+internal data class SuggestionStripSelection(
+    val words: List<SessionWord>,
+    val focusedWordId: Int?,
+)
+
+internal fun suggestionStripSelection(
+    words: List<SessionWord>,
+    cursorPosition: Int,
+): SuggestionStripSelection {
+    val focused = words.firstOrNull { cursorPosition in it.start until it.end }
+        ?: words.lastOrNull { it.end <= cursorPosition }
+        ?: words.firstOrNull { it.start >= cursorPosition }
+    return SuggestionStripSelection(words = words, focusedWordId = focused?.id)
+}
 
 internal fun displayedReelIndex(selectedIndex: Int, dragOffsetSteps: Float, maxIndex: Int): Int {
     if (maxIndex < 0) return 0
@@ -41,10 +57,8 @@ internal data class InlineReplacementReel(
 )
 
 internal fun inlineReplacementOptionIds(options: List<ReplacementOption>): Set<String> {
-    val sourceWords = options.firstOrNull()?.sourceWords.orEmpty()
-    if (sourceWords.isEmpty()) return emptySet()
     return options
-        .filter { it.sourceWords == sourceWords && it.replacementWords.size == sourceWords.size }
+        .filter { it.sourceWords.isNotEmpty() && it.replacementWords.size == it.sourceWords.size }
         .map(ReplacementOption::id)
         .toSet()
 }
@@ -68,33 +82,63 @@ internal fun edgeReplacementOptions(
  * remain in the grouped reel where they can be previewed and committed as one replacement.
  */
 internal fun inlineReplacementReels(options: List<ReplacementOption>): List<InlineReplacementReel> {
-    val sourceWords = options.firstOrNull()?.sourceWords.orEmpty()
-    if (sourceWords.isEmpty()) return emptyList()
-    val inlineOptionIds = inlineReplacementOptionIds(options)
-    val sameShape = options
-        .filter { it.id in inlineOptionIds }
-        .filterNot { option ->
-            sourceWords.size == 1 && sourceWords.single().length > 1 &&
-                option.replacementWords.single().length == 1
+    return options
+        .filter { it.sourceWords.isNotEmpty() && it.replacementWords.size == it.sourceWords.size }
+        .groupBy { it.sourceWords }
+        .values
+        .toList()
+        .flatMapIndexed { groupIndex, group ->
+            val sourceWords = group.first().sourceWords
+            val sameShape = group
+                .filterNot { option ->
+                    sourceWords.size == 1 && sourceWords.single().length > 1 &&
+                        option.replacementWords.single().length == 1
+                }
+                .distinctBy(ReplacementOption::id)
+            sourceWords.indices.map { wordIndex ->
+                val wordOptions = sameShape
+                    .filter { it.replacementWords.getOrNull(wordIndex) != null }
+                    .distinctBy { it.replacementWords[wordIndex] }
+                val candidates = (wordOptions.map { it.replacementWords[wordIndex] } + sourceWords[wordIndex]).distinct()
+                InlineReplacementReel(
+                    chip = SuggestionChip(
+                        word = sourceWords[wordIndex],
+                        alternatives = candidates,
+                        selectedIndex = candidates.indexOf(sourceWords[wordIndex]).coerceAtLeast(0),
+                        id = LIVE_REEL_ID_BASE - (groupIndex * LIVE_REEL_ID_GROUP_STRIDE + wordIndex),
+                    ),
+                    options = wordOptions,
+                    wordIndex = wordIndex,
+                )
+            }
         }
-        .distinctBy(ReplacementOption::id)
-    if (sameShape.isEmpty()) return emptyList()
+}
 
-    return sourceWords.indices.map { wordIndex ->
-        val wordOptions = sameShape
-            .filter { it.replacementWords.getOrNull(wordIndex) != null }
-            .distinctBy { it.replacementWords[wordIndex] }
-        val candidates = (wordOptions.map { it.replacementWords[wordIndex] } + sourceWords[wordIndex]).distinct()
-        InlineReplacementReel(
-            chip = SuggestionChip(
-                word = sourceWords[wordIndex],
-                alternatives = candidates,
-                selectedIndex = candidates.indexOf(sourceWords[wordIndex]).coerceAtLeast(0),
-                id = LIVE_REEL_ID_BASE - wordIndex,
-            ),
-            options = wordOptions,
-            wordIndex = wordIndex,
-        )
+internal fun inlineReelsWithoutSentenceChipDuplicates(
+    chips: List<SuggestionChip>,
+    reels: List<InlineReplacementReel>,
+): List<InlineReplacementReel> {
+    val unmatchedChipCounts = chips.groupingBy(SuggestionChip::word).eachCount().toMutableMap()
+    return reels.filter { reel ->
+        val count = unmatchedChipCounts[reel.chip.word] ?: 0
+        if (count == 0) {
+            true
+        } else {
+            unmatchedChipCounts[reel.chip.word] = count - 1
+            false
+        }
+    }
+}
+
+internal fun mergeInlineCandidatesIntoChips(
+    chips: List<SuggestionChip>,
+    reels: List<InlineReplacementReel>,
+): List<SuggestionChip> = chips.map { chip ->
+    val liveCandidates = reels
+        .filter { it.chip.word == chip.word }
+        .flatMap { it.chip.alternatives }
+    if (liveCandidates.isEmpty()) chip else {
+        chip.copy(alternatives = (listOf(chip.word) + chip.alternatives + liveCandidates).distinct())
     }
 }
 
@@ -124,6 +168,7 @@ internal const val CHIP_HORIZONTAL_PADDING_DP = 10f
 internal const val MIN_CHIP_WIDTH_DP = 56f
 internal const val REEL_ITEM_SPACING_DP = 8f
 private const val LIVE_REEL_ID_BASE = -1_000_000
+private const val LIVE_REEL_ID_GROUP_STRIDE = 10_000
 
 /** A chip's resting width: its widest candidate's measured width plus padding. */
 internal fun chipReservedWidthDp(measuredTextWidthDp: Float): Float =

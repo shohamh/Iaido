@@ -58,10 +58,12 @@ private const val UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000L
 
 class SettingsActivity : ComponentActivity() {
     private val settingsStore get() = applicationContext.settingsStore
+    private val skipAutomaticUpdateChecks: Boolean
+        get() = BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_SKIP_AUTOMATIC_UPDATE_CHECKS, false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ReleaseMonitorScheduler.schedule(this, 0L)
+        if (!skipAutomaticUpdateChecks) ReleaseMonitorScheduler.schedule(this, 0L)
         setContent { IaidoTheme { SettingsScreen() } }
     }
 
@@ -175,7 +177,7 @@ class SettingsActivity : ComponentActivity() {
         }
 
         LaunchedEffect(updateChannel, settingsLoaded) {
-            if (!settingsLoaded) return@LaunchedEffect
+            if (!settingsLoaded || skipAutomaticUpdateChecks) return@LaunchedEffect
             while (isActive) {
                 checkForUpdates(openInstallPermission = false)
                 delay(UPDATE_CHECK_INTERVAL_MS)
@@ -457,6 +459,12 @@ class SettingsActivity : ComponentActivity() {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED &&
                 NotificationManagerCompat.from(this).areNotificationsEnabled())
+
+    companion object {
+        /** Test-only escape hatch for deterministic Settings/IME screenshot journeys. */
+        const val EXTRA_SKIP_AUTOMATIC_UPDATE_CHECKS =
+            "com.iaido.app.extra.SKIP_AUTOMATIC_UPDATE_CHECKS"
+    }
 }
 
 internal data class SpacingModeOption(

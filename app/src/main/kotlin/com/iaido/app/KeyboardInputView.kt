@@ -78,6 +78,7 @@ fun KeyboardInputView(
     onLanguageSwitch: () -> Unit = {},
     onCommand: (GestureTrigger) -> Unit = {},
     suggestionChips: List<SuggestionChip> = emptyList(),
+    focusedChipId: Int? = null,
     replacementOptions: List<ReplacementOption> = emptyList(),
     liveReplacementOptionIds: Set<String> = emptySet(),
     showCandidateScores: Boolean = false,
@@ -200,6 +201,7 @@ fun KeyboardInputView(
             SuggestionStrip(
                 chips = suggestionChips,
                 rtl = language == Language.HEBREW,
+                focusedChipId = focusedChipId,
                 replacementOptions = replacementOptions,
                 liveReplacementOptionIds = liveReplacementOptionIds,
                 showCandidateScores = showCandidateScores,

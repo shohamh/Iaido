@@ -1,6 +1,5 @@
 package com.iaido.app
 
-import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -10,17 +9,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHeightIsEqualTo
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.test.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.iaido.core.recognition.SuggestionChip
-import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,17 +62,6 @@ class SuggestionStripVisibilityTest {
             composeRule.waitForIdle()
         }
 
-        val screenshot = File(
-            InstrumentationRegistry.getInstrumentation().targetContext
-                .getExternalFilesDir("ime-e2e/checkpoints"),
-            "suggestion-strip-after-four-swipes.png",
-        ).apply { parentFile?.mkdirs() }
-        screenshot.outputStream().use { output ->
-            composeRule.onNodeWithContentDescription("Iaido suggestion 0")
-                .captureToImage()
-                .asAndroidBitmap()
-                .compress(Bitmap.CompressFormat.PNG, 100, output)
-        }
         composeRule.onNodeWithText("option-4", useUnmergedTree = true).assertIsDisplayed()
     }
 
@@ -88,7 +73,7 @@ class SuggestionStripVisibilityTest {
                     chips = listOf(
                         SuggestionChip(
                             word = "one",
-                            alternatives = listOf("two", "three"),
+                            alternatives = listOf("two"),
                             selectedIndex = 0,
                             id = 1,
                         ),
@@ -104,24 +89,40 @@ class SuggestionStripVisibilityTest {
             }
         }
 
-        val screenshot = File(
-            InstrumentationRegistry.getInstrumentation().targetContext
-                .getExternalFilesDir("ime-e2e/checkpoints"),
-            "suggestion-strip-per-reel-height.png",
-        ).apply { parentFile?.mkdirs() }
-        screenshot.outputStream().use { output ->
-            composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION)
-                .captureToImage()
-                .asAndroidBitmap()
-                .compress(Bitmap.CompressFormat.PNG, 100, output)
-        }
-        InstrumentationRegistry.getInstrumentation().uiAutomation
-            .executeShellCommand("cp ${screenshot.absolutePath} /sdcard/Download/suggestion-strip-per-reel-height-node.png")
-            .close()
-
         composeRule.onNodeWithContentDescription("Iaido suggestion 0")
-            .assertHeightIsEqualTo(84.dp)
+            .assertHeightIsEqualTo(56.dp)
         composeRule.onNodeWithContentDescription("Iaido suggestion 1")
             .assertHeightIsEqualTo(28.dp)
+        composeRule.onNodeWithContentDescription(SUGGESTION_STRIP_DESCRIPTION)
+            .assertHeightIsEqualTo(56.dp)
+    }
+
+    @Test
+    fun focusedWordIsScrolledIntoViewWhenTheCursorMoves() {
+        var focusedId by mutableIntStateOf(1)
+
+        composeRule.setContent {
+            MaterialTheme {
+                SuggestionStrip(
+                    chips = (1..4).map { id ->
+                        SuggestionChip(
+                            word = "word$id",
+                            alternatives = listOf("word$id", "option$id"),
+                            selectedIndex = 0,
+                            id = id,
+                        )
+                    },
+                    rtl = false,
+                    focusedChipId = focusedId,
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 1").assertIsDisplayed()
+
+        composeRule.runOnIdle { focusedId = 4 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Iaido suggestion 3").assertIsDisplayed()
     }
 }

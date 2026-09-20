@@ -14,7 +14,11 @@ internal fun shouldInitializeDiagnostics(processName: String, applicationPackage
 class IaidoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        if (shouldScheduleReleaseMonitor(Application.getProcessName(), packageName)) {
+        val skipReleaseMonitor = BuildConfig.DEBUG && getSharedPreferences(
+            DebugAutoSpaceFixtures.PREFERENCES,
+            MODE_PRIVATE,
+        ).getBoolean(DebugAutoSpaceFixtures.SKIP_RELEASE_MONITOR_KEY, false)
+        if (shouldScheduleReleaseMonitor(Application.getProcessName(), packageName) && !skipReleaseMonitor) {
             ReleaseMonitorScheduler.schedule(this, 0L)
         }
         if (shouldInitializeDiagnostics(Application.getProcessName(), packageName)) {

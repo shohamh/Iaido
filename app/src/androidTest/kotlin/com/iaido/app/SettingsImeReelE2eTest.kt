@@ -6,24 +6,49 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import android.os.SystemClock
+import androidx.work.WorkManager
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SettingsImeReelE2eTest {
+    @After
+    fun clearReleaseMonitorTestOverride() {
+        InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, 0)
+            .edit()
+            .remove(DebugAutoSpaceFixtures.SKIP_RELEASE_MONITOR_KEY)
+            .apply()
+    }
+
     @Test
     fun settingsPreviewUsesTheRealImeReelAndCapturesItsBoundedHeight() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
         val system = ImeSystemController(instrumentation, device, instrumentation.uiAutomation)
+        instrumentation.targetContext
+            .getSharedPreferences(DebugAutoSpaceFixtures.PREFERENCES, 0)
+            .edit()
+            .putBoolean(DebugAutoSpaceFixtures.SKIP_RELEASE_MONITOR_KEY, true)
+            .commit()
         system.setAutoSpaceFixture(ImeScenarioData.AutoSpaceFixture.TYPED_REEL.preferenceValue)
         system.enableAndSelect(system.iaidoImeId)
+        WorkManager.getInstance(instrumentation.targetContext)
+            .cancelUniqueWork(RELEASE_MONITOR_WORK_NAME)
         instrumentation.uiAutomation.executeShellCommand(
-            "am start -n ${instrumentation.targetContext.packageName}/.SettingsActivity",
+            "am start -n ${instrumentation.targetContext.packageName}/.SettingsActivity " +
+                "--ez ${SettingsActivity.EXTRA_SKIP_AUTOMATIC_UPDATE_CHECKS} true",
         ).close()
-        assertTrue(device.wait(Until.hasObject(By.text("Iaido Settings")), 5_000L))
-        val preview = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 5_000L)
+        // A cold Compose launch on the emulator can spend several seconds compiling the
+        // Settings screen before it becomes visible.  Waiting only five seconds made this
+        // screenshot test capture the launcher and report that the preview was missing.
+        assertTrue(
+            "Iaido Settings screen did not become visible",
+            device.wait(Until.hasObject(By.text("Iaido Settings")), 20_000L),
+        )
+        val preview = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 20_000L)
         assertTrue("Live preview field was not found", preview != null)
         preview.click()
         device.click(500, 420)

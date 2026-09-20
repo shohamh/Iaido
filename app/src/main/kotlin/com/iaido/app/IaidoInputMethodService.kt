@@ -54,10 +54,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 /**
- * How many recently committed words stay addressable in the suggestion strip. The strip scrolls
- * horizontally and auto-scrolls its newest chip into frame, so it keeps one more word than is
- * visible at rest: the word just committed is reachable without scrolling first, and the word
- * before it stays correctable.
+ * How many nearby words are considered when deriving cursor-local join candidates. All recorded
+ * sentence words remain addressable in the suggestion strip; this bound only limits join lookup.
  */
 internal const val VISIBLE_HISTORY_WORDS = 4
 
@@ -100,6 +98,7 @@ class IaidoInputMethodService : InputMethodService() {
     /** Tracks the word being typed so it becomes an addressable session word like a swiped one. */
     private val typedWords = TypedWordTracker()
     private var visibleWordIds: List<Int> = emptyList()
+    private var focusedWordId: Int? = null
     // Recomputed only when correctionHistory actually changes (inside refreshSuggestionChips()),
     // not on every mergedReplacementOptions() call -- a live reel-drag preview fires
     // onReplacementOptionsChanged on every frame but never touches correctionHistory, so
@@ -265,6 +264,7 @@ class IaidoInputMethodService : InputMethodService() {
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
+        focusedWordId = null
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
@@ -295,6 +295,7 @@ class IaidoInputMethodService : InputMethodService() {
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
+        focusedWordId = null
         pendingCandidates = null
         lastDeletedWord = null
         splitController.cancel()
@@ -394,6 +395,7 @@ class IaidoInputMethodService : InputMethodService() {
                         handleCommand(trigger)
                     },
                     suggestionChips = sessionChips.value,
+                    focusedChipId = focusedWordId,
                     replacementOptions = replacementOptions.value,
                     liveReplacementOptionIds = liveReplacementOptionIds.value,
                     showCandidateScores = showCandidateScores.value,
@@ -860,8 +862,10 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun refreshSuggestionChips() {
-        val words = correctionHistory.aroundCursor(cursorPosition, maxWords = VISIBLE_HISTORY_WORDS)
+        val selection = suggestionStripSelection(correctionHistory.words(), cursorPosition)
+        val words = selection.words
         visibleWordIds = words.map { it.id }
+        focusedWordId = selection.focusedWordId
         sessionChips.value = words.map { word ->
             SuggestionChip(
                 word = word.current,
@@ -871,7 +875,10 @@ class IaidoInputMethodService : InputMethodService() {
                 id = word.id,
             )
         }
-        cachedHistoryJoinCandidates = historyJoinCandidates(words, activeDictionary())
+        cachedHistoryJoinCandidates = historyJoinCandidates(
+            correctionHistory.aroundCursor(cursorPosition, maxWords = VISIBLE_HISTORY_WORDS),
+            activeDictionary(),
+        )
         val live = swipeTypingCoordinator.replacementOptions()
         liveReplacementOptionIds.value = live.map { it.id }.toSet()
         replacementOptions.value = mergedReplacementOptions(live)

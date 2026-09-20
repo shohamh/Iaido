@@ -124,15 +124,11 @@ class ImeReelE2eTest {
     }
 
     @Ignore(
-        "Partially unblocked: the strip now keeps four recent words addressable (see " +
-            "VISIBLE_HISTORY_WORDS), so the fourth chip this test targets exists in state. It still " +
-            "cannot be asserted here: with four chips the strip auto-scrolls to the newest, and the " +
-            "fourth chip's node is not published in this flow even after nudging the editor's cursor " +
-            "to finalize the live swipe-typing transaction (see ImeScenario.tryLocateReelSwipeTarget) " +
-            "and waiting 5s. Re-enable once chip nodes are published for every composed chip, or once " +
-            "this test asserts the strip's scroll offset instead of a node's presence.",
+        "UiAutomator does not publish untouched LazyRow children reliably after several IME " +
+            "swipes; the deterministic Compose focus regression covers the same auto-scroll " +
+            "contract without depending on that stale accessibility tree.",
     )
-@Test
+    @Test
     fun stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords() {
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")
