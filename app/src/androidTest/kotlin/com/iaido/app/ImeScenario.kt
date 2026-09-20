@@ -3,8 +3,10 @@ package com.iaido.app
 import android.app.Instrumentation
 import android.content.Intent
 import android.graphics.PointF
+import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
+import android.util.Xml
 import android.view.KeyEvent
 import androidx.test.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -16,6 +18,25 @@ import com.iaido.core.testing.SwipeFixtures
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+
+data class ReelStripEntry(
+    val reelId: String,
+    val candidateText: String,
+    val stateDescription: String,
+    val bounds: Rect,
+)
+
+data class ReelStripSnapshot(
+    val reels: List<ReelStripEntry>,
+) {
+    val orderedReelIds: List<String> get() = reels.map(ReelStripEntry::reelId)
+    val candidateTextByReelId: Map<String, String> get() =
+        reels.associate { it.reelId to it.candidateText }
+}
 
 data class ImeScenarioEvent(
     val index: Int,
@@ -634,6 +655,116 @@ class ImeScenario(
         expectedSelection = expected.length
         checkpoint("assertTextAndCursor")
     }
+
+    /** Reads the currently published suggestion-strip semantics without using gesture geometry. */
+    fun reelStripSnapshot(): ReelStripSnapshot {
+        val strip = device.findObject(By.desc(SUGGESTION_STRIP_DESCRIPTION))
+            ?: error("Missing suggestion strip '$SUGGESTION_STRIP_DESCRIPTION'")
+        val stateDescriptions = publishedStateDescriptions()
+        val reels = buildList {
+            fun visit(node: androidx.test.uiautomator.UiObject2) {
+                val contentDescription = runCatching { node.contentDescription }.getOrNull().orEmpty()
+                if (contentDescription.startsWith("Iaido suggestion ") ||
+                    contentDescription.startsWith("Iaido replacement:")
+                ) {
+                    val bounds = node.visibleBounds
+                    val stateDescription = stateDescriptions[semanticNodeKey(contentDescription, bounds)].orEmpty()
+                    val candidateText = stateDescription.substringBefore(';').trim()
+                        .takeIf(String::isNotEmpty)
+                        ?: descendantText(node).firstOrNull()
+                    check(!candidateText.isNullOrBlank()) {
+                        "Reel node '$contentDescription' has no candidate text: " +
+                            "stateDescription='$stateDescription' bounds=$bounds"
+                    }
+                    add(
+                        ReelStripEntry(
+                            reelId = contentDescription,
+                            candidateText = candidateText,
+                            stateDescription = stateDescription,
+                            bounds = Rect(bounds),
+                        ),
+                    )
+                }
+                node.children.forEach(::visit)
+            }
+            strip.children.forEach(::visit)
+        }
+        return ReelStripSnapshot(reels)
+    }
+
+    /** Polls the real editor and strip state, then captures a settled diagnostic screenshot. */
+    fun awaitImeState(
+        expectedText: String,
+        expectedCursor: Int,
+        expectedReelIds: List<String>,
+        expectedCandidateText: Map<String, String> = emptyMap(),
+        screenshotName: String,
+        timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ): ReelStripSnapshot {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var lastObserved = "editor=<unread> strip=<unread>"
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val observedEditor = runCatching { editor.snapshot() }
+            val observedStrip = runCatching { reelStripSnapshot() }
+            lastObserved = "editor=${observedEditor.getOrNull()} strip=" +
+                (observedStrip.getOrNull() ?: observedStrip.exceptionOrNull()?.message)
+            val editorSnapshot = observedEditor.getOrNull()
+            val stripSnapshot = observedStrip.getOrNull()
+            if (editorSnapshot != null && stripSnapshot != null &&
+                editorSnapshot.text == expectedText &&
+                editorSnapshot.selection.first == expectedCursor &&
+                editorSnapshot.selection.last == expectedCursor &&
+                stripSnapshot.orderedReelIds == expectedReelIds &&
+                expectedCandidateText.all { (reelId, candidate) ->
+                    stripSnapshot.candidateTextByReelId[reelId] == candidate
+                }
+            ) {
+                captureScreenshot(screenshotName)
+                return stripSnapshot
+            }
+            SystemClock.sleep(50L)
+        }
+        val screenshot = runCatching { captureScreenshot("$screenshotName-timeout") }.getOrNull()
+        error(
+            "Timed out waiting for IME state: expectedText='$expectedText' expectedCursor=$expectedCursor " +
+                "expectedReelIds=$expectedReelIds expectedCandidateText=$expectedCandidateText; " +
+                "lastObserved=$lastObserved screenshot=${screenshot?.absolutePath ?: "unavailable"}",
+        )
+    }
+
+    private fun descendantText(node: androidx.test.uiautomator.UiObject2): List<String> = buildList {
+        runCatching { node.text }.getOrNull()?.trim()?.takeIf(String::isNotEmpty)?.let(::add)
+        node.children.forEach { addAll(descendantText(it)) }
+    }
+
+    private fun publishedStateDescriptions(): Map<String, String> {
+        val output = ByteArrayOutputStream()
+        device.dumpWindowHierarchy(output)
+        val parser = Xml.newPullParser().apply {
+            setInput(ByteArrayInputStream(output.toByteArray()), null)
+        }
+        val descriptions = mutableMapOf<String, String>()
+        while (parser.next() != XmlPullParser.END_DOCUMENT) {
+            if (parser.eventType != XmlPullParser.START_TAG || parser.name != "node") continue
+            val contentDescription = parser.getAttributeValue(null, "content-desc") ?: continue
+            val bounds = parser.getAttributeValue(null, "bounds")?.let(::parseBounds) ?: continue
+            descriptions[semanticNodeKey(contentDescription, bounds)] =
+                parser.getAttributeValue(null, "state-desc").orEmpty()
+        }
+        return descriptions
+    }
+
+    private fun parseBounds(value: String): Rect {
+        val match = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]").matchEntire(value)
+            ?: error("Invalid accessibility bounds '$value'")
+        return Rect(
+            match.groupValues[1].toInt(), match.groupValues[2].toInt(),
+            match.groupValues[3].toInt(), match.groupValues[4].toInt(),
+        )
+    }
+
+    private fun semanticNodeKey(contentDescription: String, bounds: Rect): String =
+        "$contentDescription|${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}"
 
     fun selectSpacingModeThroughSettings(mode: SpacingMode) {
         val firstSettings = openSettings()
