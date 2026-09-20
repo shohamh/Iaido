@@ -37,6 +37,7 @@ import com.iaido.core.recognition.NgramScoreStore
 import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.ScoredCandidate
 import com.iaido.core.recognition.SegmentationOption
+import com.iaido.core.recognition.SentenceCandidateReranker
 import com.iaido.core.recognition.SessionCorrectionHistory
 import com.iaido.core.recognition.SessionCorrectionHistorySnapshot
 import com.iaido.core.recognition.SuggestionChip
@@ -147,6 +148,7 @@ class IaidoInputMethodService : InputMethodService() {
                     ?: ngramStores.store(activeLanguage).trigram(first, second, next)
         },
     )
+    private val sentenceCandidateReranker = SentenceCandidateReranker(contextScorer)
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
     private val learningDictionary by lazy { PersonalDictionary(dictionaryRepository.words()) }
     private val learningDatabase = lazy {
@@ -692,14 +694,14 @@ class IaidoInputMethodService : InputMethodService() {
     ) {
         pendingCandidates = null
         val candidatesByWord = inferenceWordCandidates(words, alternatives)
-        correctionHistory.replaceRange(
+        val outputIds = correctionHistory.replaceRange(
             start = span.start,
             end = span.end,
             replacementWords = words,
             candidatesByWord = candidatesByWord,
             composite = words.size > 1,
         )
-        refreshSuggestionChips()
+        refreshSuggestionChips(outputIds.firstOrNull())
     }
 
     private fun commitText(text: String) {
@@ -721,17 +723,18 @@ class IaidoInputMethodService : InputMethodService() {
             )
         }
         pendingCandidates?.let { candidates ->
-            correctionHistory.record(start, cursorPosition, text, candidates)
+            val id = correctionHistory.record(start, cursorPosition, text, candidates)
             pendingCandidates = null
+            refreshSuggestionChips(id)
             scheduleFlowCorrection()
         }
         if (swipedWord) {
             typedWords.reset()
         } else {
             val closed = typedWords.onCommitted(text, cursorBefore = start, cursorAfter = cursorPosition)
-            updateTypedWord(closed ?: typedWords.openSpan())
+            refreshSuggestionChips(updateTypedWord(closed ?: typedWords.openSpan()))
         }
-        refreshSuggestionChips()
+        if (swipedWord) refreshSuggestionChips()
     }
 
     /**
@@ -744,9 +747,9 @@ class IaidoInputMethodService : InputMethodService() {
      * nothing to release, which is how a release either did nothing or inserted its candidate at
      * the caret instead of replacing the word ("Hiiiiiiii").
      */
-    private fun updateTypedWord(span: TypedWordSpan?) {
-        if (span == null || span.word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH) return
-        correctionHistory.upsertTyped(
+    private fun updateTypedWord(span: TypedWordSpan?): Int? {
+        if (span == null || span.word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH) return null
+        return correctionHistory.upsertTyped(
             start = span.start,
             end = span.end,
             word = span.word,
@@ -889,7 +892,13 @@ class IaidoInputMethodService : InputMethodService() {
         }
     }
 
-    private fun refreshSuggestionChips() {
+    private fun refreshSuggestionChips(changedWordId: Int? = null) {
+        changedWordId?.let { changedId ->
+            val result = sentenceCandidateReranker.rerank(correctionHistory.words(), changedId)
+            result.affectedIds.forEach { id ->
+                result.words.firstOrNull { it.id == id }?.let { correctionHistory.updateCandidates(id, it.candidates) }
+            }
+        }
         val selection = suggestionStripSelection(correctionHistory.words(), cursorPosition)
         val words = selection.words
         visibleWordIds = words.map { it.id }
@@ -927,7 +936,7 @@ class IaidoInputMethodService : InputMethodService() {
         typedWords.reset()
         cursorPosition = first.start + replacement.length
         inputConnection.setSelection(cursorPosition, cursorPosition)
-        refreshSuggestionChips()
+        refreshSuggestionChips(firstId)
         return true
     }
 
@@ -1083,7 +1092,7 @@ class IaidoInputMethodService : InputMethodService() {
         cursorPosition = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
         else word.start + replacement.length
         inputConnection.setSelection(cursorPosition, cursorPosition)
-        refreshSuggestionChips()
+        refreshSuggestionChips(id)
         return true
     }
 
