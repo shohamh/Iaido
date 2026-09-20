@@ -4,6 +4,7 @@ import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SuggestionReelMathTest {
@@ -11,6 +12,30 @@ class SuggestionReelMathTest {
     fun `dragging up advances through alternatives and clamps at the ends`() {
         assertEquals(2, displayedReelIndex(selectedIndex = 1, dragOffsetSteps = -1.2f, maxIndex = 2))
         assertEquals(0, displayedReelIndex(selectedIndex = 1, dragOffsetSteps = 4f, maxIndex = 2))
+    }
+
+    @Test
+    fun `stale resting offset is ignored while a reel is not actively settling`() {
+        assertEquals(
+            0f,
+            reelRenderOffset(
+                offset = -4f,
+                minOffset = -1f,
+                maxOffset = 0f,
+                isDragging = false,
+                isSettling = false,
+            ),
+        )
+        assertEquals(
+            -1f,
+            reelRenderOffset(
+                offset = -4f,
+                minOffset = -1f,
+                maxOffset = 0f,
+                isDragging = false,
+                isSettling = true,
+            ),
+        )
     }
 
     @Test
@@ -201,19 +226,23 @@ class SuggestionReelMathTest {
     }
 
     @Test
-    fun `single-word split candidates stay out of the inline reels and reach the grouped reel`() {
+    fun `single-word split candidates attach to the source reel instead of the grouped reel`() {
         val options = listOf(
             ReplacementOption(listOf("help"), listOf("help"), 1.0),
             ReplacementOption(listOf("help"), listOf("he", "lp"), 0.9),
         )
+        val chips = listOf(SuggestionChip(word = "help", alternatives = listOf("help"), id = 4))
 
         val inlineIds = inlineReplacementOptionIds(options)
+        val attachments = attachReplacementCandidates(chips, options.filterNot { it.id in inlineIds })
         val edgeOptions = edgeReplacementOptions(
             options.filterNot { it.id in inlineIds },
             liveReplacementOptionIds = emptySet(),
+            attachedOptionIds = attachments.map { it.option.id }.toSet(),
         )
 
-        assertEquals(listOf(options[1]), edgeOptions)
+        assertTrue(edgeOptions.isEmpty())
+        assertEquals(listOf(options[1]), attachments.map { it.option })
         assertEquals(listOf("help"), inlineReplacementReels(options).map { it.chip.word })
     }
 

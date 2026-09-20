@@ -82,15 +82,25 @@ fun SuggestionStrip(
         reelVisibleSlotCount(reelCandidatesForDisplay(it).size)
     }
         ?: reelVisibleSlotCount(0)
-    // The edge-anchored slot only ever hides a join-shaped option once it is no longer part of
-    // the live SwipeTypingCoordinator transaction (a history-derived join, or a live join whose
-    // transaction has since moved on) -- Task 8's per-chip reel takes over showing it there. A
-    // still-live join stays visible here even once a matching chip pair also exists (chips can
-    // populate earlier than the transaction resolves; provenance, not chip-attachment, is what
-    // distinguishes the two cases -- see SuggestionStrip.kt task 9 report for why a chip-match
-    // based filter doesn't work).
-    val splitOrLiveReplacementOptions = remember(groupedReplacementOptions, liveReplacementOptionIds) {
-        edgeReplacementOptions(groupedReplacementOptions, liveReplacementOptionIds)
+    // Historical joins move into the source-chip reel once those chips are present; a still-live
+    // multi-word join remains visible here until the transaction resolves. A single-source split
+    // is shown on its source chip whenever that chip is present.
+    val replacementAttachments = remember(chips, replacementOptions) {
+        attachReplacementCandidates(chips, replacementOptions)
+    }
+    val attachedReplacementOptionIds = remember(replacementAttachments) {
+        replacementAttachments.map { it.option.id }.toSet()
+    }
+    val splitOrLiveReplacementOptions = remember(
+        groupedReplacementOptions,
+        liveReplacementOptionIds,
+        attachedReplacementOptionIds,
+    ) {
+        edgeReplacementOptions(
+            groupedReplacementOptions,
+            liveReplacementOptionIds,
+            attachedReplacementOptionIds,
+        )
     }
     val inlineSlotCount = inlineReels.maxOfOrNull { reel ->
         reelVisibleSlotCount(reelCandidatesForDisplay(reel.chip).size)
@@ -121,13 +131,10 @@ fun SuggestionStrip(
         listState.animateScrollToItem(targetIndex)
     }
 
-    val joinAttachments = remember(chips, replacementOptions) {
-        attachJoinCandidates(chips, replacementOptions)
-    }
-    val reservedWidths = remember(ordered, joinAttachments, bodyTextStyleKey) {
+    val reservedWidths = remember(ordered, replacementAttachments, bodyTextStyleKey) {
         ordered.map { chip ->
             val chipId = chip.id ?: -1
-            val joinWord = joinAttachments
+            val joinWord = replacementAttachments
                 .firstOrNull { it.firstChipId == chipId || it.lastChipId == chipId }
                 ?.option
                 ?.replacementWords
@@ -194,14 +201,16 @@ fun SuggestionStrip(
         }
         itemsIndexed(ordered, key = { _, chip -> chip.id ?: -1 }) { index, chip ->
             val chipId = chip.id ?: -1
-            val trailingJoin = joinAttachments.firstOrNull { it.firstChipId == chipId }
-            val leadingJoin = joinAttachments.firstOrNull { it.lastChipId == chipId }
+            val trailingJoin = replacementAttachments.firstOrNull { it.firstChipId == chipId }
+            val leadingJoin = replacementAttachments.firstOrNull { it.lastChipId == chipId }
             val join = trailingJoin ?: leadingJoin
             // The other chip this join spans to, if any -- looked up by its actual rendered
             // position so the overlap direction is correct even when `ordered` is RTL-reversed.
             val otherChipIndex = when {
-                trailingJoin != null -> orderedIdToIndex[trailingJoin.lastChipId]
-                leadingJoin != null -> orderedIdToIndex[leadingJoin.firstChipId]
+                trailingJoin != null && trailingJoin.lastChipId != chipId ->
+                    orderedIdToIndex[trailingJoin.lastChipId]
+                leadingJoin != null && leadingJoin.firstChipId != chipId ->
+                    orderedIdToIndex[leadingJoin.firstChipId]
                 else -> null
             }
             // With no join at this boundary, an oversized *same-chip* alternative still needs a
@@ -540,7 +549,13 @@ private fun SuggestionChipView(
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
     val latestDragOffset = rememberUpdatedState(dragOffset)
-    val renderedOffset = if (isDragging) dragOffset else reelOffset.value
+    val renderedOffset = reelRenderOffset(
+        offset = if (isDragging) dragOffset else reelOffset.value,
+        minOffset = minOffset,
+        maxOffset = maxOffset,
+        isDragging = isDragging,
+        isSettling = reelOffset.isRunning,
+    )
     val displayedIndex = displayedReelIndex(selectedIndex, renderedOffset, maxIndex)
     val currentWord = alternatives.getOrNull(displayedIndex).orEmpty()
     val shape = RoundedCornerShape(16.dp)

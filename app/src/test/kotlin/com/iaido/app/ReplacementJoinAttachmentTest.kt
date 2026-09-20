@@ -14,7 +14,7 @@ class ReplacementJoinAttachmentTest {
         val chips = listOf(chip("wh"), chip("at"))
         val option = ReplacementOption(listOf("wh", "at"), listOf("what"), 0.9)
 
-        val attachments = attachJoinCandidates(chips, listOf(option))
+        val attachments = attachReplacementCandidates(chips, listOf(option))
 
         assertEquals(1, attachments.size)
         assertEquals(option, attachments.first().option)
@@ -27,7 +27,7 @@ class ReplacementJoinAttachmentTest {
         val chips = listOf(chip("hello"), chip("wh"), chip("at"))
         val option = ReplacementOption(listOf("wh", "at"), listOf("what"), 0.9)
 
-        val attachments = attachJoinCandidates(chips, listOf(option))
+        val attachments = attachReplacementCandidates(chips, listOf(option))
 
         // Chips here have no explicit id, so it falls back to position within the matched run.
         assertEquals(1, attachments.first().firstChipId)
@@ -43,7 +43,7 @@ class ReplacementJoinAttachmentTest {
         )
         val option = ReplacementOption(listOf("wh", "at"), listOf("what"), 0.9)
 
-        val attachments = attachJoinCandidates(chips, listOf(option))
+        val attachments = attachReplacementCandidates(chips, listOf(option))
 
         assertEquals(11, attachments.first().firstChipId)
         assertEquals(12, attachments.first().lastChipId)
@@ -54,14 +54,19 @@ class ReplacementJoinAttachmentTest {
         val chips = listOf(chip("hello"), chip("world"))
         val option = ReplacementOption(listOf("wh", "at"), listOf("what"), 0.9)
 
-        assertTrue(attachJoinCandidates(chips, listOf(option)).isEmpty())
+        assertTrue(attachReplacementCandidates(chips, listOf(option)).isEmpty())
     }
 
     @Test
-    fun `split options are never attached, only joins`() {
+    fun `a single-word split option attaches to its source chip`() {
         val chips = listOf(chip("inthe"))
         val split = ReplacementOption(listOf("inthe"), listOf("in", "the"), 0.9)
 
-        assertTrue(attachJoinCandidates(chips, listOf(split)).isEmpty())
+        val attachments = attachReplacementCandidates(chips, listOf(split))
+
+        assertEquals(1, attachments.size)
+        assertEquals(split, attachments.single().option)
+        assertEquals(0, attachments.single().firstChipId)
+        assertEquals(0, attachments.single().lastChipId)
     }
 }

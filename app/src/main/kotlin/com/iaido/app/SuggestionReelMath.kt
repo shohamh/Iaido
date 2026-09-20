@@ -9,6 +9,18 @@ internal fun displayedReelIndex(selectedIndex: Int, dragOffsetSteps: Float, maxI
     return (selectedIndex - dragOffsetSteps.roundToInt()).coerceIn(0, maxIndex)
 }
 
+internal fun reelRenderOffset(
+    offset: Float,
+    minOffset: Float,
+    maxOffset: Float,
+    isDragging: Boolean,
+    isSettling: Boolean,
+): Float = if (isDragging || isSettling) {
+    offset.coerceIn(minOffset, maxOffset)
+} else {
+    0f
+}
+
 internal fun reelVisibleSlotCount(candidateCount: Int): Int =
     candidateCount.coerceIn(1, MAX_REEL_VISIBLE_SLOTS)
 
@@ -40,10 +52,14 @@ internal fun inlineReplacementOptionIds(options: List<ReplacementOption>): Set<S
 internal fun edgeReplacementOptions(
     options: List<ReplacementOption>,
     liveReplacementOptionIds: Set<String>,
+    attachedOptionIds: Set<String> = emptySet(),
 ): List<ReplacementOption> = options.filterNot { option ->
-    val historicalJoin = option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
-        option.id !in liveReplacementOptionIds
-    historicalJoin
+    val attachedSingleSourceSplit = option.id in attachedOptionIds &&
+        option.sourceWords.size == 1 && option.replacementWords.size > 1
+    attachedSingleSourceSplit || (
+        option.sourceWords.size > 1 && option.replacementWords.size == 1 &&
+            option.id !in liveReplacementOptionIds
+    )
 }
 
 /**
