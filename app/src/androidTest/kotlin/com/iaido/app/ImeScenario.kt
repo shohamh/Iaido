@@ -853,6 +853,7 @@ class ImeScenario(
     fun previewReplacementThenCancel(sourceWords: Int, replacementWords: Int) {
         dragReplacement(sourceWords, replacementWords, cancel = true)
         editor.waitForText(expectedText)
+        awaitReplacementSourceWords(expectedText.trim().split(Regex("\\s+")).takeLast(sourceWords))
         expectedSelection = editor.selection().last
         checkpoint("previewReplacementThenCancel($sourceWords,$replacementWords)")
     }
@@ -1135,14 +1136,44 @@ class ImeScenario(
      * its absence) and fails loudly, naming what it did and didn't find, rather than silently
      * dragging the wrong element and producing a confusing text-mismatch failure downstream.
      */
-    private fun locateReplacementReelBounds(targetDescription: String): android.graphics.Rect {
+    private fun locateReplacementReelBounds(
+        targetDescription: String,
+        expectedSourceWords: List<String>,
+    ): android.graphics.Rect {
         val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
         while (true) {
-            device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
-        val strip = device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
+            device.findObject(By.descStartsWith("Iaido replacement:"))?.let { replacement ->
+                val description = replacement.contentDescription?.toString().orEmpty()
+                if (description.contains("current words ${expectedSourceWords.joinToString(" ")}")) {
+                    device.waitForIdle()
+                    SystemClock.sleep(250L)
+                    return replacement.visibleBounds
+                }
+            }
+            val strip = device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
             val leadingChipExists = device.findObject(By.descStartsWith("Iaido suggestion 0")) != null
             if (strip != null) {
                 val stripBounds = strip.visibleBounds
+                val stripDescription = strip.contentDescription?.toString().orEmpty()
+                if (!stripDescription.contains(
+                        "replacementSourceWords=${expectedSourceWords.joinToString("_")}",
+                    )
+                ) {
+                    if (SystemClock.elapsedRealtime() >= deadline) {
+                        error(
+                            "Timed out waiting for replacement source ${expectedSourceWords.joinToString(" ")} " +
+                                "before '$targetDescription' (strip=$stripDescription)",
+                        )
+                    }
+                    device.waitForIdle()
+                    SystemClock.sleep(50L)
+                    continue
+                }
+                device.waitForIdle()
+                SystemClock.sleep(250L)
+                replacementBoundsFromStripSemantics(strip.contentDescription?.toString())?.let { bounds ->
+                    return bounds
+                }
                 // The live replacement slot follows the sentence chips in LTR. Bring that
                 // trailing item into the viewport before using geometry; otherwise a valid slot
                 // can be outside the current LazyRow window while its accessibility node is
@@ -1152,17 +1183,32 @@ class ImeScenario(
                 device.waitForIdle()
                 device.findObject(By.descStartsWith("Iaido replacement:"))?.let { return it.visibleBounds }
                 // A live replacement slot is appended after the sentence chips in LTR. When
-                // LazyRow has not published its children yet, use the appropriate edge rather
-                // than dragging the first sentence reel. The old fallback only handled the
-                // slot-only case, so a typed prefix could make releaseReplacement silently drag
-                // the wrong chip and leave the editor unchanged.
+                // LazyRow has not published the slot's own node yet, anchor the fallback to the
+                // last visible sentence reel rather than to the strip's far edge. The content
+                // can be narrower than the viewport (for example, the typed prefix "X" plus a
+                // live join), so the far edge may be empty and a drag there never reaches the
+                // replacement detector.
+                val visibleSuggestions = device.findObjects(By.descStartsWith("Iaido suggestion "))
+                    .filterNot { suggestion ->
+                        runCatching {
+                            suggestion.contentDescription?.toString()
+                                ?.startsWith(SUGGESTION_STRIP_DESCRIPTION) == true
+                        }.getOrDefault(false)
+                    }
+                    .mapNotNull { suggestion -> runCatching { suggestion.visibleBounds }.getOrNull() }
                 val fallbackWidth = 180
-                val left = (stripBounds.right - fallbackWidth).coerceAtLeast(stripBounds.left + 1)
+                val left = if (rtlForTest()) {
+                    (visibleSuggestions.minOfOrNull { it.left } ?: stripBounds.right - fallbackWidth) -
+                        fallbackWidth
+                } else {
+                    (visibleSuggestions.maxOfOrNull { it.right } ?: stripBounds.left) + 8
+                }
+                    .coerceIn(stripBounds.left + 1, stripBounds.right - fallbackWidth - 1)
                 return android.graphics.Rect(
                     left.coerceIn(stripBounds.left + 1, stripBounds.right - 1),
-                    stripBounds.top + 10,
+                    stripBounds.top + 1,
                     (left + fallbackWidth).coerceIn(stripBounds.left + 1, stripBounds.right - 1),
-                    stripBounds.top + 170,
+                    stripBounds.bottom - 1,
                 )
             }
             if (SystemClock.elapsedRealtime() >= deadline) {
@@ -1176,11 +1222,40 @@ class ImeScenario(
         }
     }
 
+    private fun rtlForTest(): Boolean = expectedLanguage == Language.HEBREW
+
+    private fun replacementBoundsFromStripSemantics(description: String?): Rect? {
+        val values = Regex("replacementBounds=(-?\\d+),(-?\\d+),(-?\\d+),(-?\\d+)")
+            .find(description.orEmpty())
+            ?.groupValues
+            ?.drop(1)
+            ?.map(String::toIntOrNull)
+        if (values == null || values.size != 4 || values.any { it == null }) return null
+        val (left, top, right, bottom) = values.filterNotNull()
+        return Rect(left, top, right, bottom).takeIf { it.width() > 0 && it.height() > 0 }
+    }
+
+    private fun awaitReplacementSourceWords(expectedSourceWords: List<String>) {
+        val expected = "replacementSourceWords=${expectedSourceWords.joinToString("_")}"
+        waitUntil("replacement source '${expectedSourceWords.joinToString(" ")}'") {
+            device.findObject(By.descStartsWith(SUGGESTION_STRIP_DESCRIPTION))
+                ?.contentDescription
+                ?.toString()
+                ?.contains(expected) == true
+        }
+        device.waitForIdle()
+        SystemClock.sleep(250L)
+    }
+
     private fun dragReplacement(sourceWords: Int, replacementWords: Int, cancel: Boolean) {
         val targetDescription = "Iaido replacement: $sourceWords source " +
             (if (sourceWords == 1) "word" else "words") + " to $replacementWords replacement " +
             (if (replacementWords == 1) "word" else "words")
-        val bounds = locateReplacementReelBounds(targetDescription)
+        val expectedSourceWords = expectedText.trim().split(Regex("\\s+")).takeLast(sourceWords)
+        check(expectedSourceWords.size == sourceWords) {
+            "Expected $sourceWords source words in '$expectedText', got $expectedSourceWords"
+        }
+        val bounds = locateReplacementReelBounds(targetDescription, expectedSourceWords)
         // Both current call sites want the reel to move exactly one step from its resting
         // position (index 0, the top/identity candidate) to index 1 -- the alternative right next
         // to it, whatever that alternative's shape (a fixture can offer more than just an

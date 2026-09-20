@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -56,6 +57,7 @@ import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 const val SUGGESTION_STRIP_DESCRIPTION = "Iaido suggestion strip"
 
@@ -73,6 +75,7 @@ fun SuggestionStrip(
     onReplacementRelease: (ReplacementOption) -> Unit = {},
     onReplacementCancel: () -> Unit = {},
 ) {
+    var replacementBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
     val allInlineReels = remember(replacementOptions) { inlineReplacementReels(replacementOptions) }
     val renderedChips = remember(chips, allInlineReels) {
         mergeInlineCandidatesIntoChips(chips, allInlineReels)
@@ -124,6 +127,9 @@ fun SuggestionStrip(
     }
     val stripHeight = (REEL_STEP_DP * stripVisibleSlotCount).dp
     val replacementViewportHeight = (REEL_STEP_DP * replacementSlotCount).dp
+    LaunchedEffect(splitOrLiveReplacementOptions.isNotEmpty()) {
+        if (splitOrLiveReplacementOptions.isEmpty()) replacementBounds = null
+    }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
@@ -189,7 +195,13 @@ fun SuggestionStrip(
             .semantics {
                 contentDescription = SUGGESTION_STRIP_DESCRIPTION +
                     " focusedReelId=${focusedChipId ?: "none"}; " +
-                    "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}"
+                    "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}" +
+                    replacementBounds?.let { bounds ->
+                        " replacementBounds=${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}"
+                    }.orEmpty() +
+                    splitOrLiveReplacementOptions.firstOrNull()?.sourceWords?.let { words ->
+                        " replacementSourceWords=${words.joinToString("_")}"
+                    }.orEmpty()
                 stateDescription = "focusedReelId=${focusedChipId ?: "none"}; " +
                     "orderedReelIds=${ordered.mapNotNull { it.id }.joinToString(",")}"
             },
@@ -205,6 +217,7 @@ fun SuggestionStrip(
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
                     showCandidateScores = showCandidateScores,
+                    onBoundsChanged = { replacementBounds = it },
                 )
             }
         }
@@ -293,6 +306,7 @@ fun SuggestionStrip(
                     onRelease = onReplacementRelease,
                     onCancel = onReplacementCancel,
                     showCandidateScores = showCandidateScores,
+                    onBoundsChanged = { replacementBounds = it },
                 )
             }
         }
@@ -353,6 +367,7 @@ private fun ReplacementReelSlot(
     onRelease: (ReplacementOption) -> Unit,
     onCancel: () -> Unit,
     showCandidateScores: Boolean,
+    onBoundsChanged: (android.graphics.Rect) -> Unit,
 ) {
     val selection = rememberSaveable(saver = ReplacementReelSelectionSaver) {
         ReplacementReelSelection()
@@ -377,6 +392,7 @@ private fun ReplacementReelSlot(
             onCancel()
         },
         showCandidateScores = showCandidateScores,
+        onBoundsChanged = onBoundsChanged,
     )
 }
 
@@ -390,29 +406,32 @@ private fun ReplacementReelGroup(
     onRelease: (ReplacementOption) -> Unit,
     onCancel: () -> Unit,
     showCandidateScores: Boolean,
+    onBoundsChanged: (android.graphics.Rect) -> Unit,
 ) {
     val density = LocalDensity.current
     val stateKey = options.joinToString { it.id }
     var dragY by remember(stateKey) { mutableFloatStateOf(0f) }
     var isDragging by remember(stateKey) { mutableStateOf(false) }
     var dragStartSelectedIndex by remember(stateKey) { mutableIntStateOf(selectedIndex) }
+    var gestureOptions by remember(stateKey) { mutableStateOf<List<ReplacementOption>?>(null) }
     val latestOptions = rememberUpdatedState(options)
     val latestSelectedIndex = rememberUpdatedState(selectedIndex)
+    val renderedOptions = gestureOptions ?: options
     val stepPx = with(density) { REEL_STEP_DP.dp.toPx() }
     val thresholdPx = with(density) { DRAG_THRESHOLD_DP.dp.toPx() }
     val previewBaseIndex = if (isDragging) dragStartSelectedIndex else selectedIndex
-    val previewIndex = displayedReelIndex(previewBaseIndex, dragY / stepPx, options.lastIndex)
-    val option = options[previewIndex]
+    val previewIndex = displayedReelIndex(previewBaseIndex, dragY / stepPx, renderedOptions.lastIndex)
+    val option = renderedOptions[previewIndex]
     val layout = replacementReelLayout(option, rtl)
-    val description = replacementReelDescription(option, previewIndex, options.size)
+    val description = replacementReelDescription(option, previewIndex, renderedOptions.size)
     val shape = RoundedCornerShape(16.dp)
     val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     // Reserve the largest width needed by any option at each rendered position. The preview
     // changes options while the pointer is down, so sizing from only the current option can move
     // the row under the gesture and leave the visible word clipped or the hit target unstable.
-    val wordReservedWidthsDp = remember(options, rtl, bodyStyle) {
-        val layouts = options.map { replacementReelLayout(it, rtl) }
+    val wordReservedWidthsDp = remember(renderedOptions, rtl, bodyStyle) {
+        val layouts = renderedOptions.map { replacementReelLayout(it, rtl) }
         val maxWordCount = layouts.maxOfOrNull { it.renderedWords.size } ?: 0
         (0 until maxWordCount).map { wordIndex ->
             val widestWordWidthDp = layouts.maxOfOrNull { candidateLayout ->
@@ -435,6 +454,17 @@ private fun ReplacementReelGroup(
         modifier = Modifier
             .width(totalWidthDp.dp)
             .height(viewportHeight)
+            .onGloballyPositioned { coordinates ->
+                val topLeft = coordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero)
+                onBoundsChanged(
+                    android.graphics.Rect(
+                        topLeft.x.roundToInt(),
+                        topLeft.y.roundToInt(),
+                        (topLeft.x + coordinates.size.width).roundToInt(),
+                        (topLeft.y + coordinates.size.height).roundToInt(),
+                    ),
+                )
+            }
             .semantics(mergeDescendants = true) {
                 contentDescription = description
                 stateDescription = "Swipe vertically to preview; release to commit"
@@ -445,6 +475,7 @@ private fun ReplacementReelGroup(
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
+                        gestureOptions = latestOptions.value
                         dragStartSelectedIndex = latestSelectedIndex.value
                         dragY = 0f
                         isDragging = true
@@ -457,7 +488,7 @@ private fun ReplacementReelGroup(
                         // Previewing updates selectedIndex and options while this gesture is active.
                         // Keep the detector alive across that recomposition, then read the current
                         // values here so release commits the option the user is actually previewing.
-                        val currentOptions = latestOptions.value
+                        val currentOptions = gestureOptions ?: latestOptions.value
                         val releasedIndex = displayedReelIndex(
                             dragStartSelectedIndex,
                             dragY / stepPx,
@@ -465,11 +496,13 @@ private fun ReplacementReelGroup(
                         )
                         val shouldCommit = abs(dragY) >= thresholdPx || currentOptions.size == 1
                         isDragging = false
+                        gestureOptions = null
                         if (shouldCommit) onRelease(currentOptions[releasedIndex]) else onCancel()
                         dragY = 0f
                     },
                     onDragCancel = {
                         isDragging = false
+                        gestureOptions = null
                         dragY = 0f
                         onCancel()
                     },
