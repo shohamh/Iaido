@@ -116,6 +116,8 @@ class IaidoInputMethodService : InputMethodService() {
     private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val splitGraceHandler = Handler(Looper.getMainLooper())
+    private var splitGestureGeneration = 0L
+    private var scheduledSplitGeneration: Long? = null
     private val runtimeState = KeyboardRuntimeState()
     private val runtimeReadiness = KeyboardRuntimeReadiness()
     private var activeRuntimeRevision: Long? = null
@@ -428,14 +430,28 @@ class IaidoInputMethodService : InputMethodService() {
                         typingController.markNonSwipeInput()
                         redoBackspace()
                     },
-                    onSplitBegin = splitController::begin,
+                    onSplitBegin = { pointerId, point, atMs ->
+                        if (!splitController.isPending()) {
+                            splitGestureGeneration += 1
+                            scheduledSplitGeneration = null
+                            splitGraceHandler.removeCallbacksAndMessages(null)
+                        }
+                        splitController.begin(pointerId, point, atMs)
+                    },
                     onSplitMove = splitController::move,
-                    onSplitEnd = { pointerId, path, layout, atMs ->
+                    onSplitEnd = splitEnd@{ pointerId, path, layout, atMs ->
                         splitController.finish(pointerId, path, layout, atMs)
                         val expectedSession = sessionId
                         val expectedLanguage = activeLanguage
+                        val expectedGeneration = splitGestureGeneration
+                        if (scheduledSplitGeneration == expectedGeneration) return@splitEnd
+                        scheduledSplitGeneration = expectedGeneration
                         fun pollSplit() {
-                            if (sessionId != expectedSession || activeLanguage != expectedLanguage) return
+                            if (
+                                sessionId != expectedSession ||
+                                activeLanguage != expectedLanguage ||
+                                splitGestureGeneration != expectedGeneration
+                            ) return
                             val parts = when (val result = swipeTypingCoordinator.poll(System.currentTimeMillis())) {
                                 is SplitPollOutcome.Resolved -> result.parts
                                 SplitPollOutcome.Pending -> {
@@ -443,17 +459,23 @@ class IaidoInputMethodService : InputMethodService() {
                                     return
                                 }
                                 SplitPollOutcome.Cancelled -> {
+                                    scheduledSplitGeneration = null
                                     trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                                     swipeTypingCoordinator.onRecognitionFailed()
                                     splitPreview.value = null
                                     return
                                 }
                             }
+                            scheduledSplitGeneration = null
                             val dictionary = activeDictionary()
                             correctionExecutor.execute {
                                 val candidates = parts.paths.map { part -> controller.recognize(part, layout, dictionary) }
                                 mainHandler.post {
-                                    if (sessionId != expectedSession || activeLanguage != expectedLanguage) return@post
+                                    if (
+                                        sessionId != expectedSession ||
+                                        activeLanguage != expectedLanguage ||
+                                        splitGestureGeneration != expectedGeneration
+                                    ) return@post
                                     if (candidates.any { it.isEmpty() }) {
                                         trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.REJECTED)
                                         swipeTypingCoordinator.onRecognitionFailed()
@@ -476,6 +498,9 @@ class IaidoInputMethodService : InputMethodService() {
                         splitGraceHandler.postDelayed({ pollSplit() }, 351L)
                     },
                     onSplitCancel = {
+                        splitGestureGeneration += 1
+                        scheduledSplitGeneration = null
+                        splitGraceHandler.removeCallbacksAndMessages(null)
                         splitController.cancel()
                         trackGesture(DiagnosticsGestureKind.SPLIT, DiagnosticsOutcome.CANCELLED)
                         swipeTypingCoordinator.onRecognitionFailed()

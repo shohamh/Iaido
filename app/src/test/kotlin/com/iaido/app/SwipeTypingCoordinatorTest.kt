@@ -390,6 +390,67 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
+    fun `out of order multi path timestamps reject the result and finalize the active inference run`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        coordinator.onRecognizedMultiPathResult(
+            parts = listOf(path(3), path(4)),
+            candidates = listOf(listOf(candidate("th")), listOf(candidate("ere"))),
+            touchDownAtMs = listOf(120L, 100L),
+            graceWindowMs = 350L,
+        )
+
+        assertEquals("in", editor.text)
+        assertEquals(listOf(listOf("in")), finalized)
+    }
+
+    @Test
+    fun `negative multi path grace window rejects the result and finalizes the active inference run`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        coordinator.onRecognizedMultiPathResult(
+            parts = listOf(path(3), path(4)),
+            candidates = listOf(listOf(candidate("th")), listOf(candidate("ere"))),
+            touchDownAtMs = listOf(100L, 120L),
+            graceWindowMs = -1L,
+        )
+
+        assertEquals("in", editor.text)
+        assertEquals(listOf(listOf("in")), finalized)
+    }
+
+    @Test
+    fun `multi path timing metadata changes the selected language interpretation`() {
+        fun recognizedText(touchDownAtMs: List<Long>): String {
+            val editor = FakeEditor()
+            val coordinator = coordinator(
+                editor = editor,
+                mode = SpacingMode.INFER_SPACES,
+                dictionary = listOf(WordEntry("ab", 0.01), WordEntry("ba", 0.1)),
+                segmenter = InferenceSegmenter(confidenceMargin = 0.0),
+            )
+
+            coordinator.onRecognizedMultiPathResult(
+                parts = listOf(path(30), path(31)),
+                candidates = listOf(listOf(candidate("a")), listOf(candidate("b"))),
+                touchDownAtMs = touchDownAtMs,
+                graceWindowMs = 350L,
+            )
+
+            return editor.text
+        }
+
+        assertEquals("ba", recognizedText(listOf(100L, 135L)))
+        assertEquals("ab", recognizedText(listOf(100L, 500L)))
+    }
+
+    @Test
     fun `recognized three path result is accepted as one gesture event`() {
         val editor = FakeEditor()
         val coordinator = coordinator(editor, SpacingMode.MANUAL, dictionary("in", "the", "re"))
