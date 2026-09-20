@@ -691,13 +691,14 @@ class IaidoInputMethodService : InputMethodService() {
         alternatives: List<SegmentationOption>,
     ) {
         pendingCandidates = null
-        correctionHistory.deleteRange(span.start, span.end)
         val candidatesByWord = inferenceWordCandidates(words, alternatives)
-        var start = span.start
-        words.forEachIndexed { index, word ->
-            correctionHistory.record(start, start + word.length, word, candidatesByWord[index])
-            start += word.length + 1
-        }
+        correctionHistory.replaceRange(
+            start = span.start,
+            end = span.end,
+            replacementWords = words,
+            candidatesByWord = candidatesByWord,
+            composite = words.size > 1,
+        )
         refreshSuggestionChips()
     }
 
@@ -745,11 +746,10 @@ class IaidoInputMethodService : InputMethodService() {
      */
     private fun updateTypedWord(span: TypedWordSpan?) {
         if (span == null || span.word.length < TypedWordTracker.MIN_TYPED_WORD_LENGTH) return
-        correctionHistory.deleteRange(span.start, span.end)
-        correctionHistory.record(
+        correctionHistory.upsertTyped(
             start = span.start,
             end = span.end,
-            original = span.word,
+            word = span.word,
             candidates = typedWordCandidates(span.word, activeDictionary()),
         )
     }
@@ -766,6 +766,9 @@ class IaidoInputMethodService : InputMethodService() {
             )
         }
         if (!inputConnection.deleteSurroundingText(count, 0)) return
+        correctionHistory.words()
+            .filter { it.start < oldCursor && it.end > (oldCursor - count).coerceAtLeast(0) }
+            .forEach { correctionHistory.breakCompositeGroupFor(it.id) }
         lastDeletedWord = correctionHistory.words().firstOrNull { it.end == oldCursor }?.current
         val start = (oldCursor - count).coerceAtLeast(0)
         correctionHistory.deleteRange(start, oldCursor)
@@ -1073,6 +1076,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (!inputConnection.setSelection(word.start, word.end)) return false
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(word.start, word.end, replacement)
         if (!inputConnection.commitText(replacement, 1)) return false
+        correctionHistory.breakCompositeGroupFor(id)
         correctionHistory.replace(id, replacement)
         typedWords.reset()
         val delta = replacement.length - word.current.length

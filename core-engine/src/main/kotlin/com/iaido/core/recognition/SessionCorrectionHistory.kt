@@ -21,7 +21,12 @@ data class WordReplacement(
 /** Position-indexed metadata for words inserted during one IME session. */
 class SessionCorrectionHistory {
     private val entries = mutableListOf<SessionWord>()
+    // Composite membership is deliberately session-only. Editor snapshots persist word entries,
+    // while a composite is only a transient rendering/lifecycle relationship and is rebuilt by
+    // the next edit rather than restoring stale grouping metadata.
+    private val reelGroups = mutableListOf<ReelGroup>()
     private var nextId = 0
+    private var nextGroupId = 0
 
     fun record(start: Int, end: Int, original: String, candidates: List<String>): Int {
         require(start >= 0) { "start must be non-negative" }
@@ -40,6 +45,99 @@ class SessionCorrectionHistory {
     }
 
     fun words(): List<SessionWord> = entries.toList()
+
+    fun groups(): List<ReelGroup> = reelGroups.toList()
+
+    /** Updates a word's candidate pool without changing its stable identity or current text. */
+    fun updateCandidates(id: Int, candidates: List<String>): Boolean {
+        val index = entries.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        val entry = entries[index]
+        entries[index] = entry.copy(candidates = (listOf(entry.current) + candidates).distinct())
+        return true
+    }
+
+    /**
+     * Updates the currently typed span in place. The first matching start anchor keeps its ID
+     * while its end and current text grow or shrink, so every keystroke refreshes one reel.
+     */
+    fun upsertTyped(start: Int, end: Int, word: String, candidates: List<String>): Int {
+        require(start >= 0 && end >= start) { "typed range must be non-negative and ordered" }
+        val index = entries.indexOfFirst { it.start == start && it.end <= end }
+        if (index < 0) return record(start, end, word, candidates)
+        val entry = entries[index]
+        val delta = end - entry.end
+        entries[index] = entry.copy(
+            end = end,
+            current = word,
+            candidates = (listOf(word) + candidates).distinct(),
+            corrected = word != entry.original,
+        )
+        if (delta != 0) shiftEntriesAfter(index, delta)
+        return entry.id
+    }
+
+    /** Replaces a source range with one or more independently addressable output words. */
+    fun replaceRange(
+        start: Int,
+        end: Int,
+        replacementWords: List<String>,
+        candidatesByWord: List<List<String>> = replacementWords.map { emptyList() },
+        composite: Boolean = replacementWords.size > 1,
+    ): List<Int> {
+        require(start >= 0 && end >= start) { "replacement range must be non-negative and ordered" }
+        require(replacementWords.isNotEmpty()) { "replacement must contain at least one word" }
+        require(candidatesByWord.size == replacementWords.size)
+
+        val affected = entries.filter { it.start < end && it.end > start }
+        val anchor = affected.firstOrNull()
+        val oldLength = end - start
+        entries.removeAll(affected.toSet())
+        reelGroups.removeAll { group -> group.sourceStart < end && group.sourceEnd > start }
+
+        val replacementTextLength = replacementWords.joinToString(" ").length
+        val delta = replacementTextLength - oldLength
+        val insertionIndex = entries.indexOfFirst { it.start >= end }.let { if (it < 0) entries.size else it }
+        if (delta != 0) {
+            for (index in insertionIndex until entries.size) {
+                val entry = entries[index]
+                entries[index] = entry.copy(start = entry.start + delta, end = entry.end + delta)
+            }
+        }
+
+        val ids = replacementWords.mapIndexed { index, word ->
+            val id = if (index == 0 && anchor != null) anchor.id else nextId++
+            entries += SessionWord(
+                id = id,
+                start = start + replacementWords.take(index).sumOf { it.length + 1 },
+                end = start + replacementWords.take(index).sumOf { it.length + 1 } + word.length,
+                original = if (index == 0 && anchor != null) anchor.original else word,
+                current = word,
+                candidates = (listOf(word) + candidatesByWord[index]).distinct(),
+                corrected = anchor != null && index == 0 && word != anchor.original,
+            )
+            id
+        }
+        entries.sortBy { it.start }
+        if (composite) {
+            reelGroups += ReelGroup(
+                id = nextGroupId++,
+                sourceStart = start,
+                sourceEnd = start + replacementTextLength,
+                wordIds = ids,
+                sourceWords = affected.map { it.current },
+                replacementWords = replacementWords,
+            )
+        }
+        return ids
+    }
+
+    /** Breaks the transient composite relationship while retaining all independent word entries. */
+    fun breakCompositeGroupFor(wordId: Int): ReelGroup? {
+        val group = reelGroups.firstOrNull { wordId in it.wordIds } ?: return null
+        reelGroups.remove(group)
+        return group
+    }
 
     fun snapshot(): SessionCorrectionHistorySnapshot = SessionCorrectionHistorySnapshot(
         nextId = nextId,
@@ -63,6 +161,7 @@ class SessionCorrectionHistory {
         val index = entries.indexOfFirst { it.id == id }
         if (index < 0) return null
         val entry = entries[index]
+        breakCompositeGroupFor(id)
         if (entry.current == replacement) return null
         val edit = WordReplacement(entry.id, entry.start, entry.end, entry.current, replacement)
         val delta = replacement.length - entry.current.length
@@ -72,10 +171,7 @@ class SessionCorrectionHistory {
             corrected = replacement != entry.original,
         )
         if (delta != 0) {
-            for (later in index + 1 until entries.size) {
-                val shifted = entries[later]
-                entries[later] = shifted.copy(start = shifted.start + delta, end = shifted.end + delta)
-            }
+            shiftEntriesAfter(index, delta)
         }
         return edit
     }
@@ -88,6 +184,8 @@ class SessionCorrectionHistory {
         if (secondIndex != firstIndex + 1) return null
         val first = entries[firstIndex]
         val second = entries[secondIndex]
+        breakCompositeGroupFor(firstId)
+        breakCompositeGroupFor(secondId)
         val edit = WordReplacement(first.id, first.start, second.end, first.current, replacement)
         val delta = replacement.length - (second.end - first.start)
         entries[firstIndex] = first.copy(
@@ -98,10 +196,7 @@ class SessionCorrectionHistory {
         )
         entries.removeAt(secondIndex)
         if (delta != 0) {
-            for (later in firstIndex + 1 until entries.size) {
-                val shifted = entries[later]
-                entries[later] = shifted.copy(start = shifted.start + delta, end = shifted.end + delta)
-            }
+            shiftEntriesAfter(firstIndex, delta)
         }
         return edit
     }
@@ -118,6 +213,7 @@ class SessionCorrectionHistory {
         if (start == end) return
         val length = end - start
         val removed = entries.filter { it.start < end && it.end > start }.toSet()
+        reelGroups.removeAll { group -> group.sourceStart < end && group.sourceEnd > start }
         entries.removeAll(removed)
         for (index in entries.indices) {
             val entry = entries[index]
@@ -129,6 +225,15 @@ class SessionCorrectionHistory {
 
     fun clear() {
         entries.clear()
+        reelGroups.clear()
         nextId = 0
+        nextGroupId = 0
+    }
+
+    private fun shiftEntriesAfter(index: Int, delta: Int) {
+        for (later in index + 1 until entries.size) {
+            val shifted = entries[later]
+            entries[later] = shifted.copy(start = shifted.start + delta, end = shifted.end + delta)
+        }
     }
 }

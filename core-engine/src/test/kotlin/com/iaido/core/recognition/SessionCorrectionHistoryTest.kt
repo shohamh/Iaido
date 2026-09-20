@@ -162,4 +162,55 @@ class SessionCorrectionHistoryTest {
         assertEquals(snapshot, restored.snapshot())
         assertEquals(first + 2, restored.record(10, 13, "new", listOf("new")))
     }
+
+    @Test
+    fun `typed span refresh keeps one id while the word grows and candidates change`() {
+        val history = SessionCorrectionHistory()
+
+        val first = history.upsertTyped(0, 1, "h", emptyList())
+        val same = history.upsertTyped(0, 2, "hi", listOf("his"))
+
+        assertEquals(first, same)
+        assertEquals(1, history.words().size)
+        assertEquals("hi", history.words().single().current)
+        assertEquals(listOf("hi", "his"), history.words().single().candidates)
+    }
+
+    @Test
+    fun `multi-word replacement keeps output words addressable and records a composite group`() {
+        val history = SessionCorrectionHistory()
+        val source = history.record(0, 6, "inthe", listOf("inthe"))
+
+        val ids = history.replaceRange(0, 6, listOf("in", "the"), listOf(emptyList(), emptyList()))
+
+        assertEquals(source, ids.first())
+        assertEquals(listOf("in", "the"), history.words().map { it.current })
+        assertEquals(1, history.groups().size)
+        assertEquals(ids, history.groups().single().wordIds)
+        assertEquals(2, history.groups().single().replacementWords.size)
+    }
+
+    @Test
+    fun `editing a split member breaks its composite group but preserves independent reels`() {
+        val history = SessionCorrectionHistory()
+        val ids = history.replaceRange(0, 6, listOf("in", "the"))
+
+        val broken = history.breakCompositeGroupFor(ids.last())
+
+        assertEquals(ids, broken?.wordIds)
+        assertEquals(emptyList<ReelGroup>(), history.groups())
+        assertEquals(listOf("in", "the"), history.words().map { it.current })
+    }
+
+    @Test
+    fun `deleting one split range removes the group and leaves later entries shifted`() {
+        val history = SessionCorrectionHistory()
+        history.replaceRange(0, 6, listOf("in", "the"))
+        val later = history.record(7, 12, "world", listOf("world"))
+
+        history.deleteRange(3, 6)
+
+        assertEquals(emptyList<ReelGroup>(), history.groups())
+        assertEquals(4, history.words().single { it.id == later }.start)
+    }
 }
