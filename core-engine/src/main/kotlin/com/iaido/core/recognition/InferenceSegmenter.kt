@@ -46,7 +46,9 @@ class InferenceSegmenter(
             NgramContextScorer(),
         ).firstOrNull()?.let { baseline ->
             allOptions.firstOrNull { option ->
-                option.words == baseline.words && option.sourceGestureIds == baseline.sourceGestureIds
+                option.words == baseline.words &&
+                    option.sourceGestureIds == baseline.sourceGestureIds &&
+                    option.hypothesisMetadata == baseline.hypothesisMetadata
             }
         } ?: allOptions.first()
 
@@ -84,7 +86,12 @@ class InferenceSegmenter(
 
         return states[units.size]
             .map { partial ->
-                SegmentationOption(partial.words, partial.score, partial.sourceGestureIds)
+                SegmentationOption(
+                    words = partial.words,
+                    score = partial.score,
+                    sourceGestureIds = partial.sourceGestureIds,
+                    hypothesisMetadata = partial.hypothesisMetadata,
+                )
             }
             .sortedWith(optionComparator)
             .take(maxAlternatives)
@@ -127,19 +134,28 @@ class InferenceSegmenter(
         // properly-bounded multi-unit and concurrent-unit behavior unchanged. See
         // InferenceSegmenterTest's real-asset regression coverage for "hello", "there is", and
         // "wh"+"at".
-        val realTouchPathCount = units.sumOf { unit -> if (unit.concurrent) 2 else 1 }
+        val realTouchPathCount = units.sumOf { unit -> unit.paths.size }
+        val wordLimit = maxOf(maxWordsPerGroup, units.maxOf { unit -> unit.paths.size })
 
         return rawCandidates.flatMap { candidate ->
-            dictionarySegmentations(candidate.text, dictionary).map { words ->
+            dictionarySegmentations(candidate.text, dictionary, wordLimit).map { words ->
                 GroupOption(
                     words = words,
-                    score = candidate.score + words.sumOf { word -> frequencyScore(dictionary.getValue(word)) },
+                    score = candidate.score + candidate.languageWeight *
+                        words.sumOf { word -> frequencyScore(dictionary.getValue(word)) },
                     sourceGestureIds = units.map { it.id },
+                    hypothesisMetadata = candidate.hypothesisMetadata,
+                    languageEvidenceWeight = candidate.languageWeight,
                     isOverFragmented = words.size > realTouchPathCount,
                 )
             }
-        }.distinctBy { option -> option.words }
-            .sortedWith(groupComparator)
+        }.sortedWith(groupComparator)
+            .distinctBy { option ->
+                GroupOptionIdentity(
+                    words = option.words,
+                    hypothesisMetadata = option.hypothesisMetadata,
+                )
+            }
             .take(maxAlternatives)
     }
 
@@ -150,25 +166,50 @@ class InferenceSegmenter(
         if (rankedPaths.any { it.isEmpty() }) return emptyList()
 
         val raw = if (unit.concurrent) {
-            rankedPaths[0].flatMap { first ->
-                rankedPaths[1].map { second ->
-                    // This also keeps the existing SplitWordMerger as the source
-                    // of truth for two-finger merged dictionary candidates.
-                    val merged = SplitWordMerger().mergeParts(
-                        listOf(first.word.word, second.word.word),
-                        dictionary,
-                    )
-                    RawCandidate(
-                        text = merged.firstOrNull()?.word ?: first.word.word + second.word.word,
-                        score = first.score + second.score,
-                    )
+            MultiPathOrderHypothesis.forEvent(
+                paths = unit.paths,
+                candidates = rankedPaths,
+                touchDownAtMs = unit.touchDownAtMs,
+                graceWindowMs = unit.graceWindowMs,
+            ).map { hypothesis ->
+                val selected = hypothesis.candidates.map { candidates -> candidates.first() }
+                val parts = selected.map { candidate -> candidate.word.word }
+                val concatenated = parts.joinToString(separator = "")
+                val merged = if (parts.size == 2) {
+                    SplitWordMerger().mergeParts(parts, dictionary).firstOrNull()?.word
+                } else {
+                    dictionary.firstOrNull { entry -> entry.word == concatenated }?.word
                 }
+                // The concatenated fallback remains available to dictionarySegmentations(), which
+                // yields the boundary-preserving path words when each one is in the dictionary.
+                RawCandidate(
+                    text = merged ?: concatenated,
+                    score = selected.sumOf { candidate -> candidate.score },
+                    hypothesisMetadata = listOf(
+                        HypothesisMetadata(
+                            swappedPair = hypothesis.swappedPair,
+                            touchDownDeltaMs = hypothesis.touchDownDeltaMs,
+                            languageEvidenceWeight = hypothesis.languageEvidenceWeight,
+                        ),
+                    ),
+                )
             }
         } else {
-            rankedPaths.single().map { candidate -> RawCandidate(candidate.word.word, candidate.score) }
+            rankedPaths.single().map { candidate ->
+                RawCandidate(
+                    text = candidate.word.word,
+                    score = candidate.score,
+                    hypothesisMetadata = emptyList(),
+                )
+            }
         }
 
-        return raw.groupBy { it.text }
+        return raw.groupBy { candidate ->
+            RawCandidateIdentity(
+                text = candidate.text,
+                hypothesisMetadata = candidate.hypothesisMetadata,
+            )
+        }
             .map { (_, candidates) -> candidates.maxBy { it.score } }
             .sortedWith(rawComparator)
             .take(maxAlternatives)
@@ -177,11 +218,12 @@ class InferenceSegmenter(
     private fun dictionarySegmentations(
         text: String,
         dictionary: Map<String, WordEntry>,
+        wordLimit: Int = maxWordsPerGroup,
     ): List<List<String>> {
         val memo = mutableMapOf<Pair<Int, Int>, List<List<String>>>()
         fun visit(index: Int, wordsUsed: Int): List<List<String>> = memo.getOrPut(index to wordsUsed) {
             if (index == text.length) return@getOrPut listOf(emptyList())
-            if (wordsUsed == maxWordsPerGroup) return@getOrPut emptyList()
+            if (wordsUsed == wordLimit) return@getOrPut emptyList()
 
             buildList {
                 for (endExclusive in index + 1..text.length) {
@@ -195,7 +237,7 @@ class InferenceSegmenter(
         }
 
         return visit(0, 0)
-            .filter { it.isNotEmpty() && it.size <= maxWordsPerGroup }
+            .filter { it.isNotEmpty() && it.size <= wordLimit }
             .sortedWith(wordsComparator)
     }
 
@@ -210,18 +252,42 @@ class InferenceSegmenter(
     private fun frequencyScore(entry: WordEntry): Double =
         FREQUENCY_WEIGHT * ln(entry.frequency.coerceAtLeast(MIN_FREQUENCY))
 
-    private data class RawCandidate(val text: String, val score: Double) {
-        fun append(next: RawCandidate) = RawCandidate(text + next.text, score + next.score)
+    private data class RawCandidate(
+        val text: String,
+        val score: Double,
+        val hypothesisMetadata: List<HypothesisMetadata>,
+    ) {
+        fun append(next: RawCandidate) = RawCandidate(
+            text = text + next.text,
+            score = score + next.score,
+            hypothesisMetadata = hypothesisMetadata + next.hypothesisMetadata,
+        )
+
+        val languageWeight: Double
+            get() = hypothesisMetadata.fold(1.0) { weight, metadata ->
+                weight * metadata.languageEvidenceWeight
+            }
 
         companion object {
-            fun empty() = RawCandidate("", 0.0)
+            fun empty() = RawCandidate(
+                text = "",
+                score = 0.0,
+                hypothesisMetadata = emptyList(),
+            )
         }
     }
+
+    private data class RawCandidateIdentity(
+        val text: String,
+        val hypothesisMetadata: List<HypothesisMetadata>,
+    )
 
     private data class GroupOption(
         val words: List<String>,
         val score: Double,
         val sourceGestureIds: List<String>,
+        val hypothesisMetadata: List<HypothesisMetadata>,
+        val languageEvidenceWeight: Double,
         // True when the group's word count exceeds the number of real touch paths across its
         // source units, meaning at least one word boundary falls inside a single touch path's
         // own recognized text rather than between two genuinely separate swipes. Guards
@@ -231,10 +297,16 @@ class InferenceSegmenter(
         val isOverFragmented: Boolean = false,
     )
 
+    private data class GroupOptionIdentity(
+        val words: List<String>,
+        val hypothesisMetadata: List<HypothesisMetadata>,
+    )
+
     private data class Partial(
         val words: List<String>,
         val score: Double,
         val sourceGestureIds: List<String>,
+        val hypothesisMetadata: List<HypothesisMetadata>,
     ) {
         fun append(group: GroupOption, previousWords: List<String>, scorer: NgramContextScorer): Partial {
             val context = previousWords + words
@@ -254,17 +326,18 @@ class InferenceSegmenter(
             } else {
                 group.words.foldIndexed(0.0) { index, total, word ->
                     total + scorer.score(context + group.words.take(index), word)
-                }
+                } * group.languageEvidenceWeight
             }
             return Partial(
                 words = words + group.words,
                 score = score + group.score + contextScore,
                 sourceGestureIds = sourceGestureIds + group.sourceGestureIds,
+                hypothesisMetadata = hypothesisMetadata + group.hypothesisMetadata,
             )
         }
 
         companion object {
-            fun empty() = Partial(emptyList(), 0.0, emptyList())
+            fun empty() = Partial(emptyList(), 0.0, emptyList(), emptyList())
         }
     }
 
@@ -290,16 +363,20 @@ class InferenceSegmenter(
             .thenBy { it.word.word }
         private val rawComparator = compareByDescending<RawCandidate> { it.score }
             .thenBy { it.text }
+            .thenBy { candidate -> candidate.hypothesisMetadata.count { it.swappedPair != null } }
         private val wordsComparator = compareBy<List<String>> { it.size }
             .thenBy { it.joinToString(separator = "\u0000") }
         private val groupComparator = compareByDescending<GroupOption> { it.score }
             .thenBy { it.words.size }
             .thenBy { it.words.joinToString(separator = "\u0000") }
+            .thenBy { option -> option.hypothesisMetadata.count { it.swappedPair != null } }
         private val partialComparator = compareByDescending<Partial> { it.score }
             .thenBy { it.words.size }
             .thenBy { it.words.joinToString(separator = "\u0000") }
+            .thenBy { partial -> partial.hypothesisMetadata.count { it.swappedPair != null } }
         private val optionComparator = compareByDescending<SegmentationOption> { it.score }
             .thenBy { it.words.size }
             .thenBy { it.words.joinToString(separator = "\u0000") }
+            .thenBy { option -> option.hypothesisMetadata.count { it.swappedPair != null } }
     }
 }

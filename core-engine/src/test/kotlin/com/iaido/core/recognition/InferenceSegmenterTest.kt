@@ -91,6 +91,40 @@ class InferenceSegmenterTest {
     }
 
     @Test
+    fun `near simultaneous paths can prefer a swapped language hypothesis while wide paths preserve observed order`() {
+        val near = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(multiPathUnit("near", listOf("a", "b"), listOf(100L, 135L))),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("ab", 1.0), WordEntry("ba", 100.0)),
+        )
+        val wide = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(multiPathUnit("wide", listOf("a", "b"), listOf(100L, 500L))),
+            previousWords = emptyList(),
+            dictionary = listOf(WordEntry("ab", 1.0), WordEntry("ba", 100.0)),
+        )
+
+        assertEquals(listOf("ba"), near.first().words)
+        assertEquals(PathPair(0, 1), near.first().hypothesisMetadata.single().swappedPair)
+        assertEquals(listOf("ab"), wide.first().words)
+        assertEquals(null, wide.first().hypothesisMetadata.single().swappedPair)
+    }
+
+    @Test
+    fun `separate multi path events do not reorder candidates across their boundary`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(
+                multiPathUnit("first", listOf("a", "b"), listOf(100L, 120L)),
+                multiPathUnit("second", listOf("c", "d"), listOf(200L, 220L)),
+            ),
+            previousWords = emptyList(),
+            dictionary = dictionary("ab", "ba", "cd", "dc", "abcd", "badc", "adbc"),
+        )
+
+        assertTrue(options.none { it.words == listOf("adbc") })
+        assertTrue(options.all { it.sourceGestureIds == listOf("first", "second") })
+    }
+
+    @Test
     fun `context can change a sequential boundary`() {
         val options = InferenceSegmenter(
             contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 3.0)),
@@ -277,5 +311,14 @@ class InferenceSegmenterTest {
             listOf(ScoredCandidate(WordEntry(second, 1.0), 1.0)),
         ),
         concurrent = true,
+    )
+
+    private fun multiPathUnit(id: String, words: List<String>, touchDownAtMs: List<Long>): GestureUnit = GestureUnit(
+        id = id,
+        paths = words.indices.map { path },
+        candidates = words.map { word -> listOf(ScoredCandidate(WordEntry(word, 1.0), 1.0)) },
+        concurrent = true,
+        touchDownAtMs = touchDownAtMs,
+        graceWindowMs = 350L,
     )
 }
