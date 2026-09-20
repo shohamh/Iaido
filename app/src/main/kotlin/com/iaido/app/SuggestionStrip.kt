@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -548,7 +549,6 @@ private fun SuggestionChipView(
     val maxOffset = selectedIndex.toFloat()
     val viewportHeight = (REEL_STEP_DP * visibleSlotCount).dp
     val dragOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
-    val latestDragOffset = rememberUpdatedState(dragOffset)
     val renderedOffset = reelRenderOffset(
         offset = if (isDragging) dragOffset else reelOffset.value,
         minOffset = minOffset,
@@ -608,14 +608,13 @@ private fun SuggestionChipView(
                         isDragging = true
                     },
                     onDragEnd = {
-                        val releaseOffset = latestDragOffset.value
+                        // Read the gesture accumulator at release time. A derived state captured
+                        // by rememberUpdatedState can still contain the pre-drag value because
+                        // pointer callbacks may run before the recomposition that observes the
+                        // final pointer event.
+                        val releaseOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
                         val shouldSelect = abs(dragY) >= dragThresholdPx && alternatives.size > 1
                         val targetIndex = displayedReelIndex(selectedIndex, releaseOffset, maxIndex)
-                        val targetOffset = if (shouldSelect) {
-                            reelSettleOffset(targetIndex, selectedIndex)
-                        } else {
-                            0f
-                        }
                         isDragging = false
                         if (shouldSelect) {
                             if (joinCandidate != null && targetIndex == baseAlternatives.size) {
@@ -624,21 +623,17 @@ private fun SuggestionChipView(
                                 onRelease(targetIndex)
                             }
                         }
+                        // The release callback updates the selected chip immediately. Do not
+                        // continue animating the old selection offset after that update: the new
+                        // selected index is already centered, and applying the old offset to it
+                        // can move every candidate row outside the clipped viewport.
                         scope.launch {
-                            reelOffset.snapTo(releaseOffset)
-                            reelOffset.animateTo(
-                                targetValue = targetOffset,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessMediumLow,
-                                ),
-                            )
                             reelOffset.snapTo(0f)
                         }
                         dragY = 0f
                     },
                     onDragCancel = {
-                        val releaseOffset = dragOffset
+                        val releaseOffset = (dragY / reelStepPx).coerceIn(minOffset, maxOffset)
                         isDragging = false
                         scope.launch {
                             reelOffset.snapTo(releaseOffset)
@@ -682,6 +677,7 @@ private fun SuggestionChipView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .requiredHeight((alternatives.size * REEL_STEP_DP).dp)
                     .graphicsLayer {
                         translationY = with(density) {
                             ((renderedOffset - selectedIndex + centerSlotOffset) * REEL_STEP_DP).dp.toPx()

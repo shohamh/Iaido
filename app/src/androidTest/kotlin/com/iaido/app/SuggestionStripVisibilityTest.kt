@@ -1,20 +1,25 @@
 package com.iaido.app
 
+import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.test.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.iaido.core.recognition.SuggestionChip
+import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -60,6 +65,17 @@ class SuggestionStripVisibilityTest {
             composeRule.waitForIdle()
         }
 
+        val screenshot = File(
+            InstrumentationRegistry.getInstrumentation().targetContext
+                .getExternalFilesDir("ime-e2e/checkpoints"),
+            "suggestion-strip-after-four-swipes.png",
+        ).apply { parentFile?.mkdirs() }
+        screenshot.outputStream().use { output ->
+            composeRule.onNodeWithContentDescription("Iaido suggestion 0")
+                .captureToImage()
+                .asAndroidBitmap()
+                .compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
         composeRule.onNodeWithText("option-4", useUnmergedTree = true).assertIsDisplayed()
     }
 }
