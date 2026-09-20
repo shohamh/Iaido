@@ -95,6 +95,7 @@ fun KeyboardInputView(
     onBackspaceSwipeCancel: () -> Unit = {},
     onBackspaceUndo: () -> Unit = {},
     onBackspaceRedo: () -> Unit = {},
+    onSplitGestureStart: () -> Unit = {},
     onSplitBegin: (pointerId: Int, point: GesturePoint, atMs: Long) -> Unit = { _, _, _ -> },
     onSplitMove: (pointerId: Int, point: GesturePoint) -> Unit = { _, _ -> },
     onSplitEnd: (pointerId: Int, path: GesturePath, layout: KeyboardLayout, atMs: Long) -> Unit = { _, _, _, _ -> },
@@ -256,6 +257,7 @@ fun KeyboardInputView(
                         }
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
+                                onSplitGestureStart()
                                 pointerId = event.getPointerId(0)
                                 val point = event.toGesturePoint(0)
                                 points = listOf(point)
