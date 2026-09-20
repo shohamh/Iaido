@@ -7,9 +7,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
-internal const val NIGHTLY_RELEASES_API_URL =
-    "https://api.github.com/repos/shohamh/Iaido/releases?per_page=100"
-
 private val releaseSelectionJson = Json { ignoreUnknownKeys = true }
 private val nightlyTagPattern = Regex("nightly-\\d{12}")
 

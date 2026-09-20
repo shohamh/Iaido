@@ -25,13 +25,13 @@ class UpdateChannelTest {
     }
 
     @Test
-    fun `channels use separate GitHub release endpoints`() {
+    fun `channels use public GitHub release sources`() {
         assertEquals(
-            "https://api.github.com/repos/shohamh/Iaido/releases/latest",
+            "https://github.com/shohamh/Iaido/releases/latest/download/app-release.apk",
             UpdateChannel.STABLE.apiUrl,
         )
         assertEquals(
-            "https://api.github.com/repos/shohamh/Iaido/releases?per_page=100",
+            "https://github.com/shohamh/Iaido/releases.atom",
             UpdateChannel.NIGHTLY.apiUrl,
         )
         assertEquals(null, UpdateChannel.NIGHTLY.releaseTag)

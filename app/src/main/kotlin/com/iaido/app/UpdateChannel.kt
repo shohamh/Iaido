@@ -9,12 +9,12 @@ enum class UpdateChannel(
 ) {
     STABLE(
         displayName = "Stable release",
-        apiUrl = "https://api.github.com/repos/shohamh/Iaido/releases/latest",
+        apiUrl = "https://github.com/shohamh/Iaido/releases/latest/download/app-release.apk",
         releaseTag = null,
     ),
     NIGHTLY(
         displayName = "Nightly",
-        apiUrl = NIGHTLY_RELEASES_API_URL,
+        apiUrl = "https://github.com/shohamh/Iaido/releases.atom",
         releaseTag = null,
     ),
 }

@@ -95,9 +95,7 @@ class AppUpdateClient(
     ): AppUpdateResult {
         clearIncoming()
         val result = runCatching {
-            val releaseJson = selectReleaseJson(readText(requestUrl), channel)
-                ?: error(APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON)
-            val release = parseRelease(releaseJson)
+            val release = loadRelease()
             if (release.isDraft || (channel == UpdateChannel.STABLE && release.isPrerelease)) {
                 error("Latest ${channel.displayName.lowercase()} release is not installable")
             }
@@ -105,12 +103,6 @@ class AppUpdateClient(
                 error("Latest ${channel.displayName.lowercase()} release has an unexpected tag")
             }
             val asset = selectApkAsset(release.appRelease)
-            val releaseIdentity = ReleaseIdentity(
-                channel = channel,
-                tagName = release.appRelease.tagName,
-                releaseId = release.appRelease.releaseId,
-                assetUpdatedAt = asset.updatedAt,
-            )
             if (asset.sizeBytes != null && asset.sizeBytes > MAX_APP_UPDATE_BYTES) {
                 error("APK exceeds the download size limit")
             }
@@ -131,14 +123,14 @@ class AppUpdateClient(
                             stagedApk,
                             archive.versionCode,
                             archive.versionName,
-                            releaseIdentity,
+                            release.identity,
                         )
                     } else {
                         AppUpdateResult.InstallPermissionRequired(
                             stagedApk,
                             archive.versionCode,
                             archive.versionName,
-                            releaseIdentity,
+                            release.identity,
                         )
                     }
                 }
@@ -167,11 +159,35 @@ class AppUpdateClient(
 
     fun stagedApkFile(): File? = stagedApk.takeIf { it.isFile }
 
+    private fun loadRelease(): ParsedRelease {
+        if (channel == UpdateChannel.STABLE && requestUrl.toString() == STABLE_LATEST_APK_URL) {
+            return ParsedRelease(latestStableAppRelease(), isDraft = false, isPrerelease = false)
+        }
+
+        val response = readText(requestUrl)
+        if (channel == UpdateChannel.NIGHTLY) {
+            val publicRelease = selectAtomRelease(response, channel)
+                ?: error(APP_UPDATE_NIGHTLY_UNAVAILABLE_REASON)
+            return ParsedRelease(
+                appRelease = publicReleaseAppRelease(publicRelease),
+                isDraft = false,
+                isPrerelease = true,
+                identity = ReleaseIdentity(
+                    channel = channel,
+                    tagName = publicRelease.tagName,
+                    releaseId = 0L,
+                    assetUpdatedAt = publicRelease.updatedAt,
+                ),
+            )
+        }
+
+        return parseRelease(response)
+    }
+
     private fun parseRelease(json: String): ParsedRelease {
         val release = JSONObject(json.trimStart('\uFEFF'))
         val assets = release.getJSONArray("assets")
-        return ParsedRelease(
-            appRelease = AppRelease(
+        val appRelease = AppRelease(
                 tagName = release.getString("tag_name"),
                 releaseId = release.getLong("id"),
                 assets = buildList {
@@ -187,9 +203,18 @@ class AppUpdateClient(
                         )
                     }
                 },
-            ),
+            )
+        val asset = selectApkAsset(appRelease)
+        return ParsedRelease(
+            appRelease = appRelease,
             isDraft = release.optBoolean("draft"),
             isPrerelease = release.optBoolean("prerelease"),
+            identity = ReleaseIdentity(
+                channel = channel,
+                tagName = appRelease.tagName,
+                releaseId = appRelease.releaseId,
+                assetUpdatedAt = asset.updatedAt,
+            ),
         )
     }
 
@@ -319,6 +344,7 @@ class AppUpdateClient(
         val appRelease: AppRelease,
         val isDraft: Boolean,
         val isPrerelease: Boolean,
+        val identity: ReleaseIdentity? = null,
     )
 
     private companion object {
@@ -350,10 +376,10 @@ private fun java.io.InputStream.readBounded(maxBytes: Long): ByteArray {
     return output.toByteArray()
 }
 
-private const val APP_UPDATE_API_URL = "https://api.github.com/repos/shohamh/Iaido/releases/latest"
+private const val APP_UPDATE_RELEASE_URL = STABLE_LATEST_APK_URL
 
 object AppUpdateConfig {
-    const val RELEASE_API_URL = APP_UPDATE_API_URL
+    const val RELEASE_API_URL = APP_UPDATE_RELEASE_URL
 }
 
 internal fun stagedAppUpdateFile(context: Context): File? =

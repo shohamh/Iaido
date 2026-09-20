@@ -20,6 +20,16 @@ class AppUpdateReleaseTest {
     }
 
     @Test
+    fun `accepts the stable latest APK redirect URL`() {
+        assertEquals(
+            true,
+            isTrustedAppReleaseUrl(
+                "https://github.com/shohamh/Iaido/releases/latest/download/app-release.apk",
+            ),
+        )
+    }
+
+    @Test
     fun `rejects a release without an APK`() {
         assertThrows(IllegalArgumentException::class.java) {
             selectApkAsset(AppRelease("v0.1.4", listOf()))

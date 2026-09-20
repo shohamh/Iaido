@@ -37,11 +37,32 @@ internal class GitHubReleaseMonitorClient(
         return try {
             if (connection.responseCode == HttpURLConnection.HTTP_NOT_FOUND && channel == UpdateChannel.NIGHTLY) {
                 ReleaseProbe.Unavailable
-            } else {
-                checkResponse(connection)
-                selectReleaseJson(readResponse(connection), channel)
-                    ?.let { parseReleaseProbe(it, channel) }
-                    ?: ReleaseProbe.Unavailable
+            } else when (channel) {
+                UpdateChannel.NIGHTLY -> {
+                    checkResponse(connection)
+                    selectAtomRelease(readResponse(connection), channel)?.let { release ->
+                        ReleaseProbe.Available(
+                            identity = ReleaseIdentity(channel, release.tagName, 0L, release.updatedAt),
+                            versionLabel = release.versionLabel,
+                        )
+                    } ?: ReleaseProbe.Unavailable
+                }
+                UpdateChannel.STABLE -> {
+                    checkResponse(connection)
+                    val tagName = releaseTagFromDownloadUrl(connection.url.toString()) ?: "latest"
+                    ReleaseProbe.Available(
+                        identity = ReleaseIdentity(
+                            channel = channel,
+                            tagName = tagName,
+                            releaseId = 0L,
+                            assetUpdatedAt = connection.lastModified
+                                .takeIf { it > 0L }
+                                ?.toString()
+                                .orEmpty(),
+                        ),
+                        versionLabel = tagName,
+                    )
+                }
             }
         } finally {
             connection.disconnect()
@@ -49,15 +70,10 @@ internal class GitHubReleaseMonitorClient(
     }
 
     fun releaseWorkflowStatus(): ReleaseWorkflowStatus {
-        val connection = openConnection(URL(RELEASE_WORKFLOW_API_URL))
-        return try {
-            checkResponse(connection)
-            parseReleaseWorkflowStatus(readResponse(connection))
-        } catch (_: Exception) {
-            ReleaseWorkflowStatus.Unknown
-        } finally {
-            connection.disconnect()
-        }
+        // GitHub's Actions REST endpoint is rate-limited for unauthenticated clients.
+        // Release detection already uses the public release feed, so polling falls back
+        // to the normal schedule instead of repeatedly generating 403 responses.
+        return ReleaseWorkflowStatus.Unknown
     }
 
     private fun openConnection(url: URL): HttpURLConnection = connectionFactory(url).apply {
@@ -95,8 +111,6 @@ internal class GitHubReleaseMonitorClient(
 
     private companion object {
         const val MAX_RESPONSE_BYTES = 2L * 1024L * 1024L
-        const val RELEASE_WORKFLOW_API_URL =
-            "https://api.github.com/repos/shohamh/Iaido/actions/workflows/android-release.yml/runs?per_page=10"
     }
 }
 

@@ -34,8 +34,10 @@ internal fun isTrustedAppReleaseUrl(value: String): Boolean = runCatching {
     val uri = URI(value)
     uri.scheme.equals("https", ignoreCase = true) &&
         uri.host.equals(GITHUB_HOST, ignoreCase = true) &&
-        uri.path.startsWith(RELEASE_DOWNLOAD_PREFIX)
+        (uri.path.startsWith(RELEASE_DOWNLOAD_PREFIX) ||
+            uri.path.startsWith(RELEASE_LATEST_DOWNLOAD_PREFIX))
 }.getOrDefault(false)
 
 private const val GITHUB_HOST = "github.com"
 private const val RELEASE_DOWNLOAD_PREFIX = "/shohamh/Iaido/releases/download/"
+private const val RELEASE_LATEST_DOWNLOAD_PREFIX = "/shohamh/Iaido/releases/latest/download/"
