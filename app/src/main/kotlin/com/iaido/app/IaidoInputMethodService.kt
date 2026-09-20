@@ -53,6 +53,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
+/**
+ * How many recently committed words stay addressable in the suggestion strip. The strip scrolls
+ * horizontally and auto-scrolls its newest chip into frame, so it keeps one more word than is
+ * visible at rest: the word just committed is reachable without scrolling first, and the word
+ * before it stays correctable.
+ */
+internal const val VISIBLE_HISTORY_WORDS = 4
+
 class IaidoInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private val inputMethodLifecycleOwner = InputMethodLifecycleOwner()
@@ -852,7 +860,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun refreshSuggestionChips() {
-        val words = correctionHistory.aroundCursor(cursorPosition)
+        val words = correctionHistory.aroundCursor(cursorPosition, maxWords = VISIBLE_HISTORY_WORDS)
         visibleWordIds = words.map { it.id }
         sessionChips.value = words.map { word ->
             SuggestionChip(

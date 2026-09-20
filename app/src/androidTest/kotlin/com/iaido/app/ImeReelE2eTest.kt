@@ -124,18 +124,15 @@ class ImeReelE2eTest {
     }
 
     @Ignore(
-        "Blocked on a pre-existing accessibility-tree staleness bug (same one documented above " +
-            "correctionChipRemainsAddressableAfterAReelCorrection): device.findObject(By.desc(...)) " +
-            "never finds any 'Iaido suggestion N' node for a pure-typing flow (swipeWord + tapSpace, " +
-            "no drag on the strip) — confirmed even with a 5s explicit wait, and confirmed the same " +
-            "lookup succeeds once a drag gesture has touched the strip. The auto-scroll feature this " +
-            "test targets was independently verified working by driving the running app with real " +
-            "gesture injection (adb shell input swipe/tap) and screenshotting the result; see the " +
-            "Task 6 report (.superpowers/sdd/2026-09-16-suggestion-reel-redesign/task-6-report.md) " +
-            "for the screenshots and full diagnosis. Re-enable once the accessibility-tree staleness " +
-            "bug is fixed.",
+        "Partially unblocked: the strip now keeps four recent words addressable (see " +
+            "VISIBLE_HISTORY_WORDS), so the fourth chip this test targets exists in state. It still " +
+            "cannot be asserted here: with four chips the strip auto-scrolls to the newest, and the " +
+            "fourth chip's node is not published in this flow even after nudging the editor's cursor " +
+            "to finalize the live swipe-typing transaction (see ImeScenario.tryLocateReelSwipeTarget) " +
+            "and waiting 5s. Re-enable once chip nodes are published for every composed chip, or once " +
+            "this test asserts the strip's scroll offset instead of a node's presence.",
     )
-    @Test
+@Test
     fun stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords() {
         ImeScenario().also(artifacts::track).run {
             swipeWord("there")
