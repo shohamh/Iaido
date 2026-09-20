@@ -6,19 +6,32 @@ import com.iaido.core.gesture.GesturePoint
 data class SplitWordParts(
     val parts: List<String>,
     val paths: List<GesturePath>,
-)
+    val touchDownAtMs: List<Long>,
+    val graceWindowMs: Long,
+) {
+    init {
+        require(parts.size == paths.size && parts.size == touchDownAtMs.size) {
+            "Parts, paths, and touch-down timestamps must align"
+        }
+        require(touchDownAtMs.zipWithNext().all { (previous, current) -> previous <= current }) {
+            "Touch-down timestamps must be in nondecreasing order"
+        }
+    }
+}
 
 /** Collects concurrent partial gestures until the bounded grace window closes. */
 class SplitGestureSession(private var graceWindowMs: Long = 350L) {
     private data class ActivePart(
         val pointerId: Int,
         val touchOrder: Int,
+        val touchDownAtMs: Long,
         val points: MutableList<GesturePoint>,
         var tapSuffix: String = "",
     )
 
     private data class CompletedPart(
         val touchOrder: Int,
+        val touchDownAtMs: Long,
         val path: GesturePath,
         val letters: String,
     )
@@ -32,7 +45,12 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         expireIfLate(atMs)
         if (pointerId in active) return
         graceDeadlineMs = null
-        active[pointerId] = ActivePart(pointerId, nextTouchOrder++, mutableListOf(point))
+        active[pointerId] = ActivePart(
+            pointerId = pointerId,
+            touchOrder = nextTouchOrder++,
+            touchDownAtMs = atMs,
+            points = mutableListOf(point),
+        )
     }
 
     fun move(pointerId: Int, point: GesturePoint) {
@@ -43,6 +61,7 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         val part = active.remove(pointerId) ?: return
         completed += CompletedPart(
             touchOrder = part.touchOrder,
+            touchDownAtMs = part.touchDownAtMs,
             path = GesturePath(part.points.toList()),
             letters = letters + part.tapSuffix,
         )
@@ -55,6 +74,7 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         active.remove(pointerId)?.let { part ->
             completed += CompletedPart(
                 touchOrder = part.touchOrder,
+                touchDownAtMs = part.touchDownAtMs,
                 path = GesturePath(part.points.toList()),
                 letters = letter + part.tapSuffix,
             )
@@ -75,7 +95,12 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         if (active.isNotEmpty() || atMs < deadline) return null
         val result = completed.sortedBy { it.touchOrder }
         clear()
-        return SplitWordParts(result.map { it.letters }, result.map { it.path })
+        return SplitWordParts(
+            parts = result.map { it.letters },
+            paths = result.map { it.path },
+            touchDownAtMs = result.map { it.touchDownAtMs },
+            graceWindowMs = graceWindowMs,
+        )
     }
 
     /** True while another pointer or the grace window can still produce parts. */

@@ -1,8 +1,10 @@
 package com.iaido.core.recognition
 
 import com.iaido.core.gesture.GesturePoint
+import com.iaido.core.gesture.GesturePath
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -18,7 +20,10 @@ class SplitGestureSessionTest {
         session.end(2, 220, "th")
 
         assertEquals(null, session.poll(569))
-        assertEquals(listOf("th", "ere"), session.poll(570)?.parts)
+        val parts = session.poll(570)
+        assertEquals(listOf("th", "ere"), parts?.parts)
+        assertEquals(listOf(100L, 120L), parts?.touchDownAtMs)
+        assertEquals(350L, parts?.graceWindowMs)
     }
 
     @Test
@@ -69,5 +74,19 @@ class SplitGestureSessionTest {
         session.end(2, 2_010, "new")
 
         assertEquals(listOf("new"), session.poll(2_360)?.parts)
+    }
+
+    @Test
+    fun `split word parts reject timestamp counts that do not align with paths`() {
+        val malformed = assertThrows(IllegalArgumentException::class.java) {
+            SplitWordParts(
+                parts = listOf("a", "b"),
+                paths = listOf(GesturePath(listOf(point(0f, 0)))),
+                touchDownAtMs = listOf(0L),
+                graceWindowMs = 350L,
+            )
+        }
+
+        assertEquals("Parts, paths, and touch-down timestamps must align", malformed.message)
     }
 }

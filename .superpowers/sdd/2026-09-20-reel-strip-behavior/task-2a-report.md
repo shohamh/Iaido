@@ -1,0 +1,25 @@
+# Task 2A report: timestamp propagation
+
+## Status
+
+Implemented the bounded `SplitGestureSession` timestamp propagation slice.
+
+- Added `touchDownAtMs` and `graceWindowMs` to `SplitWordParts`.
+- Captured each active part's touch-down timestamp in `begin`.
+- Propagated timestamps through completion and tap promotion.
+- Emitted timestamps aligned with parts and paths in existing touch-order order.
+- Added deterministic validation for metadata lengths and nondecreasing timestamp order.
+
+## Verification
+
+- `.\gradlew.bat :core-engine:compileKotlin --no-daemon --console=plain` — passed.
+- `git diff --check` — passed.
+- `.\gradlew.bat :core-engine:test --tests '*SplitGestureSessionTest' --no-daemon --console=plain` — could not execute the focused test because Gradle compiles all core test sources first. The preserved future RED tests fail compilation on missing `MultiPathOrderHypothesis`/`PathPair` APIs and related `InferenceSegmenterTest` symbols. No Task 2A-specific compilation errors remain.
+
+## Scope
+
+Changed only `SplitGestureSession.kt`, the already-present Task 2A updates in `SplitGestureSessionTest.kt`, and this report. The unrelated app/core RED tests, `.ci-art/`, and docs were not staged or modified.
+
+## Concerns
+
+The focused test remains blocked until the future Task 2 tests are implemented or excluded from the test compilation task. No app coordinator, `GestureUnit`, or `InferenceSegmenter` changes were made.
