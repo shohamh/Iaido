@@ -67,6 +67,7 @@ class SessionCorrectionHistory {
         val edit = WordReplacement(entry.id, entry.start, entry.end, entry.current, replacement)
         val delta = replacement.length - entry.current.length
         entries[index] = entry.copy(
+            end = entry.start + replacement.length,
             current = replacement,
             corrected = replacement != entry.original,
         )

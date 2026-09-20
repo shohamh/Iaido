@@ -24,6 +24,22 @@ class SessionCorrectionHistoryTest {
     }
 
     @Test
+    fun `repeated replacement uses the updated span after a word grows and shrinks`() {
+        val history = SessionCorrectionHistory()
+        val hey = history.record(0, 3, "hey", listOf("hey", "heyday"))
+
+        history.replace(hey, "heyday")
+
+        assertEquals(6, history.words().single { it.id == hey }.end)
+
+        history.replace(hey, "hey")
+
+        val restored = history.words().single { it.id == hey }
+        assertEquals(3, restored.end)
+        assertEquals("hey", restored.current)
+    }
+
+    @Test
     fun `undo returns only an autocorrected word to its original`() {
         val history = SessionCorrectionHistory()
         val untouched = history.record(0, 4, "word", listOf("word"))
