@@ -27,6 +27,19 @@ class SplitGestureSessionTest {
     }
 
     @Test
+    fun `emitted parts retain the grace window captured when pending begins`() {
+        val session = SplitGestureSession(graceWindowMs = 350)
+        session.begin(1, point(1f, 0), 0)
+        session.end(1, 10, "th")
+        session.setGraceWindowMs(100)
+
+        val parts = session.poll(360)
+
+        assertEquals(listOf("th"), parts?.parts)
+        assertEquals(350L, parts?.graceWindowMs)
+    }
+
+    @Test
     fun `path points are retained with each completed part`() {
         val session = SplitGestureSession()
         session.begin(1, point(1f, 0), 0)

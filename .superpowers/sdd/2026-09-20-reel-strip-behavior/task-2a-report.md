@@ -23,3 +23,10 @@ Changed only `SplitGestureSession.kt`, the already-present Task 2A updates in `S
 ## Concerns
 
 The focused test remains blocked until the future Task 2 tests are implemented or excluded from the test compilation task. No app coordinator, `GestureUnit`, or `InferenceSegmenter` changes were made.
+
+## Review fix: captured grace window
+
+- Captured the grace-window value when the first completed part starts the pending event, and reused it for both the deadline and emitted `SplitWordParts.graceWindowMs`.
+- Added a regression test that changes the configured window while an event is pending; the event retains its captured value.
+- `:core-engine:compileKotlin` passed.
+- `:core-engine:test --tests '*SplitGestureSessionTest'` remains blocked by the preserved future Task 2 RED tests during `compileTestKotlin`; those tests were not modified.

@@ -40,6 +40,7 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
     private val completed = mutableListOf<CompletedPart>()
     private var nextTouchOrder = 0
     private var graceDeadlineMs: Long? = null
+    private var pendingGraceWindowMs: Long? = null
 
     fun begin(pointerId: Int, point: GesturePoint, atMs: Long) {
         expireIfLate(atMs)
@@ -65,7 +66,8 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
             path = GesturePath(part.points.toList()),
             letters = letters + part.tapSuffix,
         )
-        if (active.isEmpty()) graceDeadlineMs = atMs + graceWindowMs
+        captureGraceWindowIfNeeded()
+        if (active.isEmpty()) graceDeadlineMs = atMs + pendingGraceWindowMs!!
     }
 
     fun tap(pointerId: Int, letter: Char, atMs: Long): Boolean {
@@ -78,7 +80,8 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
                 path = GesturePath(part.points.toList()),
                 letters = letter + part.tapSuffix,
             )
-            if (active.isEmpty()) graceDeadlineMs = atMs + graceWindowMs
+            captureGraceWindowIfNeeded()
+            if (active.isEmpty()) graceDeadlineMs = atMs + pendingGraceWindowMs!!
             return true
         }
         active.values.lastOrNull()?.let {
@@ -99,7 +102,7 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
             parts = result.map { it.letters },
             paths = result.map { it.path },
             touchDownAtMs = result.map { it.touchDownAtMs },
-            graceWindowMs = graceWindowMs,
+            graceWindowMs = pendingGraceWindowMs!!,
         )
     }
 
@@ -123,6 +126,11 @@ class SplitGestureSession(private var graceWindowMs: Long = 350L) {
         active.clear()
         completed.clear()
         graceDeadlineMs = null
+        pendingGraceWindowMs = null
         nextTouchOrder = 0
+    }
+
+    private fun captureGraceWindowIfNeeded() {
+        if (pendingGraceWindowMs == null) pendingGraceWindowMs = graceWindowMs
     }
 }
