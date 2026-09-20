@@ -13,7 +13,7 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
-            android:label="Iaido Settings">
+            android:label="${settingsLabel}">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
