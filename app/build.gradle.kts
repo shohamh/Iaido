@@ -35,6 +35,7 @@ android {
 
     defaultConfig {
         applicationId = configuredApplicationId
+        manifestPlaceholders["appLabel"] = providers.gradleProperty("iaidoAppLabel").getOrElse("Iaido")
         minSdk = 31
         targetSdk = 36
         versionCode = providers.gradleProperty("iaidoVersionCode").getOrElse("1").toInt()
