@@ -10,5 +10,6 @@ bootstrap-gradle.java
 tools/__pycache__/
 dist/
 artifacts/
+.ci-art/
 secrets/
 .worktrees/
