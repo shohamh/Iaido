@@ -105,11 +105,15 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Read: `app/src/androidTest/kotlin/com/iaido/app/ImeReelE2eTest.kt`
 - Test baseline: `core-engine/src/test/`, `app/src/test/`, and the current connected `SettingsImeReelE2eTest`
 
-- [ ] Run the existing JVM baseline with `./gradlew --no-daemon --max-workers=2 :core-engine:test :app:testDebugUnitTest`; record the failing test names before changing production behavior.
-- [ ] Build the existing app and Android test APKs with `./gradlew --no-daemon --max-workers=2 :app:assembleDebug :app:assembleDebugAndroidTest`; record whether the current prospective sentence-strip test sources compile.
-- [ ] Before asserting the new sentence-strip semantics, capture the current debug IME in Settings with the existing `UiDevice`/`ArtifactWriter` instrumentation path and save it as the before image. Record emulator logical size and density using `adb shell wm size` and `adb shell wm density`.
-- [ ] Mark each STRIP-01…STRIP-27 case as already covered by the committed driver/tests or still missing. Keep the behavior document’s IDs stable and add only the missing cases in their owning task below.
-- [ ] Keep this baseline step read-only for production code. Retain the test output and named screenshot artifact, and do not alter unrelated `.superpowers/brainstorm/` state.
+- [x] Run the existing JVM baseline with `./gradlew --no-daemon --max-workers=2 :core-engine:test :app:testDebugUnitTest`; record the failing test names before changing production behavior.
+- [x] Build the existing app and Android test APKs with `./gradlew --no-daemon --max-workers=2 :app:assembleDebug :app:assembleDebugAndroidTest`; record whether the current prospective sentence-strip test sources compile.
+- [x] Before asserting the new sentence-strip semantics, capture the current debug IME in Settings with the existing `UiDevice`/`ArtifactWriter` instrumentation path and save it as the before image. Record emulator logical size and density using `adb shell wm size` and `adb shell wm density`.
+- [x] Mark each STRIP-01…STRIP-27 case as already covered by the committed driver/tests or still missing. Keep the behavior document’s IDs stable and add only the missing cases in their owning task below.
+- [x] Keep this baseline step read-only for production code. Retain the test output and named screenshot artifact, and do not alter unrelated `.superpowers/brainstorm/` state.
+
+**Baseline evidence (2026-09-21):** JVM baseline passed; both APKs built, including the prospective Android test sources. The current connected Settings journey reaches typing “Hi” and then fails at its expected missing `Iaido sentence strip` semantic node. The pre-assertion screenshot is `app/build/outputs/baseline/settings-ime-typed-hi-sentence-strip.png`; emulator physical size is 1080×2400 at 420 dpi. The connected XML report is under `app/build/outputs/androidTest-results/connected/debug/`.
+
+**Existing test ownership:** `SettingsImeReelE2eTest` represents STRIP-01 and captures the initial visual baseline for STRIP-25. `ImeReelE2eTest` has journeys for STRIP-02…03, 06, 10…12, 13a, a partial STRIP-14/16/17 deletion path, right-side STRIP-19 cursor scrolling, and partial STRIP-22/23 history behavior. `ImeInferenceE2eTest` protects inference recognition and non-mutating split/join integration beyond the numbered strip cases. The remaining explicit assertions are STRIP-04…05, 07…09, 13, 15, 18, 20…21, 24, and 26…27; complete midpoint reversal, both edge directions, history cancellation/exhaustion, and screenshot comparison are still required in the tasks below.
 
 **Pass condition:** JVM baseline and test APK build results are recorded, current Settings/IME screenshot geometry is known, and every behavior-contract row has an identified test owner.
 
@@ -123,14 +127,16 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Modify: `app/src/main/kotlin/com/iaido/app/IaidoInputMethodService.kt`
 - Reuse: `EditorSnapshot`, `SessionCorrectionHistory`, `SwipeTypingCoordinator`, `ReplacementOption`
 
-- [ ] Add `SentenceStripWord`, `SentenceStripState`, and the `SentenceStripActions` interface shown above. Keep preview-only fields out of the service state; retain candidates and history preview snapshots in the immutable state.
-- [ ] Implement `SentenceTextModel.update(previous: SentenceStripState?, snapshot: EditorSnapshot, language: Language, history: List<SessionWord>, replacementOptions: List<ReplacementOption>): SentenceStripState` as the single pure entry point. Reuse `SessionWord.id` for tracked spans, retain prior IDs for unchanged spans translated through the observed edit, and allocate new IDs only for new/split/join output spans.
-- [ ] Use the monitored `ExtractedText` snapshot and its `startOffset` when available. Find the sentence around the active selection, preserve punctuation and separators, and map tracked correction/history IDs onto matching text spans. When no sentence text can be observed, expose no stale strip words.
-- [ ] Use `java.text.BreakIterator.getWordInstance(Locale.forLanguageTag(language.localeTag))` for locale-aware spans and `BreakIterator.getCharacterInstance(Locale.forLanguageTag(language.localeTag))` to snap character taps to legal grapheme boundaries. Retain apostrophes, Hebrew letters/marks, punctuation offsets, and spaces; keep the host selection’s exact UTF-16 offset even when it falls in a gap. Use Compose `TextLayoutResult.getOffsetForPosition` for screen-x to text-offset mapping.
-- [ ] Suppress extracted text, candidates, and history previews for password/visible-password/web-password and non-text editors. Clear strip state on input finish, editor switch, and session restart before observing the next editor.
-- [ ] Update `onStartInputView`, `onUpdateSelection`, `onUpdateExtractedText`, `observeEditorSnapshot`, and `refreshSuggestionChips` to publish one fresh `SentenceStripState`. Preserve `InferenceSelectionGuard`: an IME-originated edit must not be treated as an external cursor move.
-- [ ] Add tests for cursor-at-word-end, cursor-in-word, cursor-in-gap, punctuation, an extracted-text nonzero offset, Hebrew/RTL words, combining marks, preserved IDs after an earlier-span insertion, new IDs after split/join, and password/no-observation state. Assert word spans and selection offsets, not just rendered text.
-- [ ] Run `./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest` and commit the model/service-state change after it passes.
+- [x] Add `SentenceStripWord`, `SentenceStripState`, and the `SentenceStripActions` interface shown above. Keep preview-only fields out of the service state; retain candidates and history preview snapshots in the immutable state.
+- [x] Implement `SentenceTextModel.update(previous: SentenceStripState?, snapshot: EditorSnapshot, language: Language, history: List<SessionWord>, replacementOptions: List<ReplacementOption>): SentenceStripState` as the single pure entry point. Reuse `SessionWord.id` for tracked spans, retain prior IDs for unchanged spans translated through the observed edit, and allocate new IDs only for new/split/join output spans.
+- [x] Use the monitored `ExtractedText` snapshot and its `startOffset` when available. Find the sentence around the active selection, preserve punctuation and separators, and map tracked correction/history IDs onto matching text spans. When no sentence text can be observed, expose no stale strip words.
+- [x] Use `java.text.BreakIterator.getWordInstance(Locale.forLanguageTag(language.localeTag))` for locale-aware spans and `BreakIterator.getCharacterInstance(Locale.forLanguageTag(language.localeTag))` to snap character taps to legal grapheme boundaries. Retain apostrophes, Hebrew letters/marks, punctuation offsets, and spaces; keep the host selection’s exact UTF-16 offset even when it falls in a gap.
+- [x] Suppress extracted text, candidates, and history previews for password/visible-password/web-password and non-text editors. Clear strip state on input finish, editor switch, and session restart before observing the next editor.
+- [x] Update `onStartInputView`, `onUpdateSelection`, `onUpdateExtractedText`, `observeEditorSnapshot`, and `refreshSuggestionChips` to publish one fresh `SentenceStripState`. Preserve `InferenceSelectionGuard`: an IME-originated edit must not be treated as an external cursor move.
+- [x] Add tests for cursor-at-word-end, cursor-in-word, cursor-in-gap, punctuation, an extracted-text nonzero offset, Hebrew/RTL words, combining marks, preserved IDs after an earlier-span insertion, new IDs after split/join, and password/no-observation state. Assert word spans and selection offsets, not just rendered text.
+- [x] Run `./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest`; the focused `SentenceTextModelTest` and full app JVM suite pass.
+
+- [ ] Use Compose `TextLayoutResult.getOffsetForPosition` for screen-x to text-offset mapping. This is implemented with the measured strip gesture work in Task 6.
 
 **Produces:** one immutable state containing the current sentence, stable word IDs and spans, active language, candidate choices, exact selection, and independent undo/redo availability.
 
@@ -292,6 +298,6 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 
 **Produces:** verified native screenshots and real-IME coverage that show the implemented keyboard matches the approved prototype and supplied references.
 
-## Review Gate
+## Completion Gate
 
-This plan is ready for review before production implementation begins. Keep all production tasks unchecked until the plan is approved; implementation and its test runs are not part of this documentation change.
+Keep this checklist current as implementation proceeds. The branch is complete only after the native behavior, visual comparison, JVM tests, APK builds, and connected emulator acceptance matrix above all pass.

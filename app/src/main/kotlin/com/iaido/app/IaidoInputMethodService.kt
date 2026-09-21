@@ -91,6 +91,8 @@ class IaidoInputMethodService : InputMethodService() {
     private val correctionHistory = SessionCorrectionHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
+    private val sentenceStripState = mutableStateOf(SentenceTextModel.emptyState(Language.ENGLISH))
+    private var latestEditorSnapshot: EditorSnapshot? = null
     private val showCandidateScores = mutableStateOf(false)
     // Ids of replacement options currently produced by the live SwipeTypingCoordinator
     // transaction, as opposed to history-derived joins -- used only to decide whether a
@@ -112,6 +114,7 @@ class IaidoInputMethodService : InputMethodService() {
     // preview frame would be a hot-path regression with no correctness benefit.
     private var cachedHistoryJoinCandidates: List<ReplacementOption> = emptyList()
     private var cursorPosition = 0
+    private var selectionEndPosition = 0
     private var pendingCandidates: List<String>? = null
     private var lastDeletedWord: String? = null
     private var backspaceSwipeText = ""
@@ -269,6 +272,8 @@ class IaidoInputMethodService : InputMethodService() {
         typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
+        sentenceStripState.value = SentenceTextModel.emptyState(activeLanguage)
+        latestEditorSnapshot = null
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
@@ -279,11 +284,26 @@ class IaidoInputMethodService : InputMethodService() {
         splitGraceHandler.removeCallbacksAndMessages(null)
         inferenceSelectionGuard.clear()
         textObservationEnabled = info?.let(::supportsTextObservation) == true
-        cursorPosition = currentInputConnection
-            ?.getExtractedText(extractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR)
-            ?.also(::resetEditorSnapshot)
-            ?.let { it.startOffset + it.selectionStart } ?: 0
-        if (!textObservationEnabled) editorTextChangeDetector.reset(EditorSnapshot("", 0, 0))
+        if (textObservationEnabled) {
+            val extractedText = currentInputConnection
+                ?.getExtractedText(extractedTextRequest(), InputConnection.GET_EXTRACTED_TEXT_MONITOR)
+            if (extractedText != null) {
+                resetEditorSnapshot(extractedText)
+                cursorPosition = extractedText.startOffset + extractedText.selectionStart
+                selectionEndPosition = extractedText.startOffset + extractedText.selectionEnd
+            } else {
+                cursorPosition = info?.initialSelStart?.coerceAtLeast(0) ?: 0
+                selectionEndPosition = info?.initialSelEnd?.takeIf { it >= 0 } ?: cursorPosition
+                editorTextChangeDetector.reset(EditorSnapshot("", cursorPosition, selectionEndPosition))
+            }
+        } else {
+            // Password and non-text fields must not be read for the strip, even for an initial
+            // snapshot. Keep only the framework-provided cursor location.
+            cursorPosition = info?.initialSelStart?.coerceAtLeast(0) ?: 0
+            selectionEndPosition = info?.initialSelEnd?.takeIf { it >= 0 } ?: cursorPosition
+            editorTextChangeDetector.reset(EditorSnapshot("", cursorPosition, selectionEndPosition))
+        }
+        refreshSuggestionChips()
         composeInputView?.let(::renderInputView)
     }
 
@@ -300,6 +320,8 @@ class IaidoInputMethodService : InputMethodService() {
         typedWords.reset()
         correctionHistory.clear()
         sessionChips.value = emptyList()
+        sentenceStripState.value = SentenceTextModel.emptyState(activeLanguage)
+        latestEditorSnapshot = null
         splitPreview.value = null
         pendingManualEdit.value = null
         visibleWordIds = emptyList()
@@ -331,13 +353,21 @@ class IaidoInputMethodService : InputMethodService() {
             swipeTypingCoordinator.onCursorMoved()
         }
         cursorPosition = newSelStart
+        selectionEndPosition = newSelEnd
+        latestEditorSnapshot = latestEditorSnapshot?.copy(
+            selectionStart = newSelStart,
+            selectionEnd = newSelEnd,
+        )
         observeCurrentEditorText()
         refreshSuggestionChips()
     }
 
     override fun onUpdateExtractedText(token: Int, text: ExtractedText) {
         super.onUpdateExtractedText(token, text)
-        if (textObservationEnabled) observeExtractedText(text)
+        if (textObservationEnabled) {
+            observeExtractedText(text)
+            refreshSuggestionChips()
+        }
     }
 
     override fun onDestroy() {
@@ -611,6 +641,7 @@ class IaidoInputMethodService : InputMethodService() {
         learningDictionary.restore(snapshot.profile.dictionary)
         correctionHistory.restore(session.correctionHistory)
         cursorPosition = session.cursorPosition
+        selectionEndPosition = session.cursorPosition
         pendingCandidates = session.pendingCandidates.takeIf { it.isNotEmpty() }
         runtimeState.restore(session)
         refreshSuggestionChips()
@@ -688,6 +719,7 @@ class IaidoInputMethodService : InputMethodService() {
             return false
         }
         cursorPosition = expectedCursor
+        selectionEndPosition = expectedCursor
         inputConnection.setSelection(cursorPosition, cursorPosition)
         return true
     }
@@ -718,6 +750,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, start, text)
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
+        selectionEndPosition = cursorPosition
         val deletedWord = lastDeletedWord
         lastDeletedWord = null
         if (deletedWord != null && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
@@ -781,6 +814,7 @@ class IaidoInputMethodService : InputMethodService() {
         val start = (oldCursor - count).coerceAtLeast(0)
         correctionHistory.deleteRange(start, oldCursor)
         cursorPosition = start
+        selectionEndPosition = start
         refreshSuggestionChips()
     }
 
@@ -831,6 +865,7 @@ class IaidoInputMethodService : InputMethodService() {
         }
         backspaceSwipeDeletedCount = target
         cursorPosition = backspaceSwipeCursor - target
+        selectionEndPosition = cursorPosition
     }
 
     private fun finishBackspaceSwipe() {
@@ -923,7 +958,20 @@ class IaidoInputMethodService : InputMethodService() {
         )
         val live = swipeTypingCoordinator.replacementOptions()
         liveReplacementOptionIds.value = live.map { it.id }.toSet()
-        replacementOptions.value = mergedReplacementOptions(live)
+        val merged = mergedReplacementOptions(live)
+        replacementOptions.value = merged
+        val snapshot = latestEditorSnapshot?.copy(
+            selectionStart = cursorPosition,
+            selectionEnd = selectionEndPosition,
+        ) ?: EditorSnapshot("", cursorPosition, selectionEndPosition)
+        sentenceStripState.value = SentenceTextModel.update(
+            previous = sentenceStripState.value,
+            snapshot = snapshot,
+            language = activeLanguage,
+            history = correctionHistory.words(),
+            replacementOptions = merged,
+            textObservationAllowed = textObservationEnabled,
+        )
     }
 
     private fun mergedReplacementOptions(liveOptions: List<ReplacementOption>): List<ReplacementOption> =
@@ -940,6 +988,7 @@ class IaidoInputMethodService : InputMethodService() {
         correctionHistory.join(firstId, secondId, replacement)
         typedWords.reset()
         cursorPosition = first.start + replacement.length
+        selectionEndPosition = cursorPosition
         inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips(firstId)
         return true
@@ -1096,6 +1145,7 @@ class IaidoInputMethodService : InputMethodService() {
         val delta = replacement.length - word.current.length
         cursorPosition = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
         else word.start + replacement.length
+        selectionEndPosition = cursorPosition
         inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips(id)
         return true
@@ -1148,22 +1198,24 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun resetEditorSnapshot(text: ExtractedText) {
-        editorTextChangeDetector.reset(
-            EditorSnapshot(
-                text = text.text?.toString().orEmpty(),
-                selectionStart = text.startOffset + text.selectionStart,
-                selectionEnd = text.startOffset + text.selectionEnd,
-                offset = text.startOffset,
-            ),
+        val snapshot = EditorSnapshot(
+            text = text.text?.toString().orEmpty(),
+            selectionStart = text.startOffset + text.selectionStart,
+            selectionEnd = text.startOffset + text.selectionEnd,
+            offset = text.startOffset,
         )
+        latestEditorSnapshot = snapshot
+        editorTextChangeDetector.reset(snapshot)
     }
 
     private fun observeEditorSnapshot(snapshot: EditorSnapshot) {
+        latestEditorSnapshot = snapshot
         editorTextChangeDetector.observe(snapshot)?.let { candidate ->
             swipeTypingCoordinator.onExternalEdit()
             if (pendingManualEdit.value == null) pendingManualEdit.value = candidate
         }
         cursorPosition = snapshot.selectionStart
+        selectionEndPosition = snapshot.selectionEnd
     }
 
     private fun extractedTextRequest() = ExtractedTextRequest().apply {
@@ -1192,6 +1244,7 @@ class IaidoInputMethodService : InputMethodService() {
     private fun switchLanguage() {
         swipeTypingCoordinator.onNonSwipeInput()
         activeLanguage = languageSwitcher.next()
+        refreshSuggestionChips()
     }
 
     private fun openSettings() {

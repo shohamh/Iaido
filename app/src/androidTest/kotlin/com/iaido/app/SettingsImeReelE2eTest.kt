@@ -67,6 +67,14 @@ class SettingsImeReelE2eTest {
             "Typing the second letter did not update the Settings preview",
             device.wait(Until.hasObject(By.textContains("Hi")), 5_000L),
         )
+        // Keep this capture before the sentence-strip semantics so the same journey
+        // records a useful baseline while the current IME is still box-reel based.
+        val hiScreenshot = ArtifactWriter.captureScreenshot("settings-ime-typed-hi-sentence-strip", device)
+        instrumentation.uiAutomation
+            .executeShellCommand(
+                "cp ${hiScreenshot.absolutePath} /sdcard/Download/settings-ime-typed-hi-sentence-strip.png",
+            )
+            .close()
         assertTrue(
             "The real IME sentence strip was not exposed in Settings",
             device.wait(Until.hasObject(By.desc("Iaido sentence strip")), 5_000L),
@@ -75,12 +83,6 @@ class SettingsImeReelE2eTest {
             "The typed word did not appear as one inline word lane",
             device.wait(Until.hasObject(By.descStartsWith("Iaido sentence word index=0")), 5_000L),
         )
-        val hiScreenshot = ArtifactWriter.captureScreenshot("settings-ime-typed-hi-sentence-strip", device)
-        instrumentation.uiAutomation
-            .executeShellCommand(
-                "cp ${hiScreenshot.absolutePath} /sdcard/Download/settings-ime-typed-hi-sentence-strip.png",
-            )
-            .close()
 
         tapLetter(pointer, device, 'm')
         assertTrue(
