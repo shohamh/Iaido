@@ -25,6 +25,7 @@
 - Preserve infer-space, two-finger typing, backspace, language switching, editor privacy, and existing debug identity. Do not inspect or stage unrelated `.superpowers/brainstorm/` artifacts.
 - Add no dependencies. Compose and Android instrumentation dependencies are already configured in `app/build.gradle.kts`.
 - Treat connected IME results as verified only after an actual emulator instrumentation result. Keep the supplied screenshots and V7 prototype as visual references; do not claim screenshot parity from semantics or build success alone.
+- Validation adjustment (2026-09-21): per user request, defer the expensive connected IME journeys and screenshot comparisons to Task 9. During Tasks 4–8, use JVM tests and APK/test-APK compilation as the iteration gate; do not rerun the IME harness for each task.
 
 ---
 
@@ -178,14 +179,14 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Replace: `app/src/main/kotlin/com/iaido/app/SuggestionStrip.kt`
 - Retire after migration: box-specific geometry from `SuggestionReelMath.kt`, `ReplacementReelLayout.kt`, and `ReplacementJoinAttachment.kt`, plus their obsolete visual assertions. Keep or move candidate-normalization helpers that the sentence model still uses.
 
-- [ ] Implement a pure geometry snapshot that records each measured word’s glyph bounds, visible gap, hit bounds, line baseline, start/end UTF-16 offsets, and strip content position. Extend each hit bound halfway through the additional 4 CSS-pixel visual gap.
-- [ ] Add pure helpers to map x/y positions to a word, word midpoint, and content offset; to produce a two-word join union; to compute a deletion range from crossed word midpoints; and to clamp a requested focus-scroll position. Cover LTR and RTL order.
-- [ ] Build `SentenceStrip` with a custom measured `Layout` (or a single equivalent layout that publishes identical item coordinates). Use actual `TextLayoutResult` for character offsets; do not estimate caret positions using average character width.
+- [x] Implement a pure geometry snapshot with measured word widths, glyph bounds, hit bounds, UTF-16 spans, caret anchors, content width, and focus scroll offset. Extend each hit bound halfway through the additional 4 CSS-pixel visual gap.
+- [x] Add pure helpers for word hit testing, two-word join unions, midpoint-based reversible deletion ranges, cursor-anchor mapping, LTR/RTL ordering, and clamped focus scrolling. Tighten deletion arming so the finger must enter an adjacent word target before the source word becomes a deletion preview.
+- [x] Build the initial measured `SentenceStrip` from Compose text metrics and a keyed horizontal row. The actual text layouts render from the same measured lane widths; gesture-time `TextLayoutResult` mapping is completed in Task 6.
 - [ ] Keep one geometry snapshot frozen for the pointer lifetime. Candidate preview text, focus color, and animation progress may recompose, but they must not change the active gesture’s word bounds or restart its pointer handler.
-- [ ] Publish the semantic nodes and fields already consumed by `SentenceStripImeDriver`: strip root, indexed word with source span and deleting flag, upper/lower alternatives, caret offset, whole-sentence preview, join source span, deletion range, edge-zone direction, and undo/redo state.
-- [ ] Add geometry tests for half-gap hit targets, short “it” beside long words, midpoint inclusion/exclusion, reversible selection when moving back, join union coverage/centering, LTR/RTL coordinates, content clamping, and cursor-offset mapping.
-- [ ] Run `./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest`; run the existing Compose/semantics visibility test and update it to assert sentence lanes. Delete box-specific production helpers/tests only after `rg` finds no production or test callers.
-- [ ] Commit the geometry and measured-strip foundation after unit and focused Compose tests pass.
+- [ ] Publish all semantic states consumed by `SentenceStripImeDriver`. The strip root, indexed words, upper/lower alternatives, caret, and undo/redo are present; dynamic preview, join, deletion, and edge-zone fields will be added with their gesture tasks.
+- [x] Add geometry tests for half-gap hit targets, short “it” beside long words, midpoint inclusion/exclusion, reversible selection, join union coverage/centering, LTR/RTL coordinates, content clamping, and cursor-offset mapping.
+- [x] Run `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:assembleDebugAndroidTest`. The focused Compose semantics test is compiled and will be run with the deferred final device pass.
+- [x] Commit the geometry and measured-strip foundation with the visual foundation and the deferred connected-test decision recorded.
 
 **Produces:** one measured geometry source for layout, hit testing, join/deletion overlays, caret placement, and accessibility bounds.
 
@@ -199,14 +200,14 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Modify only if needed to keep theme boundaries clear: `app/src/main/kotlin/com/iaido/app/IaidoTheme.kt`
 - Test: `app/src/androidTest/kotlin/com/iaido/app/SettingsImeReelE2eTest.kt`
 
-- [ ] Add keyboard-scoped color tokens using the exact design-document values. Keep the app’s Settings colors unchanged.
-- [ ] Render the sentence strip as plain text lanes: current word at 16 CSS px reference size/medium weight, alternatives at 12 CSS px and readable 64% opacity, section labels muted, and focused text/caret in cyan. Keep the current/upper/lower baseline stable when a candidate is absent.
-- [ ] Render the strip header, focus label, and always-present undo/redo outline icons. Disabled icons must remain in layout and independently expose disabled semantics.
-- [ ] Keep the keyboard surface height and navigation inset stable while typing or scrolling. Give the 15–16 dp undo/redo glyphs a larger transparent touch target without changing their visible size.
-- [ ] Render flat keycaps with fine outlines and no resting shadows. Keep QWERTY/Hebrew glyph positions, punctuation rows, number hints, bottom-row weights, and tap bounds unchanged. Use the same `KeyboardLayout` geometry for key drawing and swipe recognition.
-- [ ] Move the swipe trail to a dedicated keyboard overlay drawn above key faces; keep key labels legible and fade the trail out in about 210 ms after commit/cancel rather than holding it for two seconds.
+- [x] Add keyboard-scoped color tokens using the exact design-document values. Keep the app’s Settings colors unchanged.
+- [x] Render the sentence strip as plain text lanes: current word at 16 CSS px reference size/medium weight, alternatives at 12 CSS px and readable 64% opacity, section labels muted, and focused text/caret in cyan. Keep the current/upper/lower baseline stable when a candidate is absent.
+- [x] Render the strip header, focus label, and always-present undo/redo outline icons. Disabled icons remain in layout and independently expose disabled semantics.
+- [x] Keep the keyboard surface height and navigation inset stable. Give the 15–16 dp undo/redo glyphs a larger transparent touch target without changing their visible size.
+- [x] Render flat keycaps with fine outlines and no resting shadows. Keep QWERTY/Hebrew glyph positions, punctuation rows, number hints, bottom-row weights, and tap bounds unchanged. Use the same `KeyboardLayout` geometry for key drawing and swipe recognition.
+- [x] Draw the swipe trail above key faces, keep key labels legible, and fade the trail in about 210 ms after commit/cancel.
 - [ ] Match the three embedded image references and the V7 prototype at the baseline emulator viewport. Capture Settings screenshots for resting QWERTY, Hebrew, and active swipe trail; inspect key positions, strip height, text sizes, contrast, caret and clipping.
-- [ ] Run the focused Settings IME instrumentation test and record screenshots. Commit the visual foundation only after the structural semantics and screenshot review both pass.
+- [x] Defer the focused Settings IME instrumentation test and screenshot review to Task 9, per user request. Do not claim visual parity from this build-only pass.
 
 **Produces:** the approved graphite/silver/cyan keyboard and sentence strip at rest, with the existing keyboard layout preserved.
 
@@ -225,8 +226,7 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - [ ] Handle horizontal strip swipes separately from vertical word gestures. Scroll continuously with clamped content bounds and no wrap. When the cursor or focused word changes, bring it into view quickly; center it when the available preceding/following sentence content permits and clamp at either sentence edge.
 - [ ] On vertical motion over an alternative, render a full-sentence preview and animate the selected candidate into the current row in 160–170 ms with an ease-out and no bounce. On release, commit once; place the previous word into the chosen alternative side so the next same-direction swipe swaps it back.
 - [ ] On pointer cancel or release outside a candidate, clear preview without changing host text, selection, or history. Keep the opposite-side option intact and candidates non-wrapping.
-- [ ] Run STRIP-02…09, STRIP-20, and STRIP-21 connected cases through `SentenceStripImeDriver`. Assert editor text is unchanged during held previews and the strip caret always equals the actual host selection.
-- [ ] Run `./gradlew --no-daemon --max-workers=2 :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iaido.app.ImeReelE2eTest`; commit after the focused connected result is green.
+- [ ] Defer the connected STRIP-02…09, STRIP-20, and STRIP-21 journeys to Task 9. Keep preview non-mutation and cursor synchronization covered by pure/controller tests where possible.
 
 **Produces:** reliable word/character/gap cursor setting, horizontal browsing, focus-centered scrolling, and reversible upper/lower correction swaps.
 
@@ -251,8 +251,7 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - [ ] Switch from alternative selection to deletion only after a vertically armed pointer crosses from its source lane into a neighboring lane. Select that neighbor only after its midpoint is crossed. Returning over the original lane restores the vertical alternative preview.
 - [ ] While deletion is previewed, strike through only selected word text, hide those words’ alternatives, and draw one red rectangle around the selected contiguous range. Pulling back across a midpoint removes that word from preview. Release deletes exactly the selected text and preserves surrounding punctuation/spaces.
 - [ ] Add or extend deterministic debug fixture data only where current `SPLIT_ALOT`, `JOIN_REEL`, and `inside` entries do not make the expected choice unique. Keep fixture content in `app/src/debug/assets/auto-space-fixtures.txt` and fixture IDs in `ImeScenarioData.kt`.
-- [ ] Run STRIP-10…17 and STRIP-13a through the real IME. Assert that text and selection do not change during preview, the join bound covers both sources, split yields two independent words, “to” survives “inside”, and one undo restores a multi-word deletion.
-- [ ] Run the focused `ImeReelE2eTest` and `ImeInferenceE2eTest`; commit after atomic-edit and connected preview assertions pass.
+- [ ] Defer connected STRIP-10…17, STRIP-13a, and `ImeInferenceE2eTest` to Task 9. Validate the reducer and transaction boundaries with JVM tests during implementation.
 
 **Produces:** correct split/join preview geometry and a reversible midpoint-based deletion gesture.
 
@@ -272,8 +271,7 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - [ ] Show an edge affordance only during a held cursor/deletion gesture in its zone. Fade in/out in about 110 ms; keep the arrow visually clear and the region subtle as shown by the embedded reference.
 - [ ] Finish the 40-entry history module integration. Tapping an enabled undo/redo icon applies one step immediately. Holding for about 380 ms reveals the action and before/after sentence; releasing while still held applies that step, while pointer cancellation dismisses it. Disabled controls remain visible, grey, and inert.
 - [ ] Ensure undo/redo restore editor text, the InputConnection selection, sentence spans, and strip caret together. A fresh edit after undo clears redo only; the independent stack availability is reflected immediately in `SentenceStripState`.
-- [ ] Run STRIP-18, STRIP-19, STRIP-22…24 and the RTL variants. Assert the edge rate increases with penetration, cursor/deletion remains under the finger, undo/redo availability is independent, and held history preview is non-mutating until release.
-- [ ] Run `./gradlew --no-daemon --max-workers=2 :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iaido.app.ImeReelE2eTest`; commit after focused connected tests pass.
+- [ ] Defer connected STRIP-18, STRIP-19, STRIP-22…24, and RTL variants to Task 9. Cover edge-rate math and history state transitions with fast JVM tests.
 
 **Produces:** frame-rate-stable edge scrolling for both cursor and deletion gestures, and usable multi-step undo/redo controls.
 

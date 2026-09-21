@@ -1,6 +1,10 @@
 package com.iaido.app
 
 import android.view.MotionEvent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,7 +36,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
@@ -68,7 +71,7 @@ private val punctuationKeys = setOf("'", "?", ",", ".", "\u00B3", "\u00B4")
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun KeyboardInputView(
+internal fun KeyboardInputView(
     sessionId: Int,
     onSwipe: (GesturePath, KeyboardLayout) -> Unit,
     onTap: (String) -> Unit = {},
@@ -80,6 +83,8 @@ fun KeyboardInputView(
     suggestionChips: List<SuggestionChip> = emptyList(),
     focusedChipId: Int? = null,
     replacementOptions: List<ReplacementOption> = emptyList(),
+    sentenceStripState: SentenceStripState = SentenceTextModel.emptyState(language),
+    sentenceStripActions: SentenceStripActions? = null,
     liveReplacementOptionIds: Set<String> = emptySet(),
     showCandidateScores: Boolean = false,
     onSuggestionRelease: (chipIndex: Int, candidateIndex: Int) -> Unit = { _, _ -> },
@@ -134,6 +139,7 @@ fun KeyboardInputView(
         }
         var points by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
         var trailPoints by remember(sessionId) { mutableStateOf<List<GesturePoint>>(emptyList()) }
+        var trailFading by remember(sessionId) { mutableStateOf(false) }
         var pointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
         var startKey by remember(sessionId) { mutableStateOf<String?>(null) }
         var multiFingerHandled by remember(sessionId) { mutableStateOf(false) }
@@ -150,12 +156,17 @@ fun KeyboardInputView(
         val splitEnded = remember(sessionId) { mutableSetOf<Int>() }
         val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
 
-        LaunchedEffect(trailPoints) {
-            if (trailPoints.isNotEmpty()) {
-                delay(2000L)
-                trailPoints = emptyList()
-            }
-        }
+        val trailOpacity by animateFloatAsState(
+            targetValue = if (trailFading) 0f else 1f,
+            animationSpec = tween(durationMillis = 210),
+            label = "swipeTrailFade",
+            finishedListener = { value ->
+                if (value == 0f && trailFading) {
+                    trailPoints = emptyList()
+                    trailFading = false
+                }
+            },
+        )
 
         LaunchedEffect(backspaceMode) {
             if (backspaceMode != BackspaceMode.PRESS) return@LaunchedEffect
@@ -186,7 +197,7 @@ fun KeyboardInputView(
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.background,
+            color = KeyboardPalette.Page,
             contentColor = MaterialTheme.colorScheme.onBackground,
         ) {
             Column(
@@ -201,18 +212,10 @@ fun KeyboardInputView(
                     .semantics { contentDescription = "Iaido language ${language.name}" },
                 color = androidx.compose.ui.graphics.Color.Transparent,
             )
-            SuggestionStrip(
-                chips = suggestionChips,
+            SentenceStrip(
+                state = sentenceStripState,
                 rtl = language == Language.HEBREW,
-                focusedChipId = focusedChipId,
-                replacementOptions = replacementOptions,
-                liveReplacementOptionIds = liveReplacementOptionIds,
-                showCandidateScores = showCandidateScores,
-                onRelease = onSuggestionRelease,
-                onUndo = onSuggestionUndo,
-                onReplacementPreview = onReplacementPreview,
-                onReplacementRelease = onReplacementRelease,
-                onReplacementCancel = onReplacementCancel,
+                actions = sentenceStripActions,
             )
             Box(
                 modifier = Modifier
@@ -247,7 +250,8 @@ fun KeyboardInputView(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(keyboardSurfaceHeight)
+                        .height(keyboardSurfaceHeight)
+                    .background(KeyboardPalette.Deck)
                     .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
                         // Consent is checked before building a TouchFrame: converting every raw
@@ -259,6 +263,7 @@ fun KeyboardInputView(
                         }
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
+                                trailFading = false
                                 onSplitGestureStart()
                                 pointerId = event.getPointerId(0)
                                 val point = event.toGesturePoint(0)
@@ -373,6 +378,7 @@ fun KeyboardInputView(
                                 }
                             }
                             MotionEvent.ACTION_UP -> {
+                                trailFading = trailPoints.isNotEmpty()
                                 if (splitMode) {
                                     cancelBackspaceGesture()
                                     if (splitEnded.add(pointerId)) {
@@ -451,6 +457,7 @@ fun KeyboardInputView(
                                 }
                             }
                             MotionEvent.ACTION_CANCEL -> {
+                                trailFading = trailPoints.isNotEmpty()
                                 if (splitMode) onSplitCancel()
                                 cancelBackspaceGesture()
                                 splitMode = false
@@ -477,9 +484,8 @@ fun KeyboardInputView(
                     )
                 }
                 KeyboardBottomRow(keyHeight, language, pressedKey = startKey)
-                val trailColor = MaterialTheme.colorScheme.primary
                 Canvas(modifier = Modifier.fillMaxWidth().height(keyboardSurfaceHeight)) {
-                    drawSwipeTrail(trailPoints, trailColor)
+                    drawSwipeTrail(trailPoints, KeyboardPalette.Accent, trailOpacity)
                 }
             }
             Spacer(Modifier.height(bottomInset))
@@ -552,41 +558,47 @@ private fun KeyboardKey(
     val keyModifier = modifier
         .then(width?.let { Modifier.width(it) } ?: Modifier)
         .height(height)
-    val shape = RoundedCornerShape(9.dp)
+    val shape = RoundedCornerShape(8.dp)
+    val faceColor by animateColorAsState(
+        targetValue = if (pressed) KeyboardPalette.AccentWash else KeyboardPalette.Key,
+        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+        label = "keyFill",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (pressed) KeyboardPalette.Accent else KeyboardPalette.KeyBorder,
+        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+        label = "keyOutline",
+    )
     Box(
         modifier = keyModifier
             .semantics {
                 testKey?.let { contentDescription = "Iaido key $it" }
             }
-            .shadow(if (pressed) 2.dp else 1.dp, shape)
-            .background(
-                color = if (pressed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                shape = shape,
-            )
-            .border(
-                width = if (pressed) 1.5.dp else 1.dp,
-                color = if (pressed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                shape = shape,
-            ),
+            .background(faceColor, shape)
+            .border(width = 1.dp, color = borderColor, shape = shape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            color = if (pressed) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = KeyboardPalette.PrimaryInk,
             style = MaterialTheme.typography.titleMedium,
         )
         number?.let {
             Text(
                 it,
                 modifier = Modifier.align(Alignment.TopEnd),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                color = KeyboardPalette.MutedInk,
                 style = MaterialTheme.typography.labelSmall,
             )
         }
     }
 }
 
-private fun DrawScope.drawSwipeTrail(points: List<GesturePoint>, color: androidx.compose.ui.graphics.Color) {
+private fun DrawScope.drawSwipeTrail(
+    points: List<GesturePoint>,
+    color: androidx.compose.ui.graphics.Color,
+    alpha: Float,
+) {
     if (points.isEmpty()) return
     val path = Path().apply {
         moveTo(points.first().x, points.first().y)
@@ -594,11 +606,11 @@ private fun DrawScope.drawSwipeTrail(points: List<GesturePoint>, color: androidx
     }
     drawPath(
         path = path,
-        color = color.copy(alpha = 0.78f),
+        color = color.copy(alpha = 0.78f * alpha),
         style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
     )
     points.takeLast(4).forEach { point ->
-        drawCircle(color = color.copy(alpha = 0.9f), radius = 4.dp.toPx(), center = Offset(point.x, point.y))
+        drawCircle(color = color.copy(alpha = 0.9f * alpha), radius = 4.dp.toPx(), center = Offset(point.x, point.y))
     }
 }
 

@@ -98,6 +98,63 @@ class IaidoInputMethodService : InputMethodService() {
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
     private val sentenceStripState = mutableStateOf(SentenceTextModel.emptyState(Language.ENGLISH))
+    private val sentenceStripActions = object : SentenceStripActions {
+        override fun setSelection(start: Int, endExclusive: Int): Boolean {
+            val connection = currentInputConnection ?: return false
+            if (start < 0 || endExclusive < start || !connection.setSelection(start, endExclusive)) return false
+            cursorPosition = start
+            selectionEndPosition = endExclusive
+            sentenceEditHistory.closeGroup()
+            latestEditorSnapshot?.let { snapshot ->
+                latestEditorSnapshot = snapshot.copy(selectionStart = start, selectionEnd = endExclusive)
+            }
+            publishSentenceStripState()
+            return true
+        }
+
+        override fun commitWordReplacement(wordId: String, replacement: String): Boolean {
+            val word = sentenceStripState.value.words.firstOrNull { it.id == wordId } ?: return false
+            val sessionWordId = wordId.substringAfter("session:", "").toIntOrNull()
+            return if (sessionWordId != null) {
+                replaceSessionWord(sessionWordId, replacement)
+            } else {
+                applyEditorReplacement(
+                    start = word.start,
+                    endExclusive = word.endExclusive,
+                    replacement = replacement,
+                    kind = SentenceEditKind.CORRECTION,
+                    expectedSourceText = word.text,
+                )
+            }
+        }
+
+        override fun commitReplacement(optionId: String): Boolean {
+            val replacement = sentenceStripState.value.replacementOptions
+                .firstOrNull { it.option.id == optionId }?.option ?: return false
+            return releaseReplacementOption(replacement)
+        }
+
+        override fun commitDeletion(start: Int, endExclusive: Int): Boolean {
+            if (start < 0 || endExclusive <= start) return false
+            val changed = applyEditorReplacement(
+                start = start,
+                endExclusive = endExclusive,
+                replacement = "",
+                kind = SentenceEditKind.DELETION,
+                cursorAfter = start,
+            )
+            if (changed) {
+                correctionHistory.deleteRange(start, endExclusive)
+                typedWords.reset()
+                refreshSuggestionChips()
+            }
+            return changed
+        }
+
+        override fun undo(): Boolean = undoSentenceEdit()
+
+        override fun redo(): Boolean = redoSentenceEdit()
+    }
     private var latestEditorSnapshot: EditorSnapshot? = null
     private val showCandidateScores = mutableStateOf(false)
     // Ids of replacement options currently produced by the live SwipeTypingCoordinator
@@ -448,6 +505,8 @@ class IaidoInputMethodService : InputMethodService() {
                     suggestionChips = sessionChips.value,
                     focusedChipId = focusedWordId.value,
                     replacementOptions = replacementOptions.value,
+                    sentenceStripState = sentenceStripState.value,
+                    sentenceStripActions = sentenceStripActions,
                     liveReplacementOptionIds = liveReplacementOptionIds.value,
                     showCandidateScores = showCandidateScores.value,
                     onSuggestionRelease = ::releaseSuggestion,

@@ -67,8 +67,8 @@ class SettingsImeReelE2eTest {
             "Typing the second letter did not update the Settings preview",
             device.wait(Until.hasObject(By.textContains("Hi")), 5_000L),
         )
-        // Keep this capture before the sentence-strip semantics so the same journey
-        // records a useful baseline while the current IME is still box-reel based.
+        // Preserve a typed-state capture before the detailed strip assertions for later
+        // prototype/native screenshot comparison in the consolidated acceptance pass.
         val hiScreenshot = ArtifactWriter.captureScreenshot("settings-ime-typed-hi-sentence-strip", device)
         instrumentation.uiAutomation
             .executeShellCommand(
@@ -77,10 +77,11 @@ class SettingsImeReelE2eTest {
             .close()
         assertTrue(
             "The real IME sentence strip was not exposed in Settings",
-            device.wait(Until.hasObject(By.desc("Iaido sentence strip")), 5_000L),
+            device.wait(Until.hasObject(By.descStartsWith("Iaido sentence strip")), 5_000L),
         )
         assertTrue(
-            "The typed word did not appear as one inline word lane",
+            "The typed word did not appear as one inline word lane; descriptions=" +
+                device.findObjects(By.descStartsWith("Iaido sentence")).map { it.contentDescription },
             device.wait(Until.hasObject(By.descStartsWith("Iaido sentence word index=0")), 5_000L),
         )
 
