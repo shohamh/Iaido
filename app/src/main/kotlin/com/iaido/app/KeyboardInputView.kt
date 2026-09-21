@@ -194,10 +194,12 @@ fun KeyboardInputView(
                     .fillMaxWidth()
                     .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION },
             ) {
-            Box(
+            Text(
+                text = language.name,
                 modifier = Modifier
                     .size(1.dp)
                     .semantics { contentDescription = "Iaido language ${language.name}" },
+                color = androidx.compose.ui.graphics.Color.Transparent,
             )
             SuggestionStrip(
                 chips = suggestionChips,

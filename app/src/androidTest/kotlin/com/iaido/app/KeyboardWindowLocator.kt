@@ -69,12 +69,24 @@ object KeyboardWindowLocator {
     }
 
     private fun waitForLanguage(device: UiDevice, timeoutMs: Long): Language {
-        val english = By.desc(LANGUAGE_DESCRIPTION_PREFIX + Language.ENGLISH.name)
-        val hebrew = By.desc(LANGUAGE_DESCRIPTION_PREFIX + Language.HEBREW.name)
+        val englishDescription = LANGUAGE_DESCRIPTION_PREFIX + Language.ENGLISH.name
+        val hebrewDescription = LANGUAGE_DESCRIPTION_PREFIX + Language.HEBREW.name
+        val englishText = Language.ENGLISH.name
+        val hebrewText = Language.HEBREW.name
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         do {
-            if (device.findObject(english) != null) return Language.ENGLISH
-            if (device.findObject(hebrew) != null) return Language.HEBREW
+            val currentLanguage = device.findObjects(By.descStartsWith(LANGUAGE_DESCRIPTION_PREFIX))
+                .mapNotNull { runCatching { it.contentDescription?.toString() }.getOrNull() }
+                .lastOrNull { it == englishDescription || it == hebrewDescription }
+                ?: when {
+                    device.findObject(By.text(englishText)) != null -> englishDescription
+                    device.findObject(By.text(hebrewText)) != null -> hebrewDescription
+                    else -> null
+                }
+            when (currentLanguage) {
+                englishDescription -> return Language.ENGLISH
+                hebrewDescription -> return Language.HEBREW
+            }
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
         throw missingMarker("language marker", device)

@@ -11,15 +11,16 @@ object SwipeFixtures {
             GesturePoint(key.x, key.y, startMs + index * 10L)
         })
 
-    /** Coordinates match the app's ten-column QWERTY keyboard before screen translation. */
+    /** Coordinates match the app's eleven-column QWERTY keyboard before screen translation. */
     fun pathThroughQwerty(word: String, keySizePx: Float, startMs: Long = 0L): GesturePath {
         require(word.isNotEmpty()) { "Swipe fixture word cannot be empty" }
         require(word.all(Char::isLetter)) { "Swipe fixture word must contain letters: '$word'" }
         require(keySizePx > 0f) { "keySizePx must be positive" }
-        val rows = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        val columnCount = 11
+        val rows = listOf("qwertyuiop", "asdfghjkl", "'?zxcvbnm,.")
         val positions = buildMap {
             rows.forEachIndexed { row, letters ->
-                val offset = (10 - letters.length).coerceAtLeast(0) / 2f
+                val offset = (columnCount - letters.length).coerceAtLeast(0) / 2f
                 letters.forEachIndexed { index, letter ->
                     put(letter, GesturePoint(
                         x = (index + 0.5f + offset) * keySizePx,

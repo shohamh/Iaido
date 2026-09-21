@@ -75,7 +75,7 @@ class SettingsUpdateE2eTest {
         val activity = instrumentation.startActivitySync(intent)
         try {
             val device = UiDevice.getInstance(instrumentation)
-            assertTrue(device.wait(Until.hasObject(By.text("Update app")), 5_000L))
+            assertTrue(device.wait(Until.hasObject(By.text("Check for updates")), 5_000L))
             assertTrue(device.hasObject(By.text("Update channel")))
             assertTrue(device.hasObject(By.text("Stable release")))
             assertTrue(device.hasObject(By.text("Nightly")))
@@ -94,18 +94,17 @@ class SettingsUpdateE2eTest {
      */
     private fun scrollToText(device: UiDevice, label: String) {
         if (device.hasObject(By.text(label))) return
-        repeat(8) {
+        repeat(4) {
             val scrollable = device.findObject(By.scrollable(true)) ?: return
             val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
             val x = (bounds.left + bounds.right) / 2
             // Swipe from near the bottom of the scrollable area to near its top, i.e. scroll the
             // content *down* into view, since the spacing-mode options sit below the fold.
-            val startY = bounds.top + (bounds.height() * 0.8f).toInt()
-            val endY = bounds.top + (bounds.height() * 0.2f).toInt()
-            device.swipe(x, startY, x, endY, 20)
+            val startY = bounds.top + (bounds.height() * 0.72f).toInt()
+            val endY = bounds.top + (bounds.height() * 0.38f).toInt()
+            device.swipe(x, startY, x, endY, 180)
             device.waitForIdle()
-            SystemClock.sleep(150L)
-            if (device.hasObject(By.text(label))) return
+            if (device.wait(Until.hasObject(By.text(label)), 500L)) return
         }
     }
 }

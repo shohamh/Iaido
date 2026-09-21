@@ -76,7 +76,12 @@ class IaidoInputMethodService : InputMethodService() {
     )
     private var researchTraceId: String? = null
     private val languageSwitcher = LanguageSwitcher()
-    private var activeLanguage = Language.ENGLISH
+    private val activeLanguageState = mutableStateOf(Language.ENGLISH)
+    private var activeLanguage: Language
+        get() = activeLanguageState.value
+        set(value) {
+            activeLanguageState.value = value
+        }
     internal var spacingModeForTypingCoordinator = SpacingMode.INFER_SPACES
         private set
     private var splitGraceWindowMs = SettingsDefaults.GRACE_WINDOW_MS.toLong()
@@ -1187,7 +1192,6 @@ class IaidoInputMethodService : InputMethodService() {
     private fun switchLanguage() {
         swipeTypingCoordinator.onNonSwipeInput()
         activeLanguage = languageSwitcher.next()
-        composeInputView?.let(::renderInputView)
     }
 
     private fun openSettings() {

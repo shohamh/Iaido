@@ -92,7 +92,7 @@ class ImeEditorDriver(
     }
 
     fun tapMarkedKey(description: String): List<InjectedPointerEvent> {
-        val key = findView(By.desc(description), "keyboard key $description")
+        val key = findKeyboardKey(description)
         val bounds = key.visibleBounds
         return pointerInjector.injectTap(
             centerX = ((bounds.left + bounds.right) / 2f),
@@ -185,7 +185,28 @@ class ImeEditorDriver(
             device.findObject(selector)?.let { return it }
             SystemClock.sleep(50L)
         }
-        error("Missing $description")
+        val availableKeys = device.findObjects(By.descStartsWith("Iaido key "))
+            .mapNotNull { runCatching { it.contentDescription?.toString() }.getOrNull() }
+        error("Missing $description; available keyboard keys=$availableKeys")
+    }
+
+    private fun findKeyboardKey(description: String): UiObject2 {
+        if (!description.startsWith("Iaido key ")) {
+            return findView(By.desc(description), "keyboard key $description")
+        }
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            device.findObjects(By.descStartsWith("Iaido key "))
+                .firstOrNull { key ->
+                    runCatching { key.contentDescription?.toString() == description }
+                        .getOrDefault(false)
+                }
+                ?.let { return it }
+            SystemClock.sleep(50L)
+        }
+        val availableKeys = device.findObjects(By.descStartsWith("Iaido key "))
+            .mapNotNull { runCatching { it.contentDescription?.toString() }.getOrNull() }
+        error("Missing keyboard key $description; available keyboard keys=$availableKeys")
     }
 
     private fun resourceId(id: String) = "$packageName:id/$id"

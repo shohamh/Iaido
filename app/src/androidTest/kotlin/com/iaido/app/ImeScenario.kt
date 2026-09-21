@@ -169,8 +169,7 @@ class ImeScenario(
         check(window.language == expectedLanguage) {
             "Scenario language drifted before '$word': expected=$expectedLanguage observed=${window.language}"
         }
-        val keySizePx = window.surfaceBounds.width().toFloat() /
-            if (expectedLanguage == Language.HEBREW) 11f else 10f
+        val keySizePx = window.surfaceBounds.width().toFloat() / KEYBOARD_LETTER_ROW_COLUMN_COUNT
         val path = if (expectedLanguage == Language.ENGLISH) {
             SwipeFixtures.pathThroughQwerty(word, keySizePx)
         } else {
@@ -212,6 +211,7 @@ class ImeScenario(
             val before = expectedLanguage
             pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
             expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
+            awaitLanguage(expectedLanguage)
             checkpoint("switchLanguage", verifyEnvironment = true)
             return
         }
@@ -623,7 +623,7 @@ class ImeScenario(
     fun injectSplitWords(words: List<String>, expected: String? = null) {
         require(words.size >= 2) { "Split gesture needs at least two words/parts" }
         val window = keyboard()
-        val keySizePx = window.surfaceBounds.width().toFloat() / 10f
+        val keySizePx = window.surfaceBounds.width().toFloat() / KEYBOARD_LETTER_ROW_COLUMN_COUNT
         val paths = words.map { word -> SwipeFixtures.pathThroughQwerty(word, keySizePx).points }
         pointer.injectMultiPointer(paths, window.surfaceBounds)
         if (expected != null) {
@@ -976,6 +976,7 @@ class ImeScenario(
         if (bootstrap || spacingModeChanged || needsImeSelection) {
             system.waitForImeVisible(system.iaidoImeId)
         }
+        ensureLanguage(Language.ENGLISH)
         val stateAdapter = DebugKeyboardStateAdapter(instrumentation.targetContext)
         val baselineId = suiteState.baselineOrNull() ?: stateAdapter.saveBaseline().also(suiteState::setBaseline)
         stateAdapter.restoreBaseline(baselineId)
@@ -1001,6 +1002,22 @@ class ImeScenario(
                 "bootstrap=$bootstrap fixture=${fixture ?: "none"} imeSelection=$needsImeSelection " +
                 "spacingReset=$spacingModeChanged",
         )
+    }
+
+    private fun ensureLanguage(target: Language) {
+        if (keyboard().language != target) {
+            pendingPointerEvents = editor.tapMarkedKey(keyDescription("globe"))
+            awaitLanguage(target)
+        }
+    }
+
+    private fun awaitLanguage(target: Language) {
+        waitUntil("${target.name} language") {
+            runCatching {
+                device.waitForIdle()
+                keyboard().language == target
+            }.getOrDefault(false)
+        }
     }
 
     private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
