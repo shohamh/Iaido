@@ -6,6 +6,22 @@ Behavior contract: [2026-09-20-reel-strip-behavior.md](2026-09-20-reel-strip-beh
 
 Visual reference: [keyboard-reel-inline-v7.html](../prototypes/keyboard-reel-inline-v7.html)
 
+## Screenshot references
+
+These phone captures record the requested interaction states and complement the interactive V7 prototype. Use them as visual references during the native Compose comparison; the HTML prototype remains the source for live gesture behavior.
+
+![Deletion preview with a red range outline and the right edge-scroll affordance visible.](../prototypes/keyboard-reel-references/deletion-preview-with-edge-scroll.png)
+
+*Deletion preview: words are crossed out, their alternatives are hidden, and the strip can continue toward the sentence edge.*
+
+![Centered into join preview spanning the in and to word lanes.](../prototypes/keyboard-reel-references/centered-into-join-preview.png)
+
+*Join preview: “into” and its alternatives are centered inside the union of “in” and “to”.*
+
+![Sentence strip with a visible caret and swipe trail layered above the keyboard keys.](../prototypes/keyboard-reel-references/sentence-strip-caret-and-swipe-trail.png)
+
+*Resting sentence strip and keyboard: the caret follows the editor selection, and the swipe trail stays readable over the key faces.*
+
 ## Goal and boundaries
 
 Convert the approved sentence-first prototype into the actual Iaido Android IME, using Kotlin and Jetpack Compose. Match the quiet, premium graphite/silver/cyan direction while keeping the existing QWERTY and Hebrew key order and making the word strip, cursor, and gestures feel like one coherent input surface.
@@ -84,7 +100,7 @@ Suggested state responsibilities:
 
 The preview reducer must never call `InputConnection.commitText` or delete host text. Release dispatches one semantic action to the service/coordinator; only the service applies the edit and records history. Editor selection callbacks flow back into Compose and update the strip caret/focus. This avoids the strip and InputConnection becoming competing sources of truth.
 
-The existing `SwipeTypingCoordinator` replacement callbacks can remain the seam for candidate-based split/join commits where they already own the source span. Word corrections and deletion should use the same atomic edit/history boundary. The later implementation plan can pin down the exact service APIs after this design is reviewed.
+The existing `SwipeTypingCoordinator` remains the candidate source for split/join commits where it owns the source span. Word corrections and deletion use the same atomic edit/history boundary. The task sequence and proposed service-to-Compose interface are recorded in the [implementation plan](../plans/2026-09-21-sentence-first-keyboard-compose.md).
 
 ## Gesture recognition and hit geometry
 
@@ -186,4 +202,4 @@ Compare text baselines, word gap, caret offset, selected/alternative contrast, j
 
 ## Review boundary
 
-This document and the behavior contract are the review artifacts requested before implementation planning. No production Compose behavior or implementation plan is included in this change.
+The implementation plan is [2026-09-21-sentence-first-keyboard-compose.md](../plans/2026-09-21-sentence-first-keyboard-compose.md). The behavior contract remains the source of interaction requirements; this document remains the visual, motion, and Compose mapping reference. No production keyboard behavior is implemented by these documents.

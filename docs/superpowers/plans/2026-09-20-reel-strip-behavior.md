@@ -1,5 +1,7 @@
 # Reel and Suggestion-Strip Behavior Implementation Plan
 
+> **Superseded:** This plan targets the earlier box-reel interaction. Do not execute it for the sentence-first design. Use [the sentence-first Compose implementation plan](2026-09-21-sentence-first-keyboard-compose.md) with the updated behavior contract and design document.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the approved reel/strip behavior contract so every tracked sentence word has one visible, bounded, cursor-following reel; word replacement is atomic; split and join candidates have the specified geometry and lifecycle; sentence context updates neighboring reels; and infer-space/two-finger ordering and timing are deterministic and tested through the real IME.
