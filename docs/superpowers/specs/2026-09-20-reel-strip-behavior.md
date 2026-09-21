@@ -1,174 +1,113 @@
-# Reel and suggestion-strip behavior contract
+# Sentence-first reel-strip behavior contract
 
-Status: Approved for implementation
+Status: Draft for review. This replaces the previous box-style reel-strip behavior contract before implementation.
 
-Implementation choices:
+The strip is a clear, horizontally scrollable sentence. The currently committed word stays in line; autocorrect alternatives sit above and below it. This contract reflects the behavior requested for the interactive prototype and is the behavioral source for the native Jetpack Compose design.
 
-- The sentence-aware context window is `N = 3` words on either side of the changed word.
-- One logical multi-path event accepts one to four paths. Within that event, inference evaluates
-  the observed assignment and one swapped assignment for every unordered pair of paths.
-- Multi-path timing uses the continuous formula `closeness = 1 - clamp(delta / graceWindow, 0, 1)`;
-  the resulting value scales only frequency/context evidence, while path-fit evidence is unchanged.
-- When the cursor is in whitespace, focus remains on the nearest word on the side from which the
-  cursor entered that whitespace; otherwise focus is the word containing the cursor.
-
-This document consolidates the reel and suggestion-strip behavior described during the
-debugging sessions. It is the contract that the connected IME end-to-end tests will verify.
+The existing infer-space, multi-path recognition, and typing-boundary rules are retained below. This document changes their presentation and the word-level interactions, not their recognition scoring.
 
 ## Terms
 
-- A **word reel** is the vertical reel attached to one word in the current sentence.
-- A **candidate** is one visible replacement row in that reel. The current word is also a
-  candidate when it has no alternatives.
-- A **sentence word** is a word with a tracked editor span, whether it was typed, swiped, or
-  produced by a segmentation/inference result.
-- A **split candidate** is one replacement option containing multiple output words, such as
-  `I mo` for the source word `imo`. It is still one candidate row in the source word's reel.
+- A **word lane** is one sentence word and its inline alternatives. It has no enclosing candidate box at rest.
+- A **word reel** is the candidate state associated with one word lane. The word reel is interaction state, not a drawn box or chip.
+- A **current word** is the text currently committed to the editor at a tracked word span.
+- An **alternative** is a distinct autocorrect result placed above or below a current word.
+- A **preview** is the temporary sentence shown while a gesture is held. It does not mutate editor text until release.
+- A **compound preview** is a split or join preview that affects more than one output word.
+- A **deletion preview** is a reversible, in-gesture selection of one or more words for deletion.
+- The **IME cursor** is the host editor selection offset reported through InputConnection. It is authoritative.
 
 ## Behavior contract
 
-### 1. Every sentence word has exactly one addressable reel
+### 1. The strip reads as a sentence
 
-- Every tracked sentence word gets one word reel, including a one-character word such as `a`,
-  `I`, or `x`.
-- Typing a word creates or refreshes its reel after every committed letter. The reel must not wait
-  for a space or another delimiter before appearing.
-- A one-character word with no alternative candidates still renders a one-row reel containing the
-  word itself. It must not disappear merely because its alternative list is empty.
-- Adding another typed letter updates that same word's reel and does not create a duplicate reel.
-- A word replacement updates the existing sentence word and its reel rather than appending a new
-  word or creating a second reel for the same span. It also triggers the sentence-aware updates
-  described in section 3.
+- Render the current sentence as ordinary inline text in reading order. Do not draw a separate box or chip around each word at rest.
+- Keep the selected/current word larger and brighter than its alternatives. Show at most one alternative above and one below each current word, with lower opacity that remains comfortably readable.
+- Offer autocorrect word suggestions, including split and join results. Do not offer capitalization-only variants or duplicate alternatives. De-duplicate case-insensitively using the active language locale while preserving the chosen display casing.
+- Keep every current sentence word addressable, including one-character words. A correction updates the same sentence span; it does not append a second copy.
+- Preserve punctuation and surrounding spaces unless a split, join, or deletion explicitly changes that span.
+- Keep the strip's content and focus tied to the active editor selection, not to the last word typed.
 
-### 2. Whole-word replacement is atomic
+### 2. Up and down are reversible alternative swaps
 
-- Selecting a candidate replaces the complete source word span.
-- If `hey` is changed to `heyday` and then changed back to `hey`, the result is exactly `hey`.
-  No suffix from `heyday` may remain, and the caret is immediately after the replacement.
-- Releasing a reel candidate must never insert text at the caret while leaving the old source word
-  in place.
-- The same rule applies to typed words, swiped words, corrected words, and words selected after a
-  cursor move.
+- A vertical swipe starts on a current word and moves toward its upper or lower alternative. While held, show the whole sentence as it would look after release.
+- Preview is non-mutating: the editor text, selection, and committed history stay unchanged until pointer release.
+- Releasing over a valid alternative atomically replaces the source span and puts the displaced current word in that same alternative position. Swiping in the same direction again can therefore swap back to the previous word.
+- The opposite-side alternative remains available if it is still valid and distinct. Never show the current word as its own alternative or duplicate an option across the current/upper/lower entries for the same source.
+- A missing alternative or a drag beyond the available option clamps at that end; ordinary alternative selection never wraps around the candidate list.
+- Releasing outside a valid alternative or cancelling the pointer stream leaves the editor unchanged and clears the preview.
+- A committed correction places the editor cursor immediately after the resulting text span.
 
-### 3. Reel changes are sentence-aware
+### 3. Splits and joins preview as sentence text
 
-- A reel update is evaluated in the context of the complete current sentence, not as an isolated
-  word correction.
-- When a word changes, the candidate lists and ranking for up to `N` neighboring words before and
-  after it are recalculated using the updated sentence and the configured frequency/context data.
-  `N` is a shared, documented context-window setting rather than an accidental caller-specific
-  limit.
-- The changed word and every affected neighboring reel refresh in place. The strip keeps one reel
-  per sentence word and does not duplicate or reorder reels during the refresh.
-- A neighboring reel may change its visible candidate, score, or ordering even when that neighboring
-  word was not directly selected. This is intentional: one correction can improve the rest of the
-  sentence's suggestions.
-- Words outside the `N`-word context window are not recalculated solely because of this update.
-- If a currently selected candidate remains valid after recalculation, its word stays selected;
-  otherwise the reel falls back to the current sentence word and keeps that word visible.
-- The E2E fixture must make the before/after ranking difference observable, including candidate
-  text or score labels, so a test cannot pass merely because the strip recomposed.
+- A split suggestion such as “alot” -> “a lot” previews both output words with normal sentence spacing. Releasing commits the whole split atomically and creates two independently addressable word lanes.
+- A join suggestion such as “in to” -> “into” is reachable from either source word: forward from “in” and backward from “to”.
+- A normal one-word alternative such as “inside” for “in” replaces only the “in” span and preserves the following “to”. A candidate may consume adjacent words only when its source span explicitly includes those words as a join.
+- During a join preview, show one thin muted-cyan outline around the union of both source word areas and their gap. Center “into” and its alternatives in that union so the label does not clip or overlap neighboring text.
+- Do not add a third word lane for a join. Keep surrounding sentence words in place and readable.
+- Releasing a join replaces the complete source span and its inter-word separator with the joined word in one edit; both source words disappear and one “into” lane remains.
+- A source change, deletion, cursor edit, or competing correction invalidates stale split/join suggestions. A stale option must not remain visible or selectable.
 
-### 4. Candidates are visible, bounded, and selectable only when visible
+### 4. The strip cursor always mirrors the IME cursor
 
-- Every selectable candidate row has visible text. A candidate must never be hit-testable while
-  rendering as a blank or transparent row.
-- Scrolling a reel down four candidate steps must show readable text at the resting position.
-- The focused/current candidate is fully visible in its reel viewport; it must not be clipped in
-  the middle of the word.
-- A reel's height is based on the number of candidates it actually contains, capped by the
-  configured maximum visible rows. A one-row reel is one row tall, a two-row reel is two rows tall,
-  and so on.
-- The strip must not reserve or expose empty space below the last real candidate. There must be no
-  invisible options below the visible content that can be selected by swiping.
-- Long candidate text may grow into the permitted neighboring visual space, but the reel's layout
-  slot remains bounded and must not create a giant standalone reel.
+- Render a distinct, steady caret in the sentence strip at the same logical text offset as the host editor cursor. Update it immediately for typing, external selection changes, correction commits, deletion, and undo/redo.
+- Tapping a whole word places the cursor at the end of that word, as requested. Tapping a character places it at that character boundary. Tapping the whitespace gap places it at the corresponding insertion boundary.
+- Holding on a word places the cursor at the character under the initial touch. Moving horizontally while still held scrubs the cursor through the sentence immediately, before entering an edge-scroll zone.
+- Word focus and cursor position are related but distinct: the strip may focus the containing or nearest word while the caret remains at the exact character/gap offset.
+- Use the same UTF-16 selection offsets as InputConnection. Text measurement and hit-testing must account for variable-width glyphs, grapheme clusters, punctuation, and RTL runs; never infer a caret from a fixed character-width estimate.
+- Cursor focus at whitespace is deterministic: use the nearest adjacent word, retaining the previous focus only for an exact tie. The caret itself remains at the requested whitespace boundary.
 
-### 5. The strip represents the whole sentence without duplicates
+### 5. Horizontal navigation and word hit areas
 
-- The strip shows a reel for every currently tracked sentence word, not only the most recently
-  typed word or a cursor-local subset.
-- Each sentence word appears once. Recomposition, candidate refreshes, cursor movement, and
-  replacement previews must not duplicate reels.
-- In left-to-right text, the newest sentence word is the rightmost reel. In right-to-left text,
-  ordering follows the corresponding reading direction while preserving one reel per word.
-- Removing, joining, or replacing words removes only the reels for spans that no longer exist and
-  preserves the remaining sentence order.
+- A left/right swipe across the strip scrolls the sentence horizontally without selecting a correction. Scrolling is continuous, clamps at either end, and never wraps.
+- When cursor focus changes to a word outside the viewport, move it into view quickly and smoothly. Aim to place it near the viewport center when there is enough sentence content before and after it; clamp naturally near the first and last words.
+- Do not recenter repeatedly when the cursor is already visible and stable. Avoid layout jumps when suggestion text or preview state changes.
+- Increase the visible horizontal word spacing by exactly 4 prototype pixels over the prior strip spacing, not 5. In Compose, scale this from the reference screenshot density and preserve the same visual gap.
+- Expand each word's gesture hit area into half of its neighboring spacing. For the added 4-pixel gap, each adjacent hit area reaches 2 pixels into that gap; text bounds and visible spacing do not change.
+- Small words such as “it” must be as easy to target as longer words. A miss on a word must not accidentally start deletion of a neighbor.
 
-### 6. Cursor movement controls the focused reel
+### 6. Deletion is a reversible horizontal extension of a word gesture
 
-- Moving the editor cursor into a word focuses that word's reel.
-- Moving the cursor from a later word back to an earlier word scrolls the strip back to the
-  earlier reel; moving forward scrolls it forward again.
-- The focused reel is brought fully into the horizontal viewport, even when the sentence has more
-  reels than fit on screen.
-- Cursor movement changes focus without reordering or duplicating sentence reels.
-- At a word boundary, the focused word is deterministic and consistent in both directions. The
-  recommended default is the word containing the cursor; when the cursor is in whitespace, focus
-  the nearest word on the side from which the cursor entered that whitespace.
+- A gesture begins on a word. Vertical movement first previews that word's upper/lower alternative, as in section 2.
+- Moving horizontally into another word changes the gesture into deletion-preview mode. Crossing into that neighboring word's hit area activates deletion mode; its word is included only when the pointer crosses that word's midpoint.
+- The starting word is included once deletion mode activates. Further words in the same direction are added one at a time only as their midpoints are crossed.
+- Moving back across a selected word's midpoint removes that word from the preview. Returning over the original word cancels deletion mode and restores the vertical alternative preview instead.
+- Show one red outline around the contiguous deletion range and strike through every word currently selected for deletion. Hide all alternatives for selected words while they are marked.
+- The visible editor text remains unchanged during preview. Releasing commits the selected contiguous deletion as one history action; cancellation restores the original sentence with no edit.
+- Preserve natural spacing at the deletion boundary and place the cursor at the deletion start. Do not delete punctuation or neighboring words outside the preview range.
 
-### 7. Multi-word split replacements belong to the source word reel
+### 7. Edge scrolling extends cursor movement and deletion
 
-- A multi-word replacement such as `I mo` for `imo` is one candidate row attached to the `imo`
-  word reel.
-- It must not appear as a separate two-word reel, a pair of independent reels, or a giant split
-  reel beside the source word.
-- The candidate text may contain a space, but it is one selectable candidate and one replacement
-  action.
-- Candidate ordering comes from the configured ranking/frequency data. The UI must not assume that
-  `I mo` is more likely than `imo`; the source word remains a normal candidate and the split
-  candidate is positioned according to the ranking supplied by the generator.
-- If the source word or its span disappears, the attached split candidate disappears with it and
-  must not remain as a stale standalone reel.
+- Show edge-scroll affordances only during an eligible held cursor or deletion gesture near the left/right limits of the sentence viewport.
+- Each zone is a small, soft gradient rectangle with no border and no red fill. Fade from transparent at its inner edge toward no more than 50% opacity at its outer edge. Use a slim, clearly visible directional chevron: larger than the too-small prototype iteration, visually narrow rather than wide.
+- Keep the zones smaller and more transparent than the earlier version. The overlay must not obscure the word or caret underneath.
+- Holding in an edge zone scrolls the strip continuously in that direction. It must continue updating the caret during cursor scrubbing and continue adding/removing words during deletion preview as newly visible word midpoints pass the fixed finger position.
+- Scroll speed increases continuously with normalized finger penetration into the zone. Use a smooth nonlinear curve (the prototype reference is 24 + 780 * depth^2 CSS pixels/second, clamped by content bounds); tune the equivalent Compose dp/second values against the reference device.
+- Update the gesture once per animation frame using elapsed frame time, not a fixed number of pixels per timer tick. Keep pointer ownership and hit geometry stable throughout the gesture.
+- Pulling back toward the inner edge reduces speed and reverses/unselects words naturally. Reaching the sentence end clamps; edge scrolling never wraps to the other end.
 
-### 8. Editing a selected split result creates independent word reels
+### 8. Undo and redo are visible, multi-step actions
 
-- Selecting a split candidate such as `imo` → `I mo` may initially keep the selected result as one
-  composite split reel so the replacement can settle as one action.
-- After that split result has been selected, deleting or editing any character in either resulting
-  word breaks the composite split relationship.
-- Once the relationship is broken, the strip renders one independent word reel per remaining word:
-  `I` gets its own reel and `mo` gets its own reel. Each reel has its own span, candidates, focus,
-  and replacement behavior.
-- Editing one split word must not keep the other word trapped inside a composite reel. The untouched
-  word becomes independently addressable at the same time as the edited word.
-- Deleting a character that removes a word removes only that word's reel; it must not leave an empty
-  reel or silently merge the remaining word back into the composite split reel.
-- The independent reels appear in sentence order, are not duplicated, and are included in the
-  sentence-aware neighbor recalculation from section 3.
-- After the split has been broken, a later correction of one resulting word affects that word and
-  its configured neighboring context, not the other split word as if they were still one span.
+- Keep small icon-only undo and redo buttons visible beside the strip header/focus label.
+- Keep the controls independently disabled and greyed out when their respective history stack is empty. A disabled control cannot be activated or show a misleading preview.
+- Maintain multiple logical edit actions, not a one-action toggle. Undo moves the most recent edit to redo; redo moves it back. A new edit after undo clears the redo stack.
+- Treat a correction, split, join, or committed multi-word deletion as one logical action. Group rapid character typing and repeated backspaces into sensible typing/deletion transactions rather than one history entry per key.
+- A quick tap applies undo/redo immediately. Holding an enabled button shows a small tooltip with the action and a before/after sentence preview; releasing applies that action. Moving away or cancelling dismisses the preview without applying it.
+- Keep cursor/selection restoration in history so undo and redo restore the corresponding editor text and cursor position.
+- Preserve the prototype's 40-entry history limit as the initial implementation target; make the limit explicit and test that older history is pruned without corrupting redo.
 
-### 9. Joining adjacent words is offered from both source reels
+### 9. Sentence-aware candidate updates remain stable
 
-- For adjacent source words such as `in to`, the candidate `into` appears on both the `in` reel and
-  the `to` reel. Both entries represent the same join action and use the same source-word span.
-- The join candidate is attached to the source reels; it is not rendered as a separate edge reel,
-  a third reel, or a giant two-word chip beside them.
-- When the `into` row is centered in the `in` reel, that row expands forward across the `to` reel's
-  reserved width and the inter-reel gap, visually uniting the two reels for that row.
-- When the same `into` row is centered in the `to` reel, it expands backward across the `in` reel's
-  reserved width and gap. The expansion direction is determined by which source reel is displaying
-  the candidate, not by a hard-coded left-only or right-only rule.
-- The expanded join row is visually one candidate row: one label, one gesture target, one bounded
-  union of the two source reel slots. It must not duplicate the text or create an extra blank slot.
-- The join candidate is offered only while the source words are adjacent and unchanged. If either
-  source word changes, is deleted, or is joined elsewhere, the stale join disappears from both
-  source reels.
-- Selecting `into` from either source reel atomically replaces the full `in ` + `to` span with
-  `into`, removes both source reels, creates one reel for `into`, and recalculates the affected
-  neighboring context according to section 3.
-- The behavior generalizes to longer contiguous joins: every source reel in the join may expose the
-  same candidate, and the visual row spans the complete source run in the direction appropriate to
-  the reel displaying it.
+- Candidate generation continues to use the current sentence and configured language data. The strip renders the result; it does not invent casing candidates or alter ranking.
+- When a correction changes sentence context, refresh affected neighboring options in place using the existing configured context window. Keep unaffected words, ordering, cursor, and scroll position stable.
+- De-duplicate options after merging live and stored suggestions. A committed/current word never appears as an alternative to itself.
+- If the focused option disappears after refresh, restore the current word as selected and keep the caret synchronized.
 
 ### 10. Real IME verification is the acceptance surface
 
-- Connected UI verification uses the real Settings screen with the real Iaido IME selected, types
-  text into the live preview, and captures screenshots of that screen.
-- A blank Compose-only harness screenshot is not evidence that the Settings/IME behavior works.
-- Debug verification may use the separately named `Iaido Debug` IME and `Iaido Debug Settings`, so
-  the test can select the intended IME unambiguously.
+- Connected UI verification uses the real Settings screen with the real Iaido IME selected and types into the live preview. Capture the editor and keyboard in the same screenshot.
+- A blank Compose-only harness screenshot is not evidence that Settings/IME integration works.
+- Debug verification may use the separately named Iaido Debug IME and Iaido Debug Settings, selecting them unambiguously.
 
 ### 11. Infer-space and two-finger swipe/type interactions
 
@@ -217,9 +156,9 @@ debugging sessions. It is the contract that the connected IME end-to-end tests w
 - A typed word before or after a two-finger gesture remains a separate sentence word unless the
   configured inference result explicitly joins it. Its reel appears in the correct sentence order
   and is not duplicated when the gesture transaction finalizes.
-- When a two-finger gesture resolves to a split result, its coordinated split reel behavior follows
-  sections 7 and 8: the split candidate is visually structured, and editing either resulting word
-  breaks the composite relationship into independent reels.
+- When a two-finger gesture resolves to a split result, the output follows section 3: each
+  resulting word is independently addressable in sentence order, and the inferred edit remains one
+  transaction.
 
 ## Infer-space and multitouch E2E coverage
 
@@ -249,113 +188,58 @@ typed boundary action.
 | INF-18 | Use `Space after swipe` with a two-finger gesture | The complete gesture adds exactly one trailing space; the strip shows the gesture's resulting word reels and no per-finger duplicate. |
 | INF-19 | Screenshot every inference state transition | Each screenshot is from the real Settings/IME surface and visibly shows the expected word count, ordering, replacement shape, and candidate text. |
 
-## Planned connected IME E2E coverage
+## Sentence-first strip E2E coverage
 
-The tests will be added to `app/src/androidTest/kotlin/com/iaido/app/ImeReelE2eTest.kt`, with
-Settings-screen screenshot coverage in `SettingsImeReelE2eTest.kt` where the real preview is the
-important assertion surface.
+These cases use the real IME editor and deterministic debug suggestion fixtures. Each gesture case asserts the editor state, exact selection offset, visible strip state, and gesture preview before release.
 
 | ID | Scenario | Assertions |
 | --- | --- | --- |
-| E2E-01 | Type `hey`, select `heyday`, then select `hey` | The editor contains exactly `hey`; no residual suffix; caret is after the word; the same reel remains addressable. |
-| E2E-02 | Type a multi-letter word one key at a time | One reel is present after each letter; the visible candidate set refreshes; no duplicate reel is created. |
-| E2E-03 | Type a single-character word | One addressable reel exists; its one-row viewport contains the readable current character. |
-| E2E-04 | Type a sentence containing one-, two-, and multi-character words | Every sentence word has exactly one reel; the newest is at the right in LTR; no reel is duplicated. |
-| E2E-05 | Move the cursor from the newest word to an earlier word and back | The focused reel follows the cursor in both directions; the focused reel is fully in the horizontal viewport. |
-| E2E-06 | Focus a word whose reel is horizontally off-screen | The strip scrolls to the focused reel; its full current row is visible; neighboring reel order is unchanged. |
-| E2E-07 | Scroll one reel four options down | The resting candidate row contains readable visible text and its text bounds are inside the reel viewport. |
-| E2E-08 | Compare reels with one, two, and three-plus candidates | Each reel's measured height matches its real visible candidate count up to the cap; no empty rows remain below content. |
-| E2E-09 | Exercise an invisible-option regression fixture | Every selectable row exposes visible candidate text; swiping past the last real row cannot select an invisible word. |
-| E2E-10 | Use `imo` with the split candidate `I mo` | `I mo` appears as one candidate in the `imo` reel, not as a separate two-word/giant reel; replacement is atomic. |
-| E2E-11 | Replace a middle word in a sentence with context-sensitive fixture data | The changed reel and up to `N` reels before and after visibly update their candidate/ranking content; a word outside the window does not change. |
-| E2E-12 | Replace the same word twice with different candidates | The second update uses the new sentence context, not the original sentence; affected neighboring reels visibly recalculate again. |
-| E2E-13 | Update a word while the strip is horizontally scrolled | Recalculation refreshes existing reel slots in place; no duplicate chips, jumps to an unrelated word, or blank focused row appears. |
-| E2E-14 | Offer `into` for the adjacent source words `in to` | `into` is visible on both the `in` reel and the `to` reel; no standalone join reel exists. |
-| E2E-15 | Center `into` from the `in` reel | The single `into` row expands forward over the `to` reel and gap; its bounds equal the two-reel union and its text is fully visible. |
-| E2E-16 | Center `into` from the `to` reel | The single `into` row expands backward over the `in` reel and gap; it is not clipped or shifted to a separate reel. |
-| E2E-17 | Commit `into` from the first source reel | The full `in to` span becomes exactly `into`; both source reels disappear; one `into` reel remains; neighbor context recalculates. |
-| E2E-18 | Commit `into` from the second source reel | The same atomic result occurs when the join is released from the `to` reel. |
-| E2E-19 | Change or delete one source word after a join is offered | The stale `into` candidate disappears from both source reels and no stale standalone reel remains. |
-| E2E-20 | Exercise join expansion at the beginning and end of a sentence | Forward and backward expansion work at strip edges without clipping, invisible space, or an off-screen hit target. |
-| E2E-21 | Move the cursor across a sentence after a context update and join | Focus follows the correct updated reels; the strip remains ordered and the focused candidate is fully visible. |
-| E2E-22 | Select `imo` → `I mo`, then edit a character in one split word | The composite split reel breaks into separate `I` and `mo` reels; both are visible, independently bounded, and ordered. |
-| E2E-23 | Select `imo` → `I mo`, then delete a character in the other split word | The deleted word's reel updates or disappears according to its remaining text; the untouched split word gets its own independent reel; no composite or empty reel remains. |
-| E2E-24 | Correct one word after a split result has broken apart | Only the selected independent word is replaced; the other split word remains separate; sentence-aware neighbors recalculate from the new sentence. |
-| E2E-25 | Type and move the cursor in the real Settings preview | The screenshot shows the typed preview, all expected reels, readable candidate rows, and no blank harness-only result. |
+| STRIP-01 | Type a sentence with short and long words | One inline word lane per current word; no boxes, duplicate suggestions, or capitalization-only options; text order matches the editor. |
+| STRIP-02 | Swipe up on a word with an upper autocorrect option | The complete sentence preview changes while editor text remains unchanged; release commits the correction and places the caret after it. |
+| STRIP-03 | Swap up twice on the same word | First release commits the upper option and puts the previous word above; second release restores the original word. |
+| STRIP-04 | Repeat STRIP-02/03 for the lower option | Lower-side preview and reversible swap work independently of the upper option. |
+| STRIP-05 | Drag beyond the final available option or start with no option | Selection clamps without wrapping; release outside a valid option leaves text unchanged. |
+| STRIP-06 | Tap a whole word, a character, and a gap | Whole word selects its end; character/gap selects its exact UTF-16 boundary; strip caret and host selection match after each tap. |
+| STRIP-07 | Hold a word and scrub horizontally | Initial cursor lands under the held character; moving left/right updates the host selection before reaching either edge zone. |
+| STRIP-08 | Move the cursor in the host editor, then type/correct | Strip caret tracks every external selection/text change; no stale word focus remains. |
+| STRIP-09 | Scroll the strip left/right and focus an off-screen word | Scroll clamps without wrapping; focused word is revealed quickly and centered when room exists. |
+| STRIP-10 | Preview “alot” -> “a lot” | Preview shows two normally spaced words; editor remains unchanged until release; release commits a single split transaction. |
+| STRIP-11 | Preview “in to” -> “into” from “in” | One centered join preview spans both words and the gap; label and alternatives fit inside the union; no third word appears. |
+| STRIP-12 | Preview “in to” -> “into” from “to” | Backward join preview has the same bounds/centering and commits the same atomic result on release. |
+| STRIP-13 | Invalidate a split/join source during editing | Stale alternatives disappear immediately and are not hit-testable. |
+| STRIP-13a | Choose “inside” for “in” in “in to” | Only “in” changes; “to” remains present. A normal autocorrect cannot consume a neighboring word. |
+| STRIP-14 | Drag vertically, then enter an adjacent word | Deletion mode starts on entering the neighbor; the neighbor is not selected until its midpoint is crossed. |
+| STRIP-15 | Return to the original word before release | Deletion preview disappears and the corresponding vertical alternative preview returns. |
+| STRIP-16 | Sweep across two more word midpoints and pull back | Each crossing adds/removes exactly that word; selected words are struck through, alternatives hidden, and one red outline covers the range. |
+| STRIP-17 | Release a multi-word deletion | Only previewed words are deleted as one action; surrounding punctuation/spacing and cursor start are correct. |
+| STRIP-18 | Hold a deletion gesture at the left/right edge zone | Strip scrolls in that direction; speed rises with zone penetration; words continue to be selected by midpoint without wrapping. |
+| STRIP-19 | Hold cursor scrubbing into either edge zone | Sentence scrolls while the cursor remains attached to the finger's visual character position; host and strip offsets stay equal. |
+| STRIP-20 | Tap a short word such as “it” beside longer words | Hit area includes half the adjacent gap; gesture selects the intended short word and does not delete its neighbor. |
+| STRIP-21 | Focus words at the start, middle, and end of a long sentence | Middle focus centers when possible; first/last focus clamps cleanly; no jump or blank strip frame. |
+| STRIP-22 | Apply three edits, undo twice, then redo twice | Each action restores text and cursor; undo/redo buttons enable independently; a new edit clears redo only. |
+| STRIP-23 | Hold an enabled undo/redo button, then release | Tooltip and before/after preview identify the pending action; release applies it; cancellation does not. |
+| STRIP-24 | Exhaust undo history and separately exhaust redo history | Each icon remains visible and independently greyed when disabled; the other stack remains usable. |
+| STRIP-25 | Compare edge-zone, join, deletion, swap, caret, and keyboard states | Screenshots come from real Settings/IME; geometry, clipping, text, color, and motion state are compared with V7 at the same viewport/density. |
+| STRIP-26 | Repeat core selection/deletion journeys in Hebrew/RTL | Sentence order, cursor offsets, left/right deletion, focus scrolling, join bounds, and alternative positions follow reading direction without wrap. |
+| STRIP-27 | Enable reduced motion and perform swap/scroll/delete | Gestures and previews still work; nonessential transitions shorten or snap without losing state. |
 
 ## Test implementation rules
 
-- Prefer deterministic debug fixtures for candidate lists and frequencies so the tests assert the
-  behavior rather than a changing production dictionary.
-- Use the real `ImeScenario` editor and IME gestures for text, cursor, and reel actions. Do not
-  replace the IME path with direct calls to `SuggestionStrip` for these acceptance tests.
-- Add polling/settling helpers that wait for the actual strip state before reading bounds or
-  screenshots; do not use fixed sleeps as the only synchronization.
-- Assert both accessibility-visible candidate text and screenshot artifacts when a test concerns
-  visual visibility. A screenshot is retained as a diagnostic artifact on failure.
-- Treat strip geometry as a first-class assertion, not only as a screenshot artifact. Each reel and
-  visible candidate row must expose stable test semantics containing its word/reel identity and
-  candidate text, so the E2E test can assert visible bounds, text bounds, and containment in the
-  strip viewport.
-- For a normal word reel, assert that the focused row's bounds are fully contained by that reel's
-  bounds. For a join row, assert that its bounds cover the union of the two source reel bounds in
-  the expected direction, without creating a third reel item.
-- For each visual scenario, retain a screenshot after the state settles and assert the structural
-  geometry/text first. Screenshots are diagnostic evidence and visual review artifacts; they are
-  not the only assertion because device rendering can differ by density and theme.
-- Context-update tests must enable candidate-score display or use fixture words whose candidate
-  text changes, so the test proves that neighboring reels recalculated rather than merely
-  recomposed.
-- Split-result tests must capture both states: the initially selected composite split reel, and the
-  post-edit state with one independent reel per resulting word. They must assert separate reel
-  bounds and candidate semantics for both words, not only the final editor text.
-- Infer-space and multitouch tests must capture the strip after every boundary decision that changes
-  the editor text. Each assertion must compare the expected output-word count, reel order, reel
-  shape, visible candidate text, and focused bounds; final editor text alone is insufficient.
-- Type-before/type-after-two-finger tests must assert the hard boundary explicitly: the typed word's
-  reel remains separate unless the fixture intentionally chooses a join, and no pending gesture
-  transaction may rewrite across it.
-- Two-finger tests must validate both the merged and boundary-preserving outcomes, including the
-  number and geometry of visible reels, and must use touch-down order to identify the source parts.
-- Reordering tests must run identical multi-swipe paths with swapped touch-down assignments for
-  every pair within the same gesture and assert the selected language result plus the visible reel
-  structure, not just the raw pointer order. A three-or-more-path fixture is required to prove
-  that internal pairs are not skipped.
-- Timing-weight tests must use the same paths with at least one near-simultaneous timestamp pair and
-  one deliberately separated pair. They must assert both the selected text segmentation and the
-  corresponding number/geometry of reels, proving that timing changes the score without making
-  unrelated gestures reorder.
-- When accessibility publication is stale, the test helper must first trigger a real strip/editor
-  state update and then re-read the actual node; it must not silently pass using a guessed screen
-  coordinate.
-- Run the suite on the Android emulator. A connected phone run is additional evidence, but a
-  phone launch timeout is reported separately rather than counted as a passing IME result.
+- Use deterministic fixtures for alternatives, split/join options, and sentence length. Fixtures must include short words (“it”), duplicates, casing-only decoys, and words at both scroll edges.
+- Use the real ImeScenario/editor and IME pointer injector. Do not substitute direct calls into SuggestionStrip or a Compose-only test harness for acceptance tests.
+- Publish stable semantics for the strip, word identity/span, current/upper/lower text, caret offset, active preview mode, join source span, deletion range, and undo/redo enabled state. Include visible bounds so tests can assert clipping, hit areas, and the two-word join union.
+- Wait for semantic state and layout bounds to settle through polling. Do not use fixed sleeps as the only synchronization.
+- For each gesture preview, hold the pointer down at an intermediate path point, assert preview state and unchanged editor text/selection, then inject release and assert the committed text/selection.
+- Retain screenshot artifacts for at-rest sentence, upper/lower preview, split, both join directions, deletion range, both edge zones, undo/redo preview, QWERTY, and Hebrew. Assert structure and text before screenshot comparison.
+- Compare native screenshots with keyboard-reel-inline-v7.html at the same device viewport and effective density. Normalize only system bars/insets; do not mask word alignment, font size, caret, gradients, clipping, or key geometry.
+- Keep the existing infer-space/multitouch journeys below. They continue to assert recognition output and transaction boundaries, while their strip assertions use inline word lanes rather than chip/reel boxes.
+- Do not treat an IME launch timeout or stale accessibility tree as a pass. If semantics are stale, wait for a real editor/strip update and read the actual node; never fall back to a guessed coordinate for a negative assertion.
 
-## Sign-off questions
+## Retired box-reel assertions
 
-Please confirm these points before I implement the E2E tests:
+The implementation should replace tests that require a candidate chip/reel box, a separate edge-anchored join slot, vertical candidate-list scrolling, or one shared reel widget for a split. Those visuals and interaction assumptions are superseded by the sentence-first strip above. Recognition, atomic replacement, infer-space, and real-IME integration assertions remain in scope.
 
-1. Is a one-character word with no alternatives correctly represented by a one-row reel containing
-   only that character?
-2. Is the recommended whitespace-boundary rule acceptable, or should whitespace always focus the
-   previous word / next word instead?
-3. Is `I mo` correctly specified as one spaced candidate row inside the `imo` reel, with ranking
-   determined by the fixture/data rather than a hard-coded preference?
-4. Should `N` be the existing configured context window, or do you want a specific numeric value
-   for the before/after neighbor recalculation?
-5. Is the `in` + `to` → `into` join behavior correct when the row expands over both reels in
-   either direction, and should the join candidate be offered from every source reel for joins of
-   more than two words?
-6. Is the proposed visual-test contract correct: stable reel/candidate semantics plus bounds and
-   containment assertions, with screenshots retained as evidence rather than relying on pixel
-   equality alone?
-7. Is the split-result rule correct: after editing or deleting any character in either word of
-   `I mo`, the composite split reel breaks into independent reels for the remaining words?
-8. Should typed input always finalize and clear a pending infer-space/two-finger transaction, so
-   later swipes cannot rewrite across the typed word?
-9. Are the merged and boundary-preserving two-finger outcomes, plus the `Space after swipe`
-   exactly-one-space rule, the combinations you want covered?
-10. Is the reorder search correct as specified: for every pair of swipe paths within one gesture,
-    evaluate observed and swapped assignments, including all `previous-current` and
-    `current-next` positions, then weight the language score by the measured time closeness of the
-    two paths so accidental touchdown order can be corrected?
+Pure tests for the currently used SuggestionReelMath and ReplacementReelLayout helpers may stay
+while that legacy code remains. They are not acceptance tests for the new visual behavior; replace
+them with sentence geometry, midpoint, caret mapping, and edge-scroll math tests when the new
+geometry/state helpers are introduced.

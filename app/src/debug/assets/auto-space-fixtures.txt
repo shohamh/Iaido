@@ -5,10 +5,16 @@ separate|word|the|100
 join_reel|word|in|100
 join_reel|word|to|100
 join_reel|word|into|1
+join_reel|word|inside|10
 
 split_reel|word|inthe|100000
 split_reel|word|in|1
 split_reel|word|the|1
+
+split_alot|word|alot|1
+split_alot|word|a|1000
+split_alot|word|lot|1000
+split_alot|bigram|a|lot|10000
 
 context_revision|word|in|100
 context_revision|word|to|100

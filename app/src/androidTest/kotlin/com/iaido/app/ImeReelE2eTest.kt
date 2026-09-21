@@ -1,10 +1,6 @@
 package com.iaido.app
 
-import androidx.test.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.UiDevice
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,298 +11,288 @@ class ImeReelE2eTest {
     val artifacts = FailureArtifactRule()
 
     @Test
-    fun releasingTheReelOfATypedWordReplacesItInsteadOfAppendingToIt() {
+    fun stripCaretTracksWordCharacterAndGapTaps() {
         ImeScenario().also(artifacts::track).run {
-            tapKey("t")
-            tapKey("e")
-            tapKey("h")
-            val typed = state().expectedText
-            check(typed.lowercase().endsWith("teh")) { "Typed word not committed: '$typed'" }
+            typeText("we put")
+            val text = state().expectedText
+            val strip = SentenceStripImeDriver()
 
-            // A typed word is addressable only because the service records it as a session word as
-            // it grows; without that the drag either did nothing or inserted its candidate at the
-            // caret instead of replacing the word.
-            val corrected = swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            check(corrected != typed) {
-                "Releasing the reel of a typed word changed nothing: '$typed'"
+            strip.tapWord(0)
+            val wordEnd = text.indexOf(' ')
+            check(strip.editorSnapshot().selection.last == wordEnd) {
+                "Tapping the first word should place the host cursor at its end: " + strip.editorSnapshot()
             }
+            check(strip.cursorOffset() == wordEnd) { "Strip caret did not mirror word-end cursor" }
+            assertText(text)
 
-            var changes = 0
-            var previous = typed
-            repeat(4) {
-                // Once the chip has no further alternative the drag stops changing the text; that
-                // is the end of the list, not a failure. A release that *does* change the text must
-                // still replace the word rather than accumulate.
-                val now = runCatching { swipeSuggestion(index = 0, verticalDistancePx = -96f) }.getOrNull()
-                    ?: return@repeat
-                check(!Regex("(.)\\1\\1").containsMatchIn(now)) {
-                    "A release accumulated text instead of replacing the word: '$typed' -> '$now'"
+            strip.tapCharacter(1, "put", 1)
+            val characterBoundary = text.indexOf("put") + 1
+            check(strip.editorSnapshot().selection.last == characterBoundary) {
+                "Character tap did not place the caret at the requested boundary: " + strip.editorSnapshot()
+            }
+            check(strip.cursorOffset() == characterBoundary) { "Strip caret diverged after character tap" }
+            assertText(text)
+
+            strip.tapGap(0, 1)
+            val gapCursor = strip.editorSnapshot().selection.last
+            val secondWordStart = text.indexOf("put")
+            check(gapCursor in wordEnd..secondWordStart) {
+                "Gap tap placed the caret outside the word boundary: cursor=" + gapCursor + " text='" + text + "'"
+            }
+            check(strip.cursorOffset() == gapCursor) { "Strip caret diverged after gap tap" }
+            assertText(text)
+        }
+    }
+
+    @Test
+    fun verticalAlternativePreviewDoesNotCommitUntilReleaseAndCanSwapBack() {
+        ImeScenario().also(artifacts::track).run {
+            swipeWord("there")
+            val strip = SentenceStripImeDriver()
+            val before = strip.editorSnapshot().text
+            val side = strip.alternativesForWord(0).firstOrNull()?.let { node ->
+                if (node.contentDescription.orEmpty().contains("side=above")) {
+                    SentenceStripImeDriver.Side.ABOVE
+                } else {
+                    SentenceStripImeDriver.Side.BELOW
                 }
-                check(!now.lowercase().contains("tehteh")) {
-                    "A release appended a second copy of the word: '$typed' -> '$now'"
+            } ?: error("Expected an autocorrect alternative for 'there'")
+
+            strip.swipeAlternative(0, side) {
+                check(strip.previewTextOrNull() != null) { "Whole-sentence preview was not exposed while held" }
+                check(strip.editorSnapshot().text == before) { "Preview mutated editor text before release" }
+            }
+            val corrected = strip.editorSnapshot().text
+            check(corrected != before) { "Releasing on an alternative did not commit the correction" }
+            assertText(corrected)
+
+            strip.swipeAlternative(0, side) {
+                check(strip.editorSnapshot().text == corrected) {
+                    "The reverse preview mutated editor text before release"
                 }
-                // A single candidate (or a short join) is fine; a release sequence that keeps
-                // growing is the accumulation bug.
-                check(now.length <= 12) {
-                    "A release grew the text like an accumulation: '$typed' -> '$now'"
+            }
+            check(strip.editorSnapshot().text == before) {
+                "Swiping in the same direction should swap back to the previous word"
+            }
+            assertText(before)
+        }
+    }
+
+    @Test
+    fun splitPreviewShowsAlotAsTwoWordsAndCommitsAtomically() {
+        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.SPLIT_ALOT)
+            .also(artifacts::track).run {
+                typeText("alot")
+                val strip = SentenceStripImeDriver()
+                val before = strip.editorSnapshot().text
+                val side = strip.sideForAlternative(0, "a lot")
+                    ?: error("Expected the 'a lot' split alternative for 'alot'")
+
+                strip.swipeAlternative(0, side) {
+                    check(strip.previewTextOrNull().orEmpty().contains("a lot", ignoreCase = true)) {
+                        "Split preview did not show both output words"
+                    }
+                    check(strip.editorSnapshot().text == before) {
+                        "Split preview mutated editor text before release"
+                    }
                 }
-                if (now != previous) changes += 1
-                previous = now
+
+                val committed = strip.editorSnapshot().text
+                check(committed.trim().equals("a lot", ignoreCase = true)) {
+                    "Expected one atomic 'alot' -> 'a lot' replacement, got '" + committed + "'"
+                }
+                check(strip.visibleWordIndices().distinct().size == 2) {
+                    "The committed split should expose two independent word lanes"
+                }
+                assertText(committed)
             }
-            check(changes >= 1) { "No release ever replaced the typed word: '$typed'" }
-        }
     }
 
     @Test
-    fun correctionReelScrollsCommitsAndRemembersTheReleasedCandidate() {
+    fun forwardJoinPreviewUnitesInAndToAndCommitsOnRelease() = assertJoinFrom(sourceWordIndex = 0)
+
+    @Test
+    fun backwardJoinPreviewFromToUnitesInAndToAndCommitsOnRelease() = assertJoinFrom(sourceWordIndex = 1)
+
+    @Test
+    fun normalInsideAlternativeOnInDoesNotConsumeFollowingTo() {
+        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.JOIN_REEL)
+            .also(artifacts::track).run {
+                swipeWord("in")
+                tapSpace(checkpointEach = false)
+                swipeWord("to")
+                tapSpace(checkpointEach = false)
+
+                val strip = SentenceStripImeDriver()
+                val side = strip.sideForAlternative(0, "inside")
+                    ?: error("Expected the normal 'inside' autocorrect for 'in'")
+                strip.swipeAlternative(0, side) {
+                    check(strip.joinPreviewOrNull() == null) {
+                        "A normal one-word autocorrect was incorrectly shown as a join"
+                    }
+                }
+
+                val committed = strip.editorSnapshot().text.trim()
+                check(committed.equals("Inside to", ignoreCase = true)) {
+                    "Correcting 'in' to 'inside' must preserve the following 'to', got '$committed'"
+                }
+                check(strip.visibleWordIndices().distinct().size == 2) {
+                    "Normal autocorrect removed or duplicated the neighboring word lane"
+                }
+                assertText(strip.editorSnapshot().text)
+            }
+    }
+
+    @Test
+    fun deletionPreviewUsesWordMidpointsAndIsOneUndoableAction() {
         ImeScenario().also(artifacts::track).run {
-            swipeWord("there")
-            val before = state().expectedText
-            val after = swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            check(after != before) { "Reel release did not select a different candidate: '$before'" }
-            val afterSecondRelease = swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            check(afterSecondRelease != after) {
-                "Reel position was not remembered between releases: '$after'"
+            typeText("one two three")
+            val strip = SentenceStripImeDriver()
+            val before = strip.editorSnapshot().text
+
+            strip.dragAcrossWords(startIndex = 1, endIndex = 2) {
+                check(strip.deletionPreviewOrNull() != null) { "Crossing the neighboring word did not show deletion" }
+                check(strip.editorSnapshot().text == before) { "Deletion preview changed text before release" }
+                check(strip.alternativesForWord(1).isEmpty()) {
+                    "Alternatives should be hidden for a word previewed for deletion"
+                }
             }
+
+            val after = strip.editorSnapshot().text
+            check(after.equals(before.substringBefore(' '), ignoreCase = true)) {
+                "Expected only the previewed trailing words to be deleted: '" + before + "' -> '" + after + "'"
+            }
+            check(strip.editorSnapshot().selection.last == after.length) {
+                "Deletion did not restore the cursor at the deletion start"
+            }
+            assertText(after)
+
+            strip.tapUndo()
+            assertText(before)
+            strip.tapRedo()
+            assertText(after)
         }
     }
 
     @Test
-    fun correctionReelRespondsToAnImmediateSwipeWithoutRequiringALongPressFirst() {
+    fun heldCursorScrubContinuesThroughTheRightEdgeZone() {
         ImeScenario().also(artifacts::track).run {
-            swipeWord("there")
-            val before = state().expectedText
-            val after = swipeSuggestionImmediately(index = 0, verticalDistancePx = -96f)
-            check(after != before) { "Reel did not respond to an immediate (no long-press) swipe: '$before'" }
+            typeText("one two three four five six seven eight nine ten eleven twelve")
+            val text = state().expectedText
+            val strip = SentenceStripImeDriver()
+            strip.tapWord(5)
+            val beforeOffset = strip.editorSnapshot().selection.last
+            assertText(text)
+
+            strip.holdWordAndDragToEdge(5, SentenceStripImeDriver.Direction.RIGHT) {
+                check(strip.editorSnapshot().text == text) { "Cursor scrubbing changed the sentence" }
+                check(strip.cursorOffset() == strip.editorSnapshot().selection.last) {
+                    "The strip caret stopped matching InputConnection during edge scrolling"
+                }
+            }
+
+            check(strip.editorSnapshot().selection.last > beforeOffset) {
+                "Holding at the right edge did not keep moving the cursor through later words"
+            }
+            check(strip.editorSnapshot().selection.last <= text.length) {
+                "Edge scrolling wrapped the cursor past the sentence end"
+            }
+            assertText(text)
         }
     }
 
-    /**
-     * "Remains addressable" is verified by actually addressing it again -- dragging chip 0's own
-     * reel a second time and confirming the text changes once more -- rather than by asking
-     * UiAutomator whether an "Iaido suggestion 0" node exists. That direct lookup was tried first
-     * and is not reliable here: even with the transaction now correctly finalizing before the
-     * drag (see tryLocateReelSwipeTarget's own cursor nudge, kept for a real, separate
-     * landing-on-the-wrong-candidate bug it fixes in the geometric fallback) and the drag itself
-     * confirmed to commit a genuine single-word candidate, a dumpWindowHierarchy taken right after
-     * still shows the whole suggestion strip as a bare leaf with zero published children, and
-     * neither an extra settle delay nor a 15s/dozens-of-attempts poll loop changes that -- the
-     * same pre-existing accessibility-tree staleness already documented on
-     * stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords below. swipeSuggestion's own
-     * geometric fallback doesn't depend on that lookup succeeding (see
-     * correctionReelScrollsCommitsAndRemembersTheReleasedCandidate, which drags the same chip
-     * twice in a row and passes reliably), so reusing it here proves the chip is still there and
-     * responsive without hitting the broken lookup at all.
-     */
     @Test
-    fun correctionChipRemainsAddressableAfterAReelCorrection() {
+    fun undoRedoStayVisibleHaveIndependentAvailabilityAndKeepMultipleSteps() {
         ImeScenario().also(artifacts::track).run {
-            swipeWord("there")
-            val afterFirst = swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            val afterSecond = swipeSuggestion(index = 0, verticalDistancePx = -96f)
-            check(afterSecond != afterFirst) {
-                "Correction chip did not respond to a second reel drag ('$afterFirst' -> " +
-                    "'$afterSecond'); it may have disappeared or stopped being addressable"
+            clearText()
+            val strip = SentenceStripImeDriver()
+            check(!strip.undoEnabled()) { "Undo must be visible but disabled with an empty history" }
+            check(!strip.redoEnabled()) { "Redo must be visible but disabled with an empty history" }
+
+            typeText("we put")
+            val typed = strip.editorSnapshot().text
+            check(strip.undoEnabled() && !strip.redoEnabled()) {
+                "Typing should enable undo independently of redo"
             }
+
+            strip.tapUndo()
+            val afterFirstUndo = strip.editorSnapshot().text
+            check(afterFirstUndo != typed) { "First undo did not change the sentence" }
+            assertText(afterFirstUndo)
+
+            strip.tapUndo()
+            val afterSecondUndo = strip.editorSnapshot().text
+            check(afterSecondUndo != afterFirstUndo) { "History contains only one undo action" }
+            check(strip.redoEnabled()) { "Undo should populate the redo history" }
+            assertText(afterSecondUndo)
+
+            strip.tapRedo()
+            check(strip.editorSnapshot().text == afterFirstUndo) { "First redo did not restore the previous step" }
+            assertText(afterFirstUndo)
+
+            val beforeHeldUndo = strip.editorSnapshot().text
+            strip.holdUndo {
+                check(strip.nodeOrNull("Iaido history preview") != null) {
+                    "Holding undo did not show its action and before/after preview"
+                }
+                check(strip.editorSnapshot().text == beforeHeldUndo) {
+                    "The long-press preview applied before release"
+                }
+            }
+            val afterHeldUndo = strip.editorSnapshot().text
+            check(afterHeldUndo != beforeHeldUndo) { "Releasing the held undo did not apply it" }
+            assertText(afterHeldUndo)
+
+            tapKey("x", checkpointEach = false)
+            check(!strip.redoEnabled()) { "A new edit after undo must clear redo history" }
         }
     }
 
-    @Test
-    fun correctionReelCommitsImmediatelyRatherThanAfterTheSettleAnimation() {
-        ImeScenario().also(artifacts::track).run {
-            swipeWord("there")
-            val latencyMs = swipeSuggestionCommitLatencyMs(index = 0, verticalDistancePx = -96f)
-            check(latencyMs < 600L) {
-                "Reel commit took ${latencyMs}ms after release; expected the word to commit " +
-                    "immediately on release, not after the settle animation finishes"
+    private fun assertJoinFrom(sourceWordIndex: Int) {
+        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.JOIN_REEL)
+            .also(artifacts::track).run {
+                swipeWord("in")
+                tapSpace(checkpointEach = false)
+                swipeWord("to")
+                tapSpace(checkpointEach = false)
+
+                val strip = SentenceStripImeDriver()
+                val before = strip.editorSnapshot().text
+                val sourceBounds = android.graphics.Rect(strip.word(0).visibleBounds).apply {
+                    union(strip.word(1).visibleBounds)
+                }
+                val side = strip.sideForAlternative(sourceWordIndex, "into")
+                    ?: error("Expected the join alternative from source word " + sourceWordIndex)
+
+                strip.swipeAlternative(sourceWordIndex, side) {
+                    check(strip.editorSnapshot().text == before) {
+                        "Join preview changed editor text before release"
+                    }
+                    val join = strip.joinPreviewOrNull()
+                        ?: error("Join preview did not expose its two-word union")
+                    check(join.visibleBounds.contains(sourceBounds)) {
+                        "Join outline " + join.visibleBounds + " did not cover both source words " + sourceBounds
+                    }
+                    check(strip.previewTextOrNull().orEmpty().contains("into", ignoreCase = true)) {
+                        "Whole-sentence preview did not show the joined word"
+                    }
+                }
+
+                val committed = strip.editorSnapshot().text.trim()
+                check(committed.equals("Into", ignoreCase = true)) {
+                    "Expected atomic 'in to' -> 'into', got '" + committed + "'"
+                }
+                check(strip.visibleWordIndices().distinct().size == 1) {
+                    "Join commit should leave one word lane and no duplicate source lane"
+                }
+                assertText(strip.editorSnapshot().text)
             }
-        }
     }
 
-    @Test
-    fun typedOneCharacterAndSentenceWordsEachHaveOneVisibleStableReel() {
-        ImeScenario().also(artifacts::track).run {
-            tapKey("a")
-            val oneCharacter = reelStripSnapshot()
-            check(oneCharacter.reels.size == 1) {
-                "Expected one reel for the one-character word, got ${oneCharacter.reels}"
-            }
-            check(oneCharacter.reels.single().candidateText.equals("A", ignoreCase = true)) {
-                "One-character reel did not expose its current word: $oneCharacter"
-            }
-
-            tapSpace(checkpointEach = false)
-            tapKey("b")
-            val sentence = reelStripSnapshot()
-            check(sentence.reels.size == 2) {
-                "Expected one reel per sentence word without duplicates, got ${sentence.reels}"
-            }
-            check(sentence.orderedReelIds.distinct().size == sentence.orderedReelIds.size) {
-                "Sentence reel IDs were duplicated: ${sentence.orderedReelIds}"
-            }
-        }
-    }
-
-    @Test
-    fun eachTypedLetterRefreshesTheSameReelWithoutCreatingDuplicates() {
-        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.TYPED_REEL).also(artifacts::track).run {
-            tapKey("h")
-            val afterH = reelStripSnapshot()
-            check(afterH.reels.size == 1) { "Expected one reel after first letter: $afterH" }
-            val reelId = afterH.orderedReelIds.single()
-            check(afterH.reels.single().candidateText.equals("H", ignoreCase = true)) {
-                "First typed letter is not the displayed candidate: $afterH"
-            }
-
-            tapKey("i")
-            val afterHi = reelStripSnapshot()
-            check(afterHi.orderedReelIds == listOf(reelId)) {
-                "Typing the second letter created or reordered a reel: before=$afterH after=$afterHi"
-            }
-            check(afterHi.reels.single().candidateText.equals("Hi", ignoreCase = true)) {
-                "Typed reel did not refresh to the current word: $afterHi"
-            }
-
-            tapKey("m")
-            val afterHim = reelStripSnapshot()
-            check(afterHim.orderedReelIds == listOf(reelId)) {
-                "Typing the third letter duplicated the reel: $afterHim"
-            }
-            check(afterHim.reels.single().candidateText.equals("Him", ignoreCase = true)) {
-                "Typed reel did not refresh after the third letter: $afterHim"
-            }
-        }
-    }
-
-    @Test
-    fun movingTheCursorBackAndForwardChangesFocusedReelWithoutChangingOrder() {
-        ImeScenario().also(artifacts::track).run {
-            tapKey("a", checkpointEach = false)
-            tapSpace(checkpointEach = false)
-            tapKey("b", checkpointEach = false)
-            tapSpace(checkpointEach = false)
-            tapKey("c", checkpointEach = false)
-            val atEnd = reelStripSnapshot()
-            check(atEnd.reels.size == 3) { "Expected three sentence reels: $atEnd" }
-            val originalOrder = atEnd.orderedReelIds
-
-            moveCursorLeft(2, checkpointEach = false)
-            val atMiddle = reelStripSnapshot()
-            check(atMiddle.orderedReelIds == originalOrder) {
-                "Cursor movement reordered sentence reels: $atEnd -> $atMiddle"
-            }
-            check(atMiddle.focusedReelId == originalOrder[1]) {
-                "Cursor did not focus the middle word: $atMiddle"
-            }
-
-            moveCursorRight(1, checkpointEach = false)
-            val forward = reelStripSnapshot()
-            check(forward.orderedReelIds == originalOrder) {
-                "Moving the cursor forward changed reel order: $forward"
-            }
-            check(forward.focusedReelId == originalOrder[2]) {
-                "Cursor did not return focus to the last word: $forward"
-            }
-        }
-    }
-
-    @Ignore(
-        "UiAutomator does not publish untouched LazyRow children reliably after several IME " +
-            "swipes; the deterministic Compose focus regression covers the same auto-scroll " +
-            "contract without depending on that stale accessibility tree.",
-    )
-    @Test
-    fun stripAutoScrollsSoTheNewestChipStaysInFrameAfterSeveralWords() {
-        ImeScenario().also(artifacts::track).run {
-            swipeWord("there")
-            tapSpace(checkpointEach = false)
-            swipeWord("is")
-            tapSpace(checkpointEach = false)
-            swipeWord("a")
-            tapSpace(checkpointEach = false)
-            swipeWord("ninja")
-            val device = androidx.test.uiautomator.UiDevice.getInstance(
-                androidx.test.InstrumentationRegistry.getInstrumentation(),
-            )
-            device.waitForIdle()
-            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido suggestion 3")) != null) {
-                "Newest chip (index 3, 'ninja') is not visible without further scrolling after four words"
-            }
-        }
-    }
-
-    /**
-     * Uses the same [ImeScenarioData.AutoSpaceFixture.JOIN_REEL] fixture as
-     * [ImeInferenceE2eTest]'s existing join coverage, rather than the real shipped dictionary:
-     * the real dictionary gives "in"/"to" (and "wh"/"at") 8-16 single-word alternatives each,
-     * which the swipe surface's own limited vertical gesture room (the keyboard's root view
-     * leaves only ~150px above the strip -- confirmed empirically, well under one
-     * [MAX_REEL_VISIBLE_SLOTS]-worth of steps) cannot physically overshoot past in one synthetic
-     * drag. The fixture's tiny dictionary ("in", "to", "into" -- see
-     * `app/src/debug/assets/auto-space-fixtures.txt`) gives each word exactly one real
-     * alternative (itself), so one step reliably reaches the appended join slot -- except for a
-     * sentence-initial word, which always additionally carries its own lowercase variant as a
-     * second candidate (from `SentenceCapitalization`), pushing it one step out of reach; this
-     * test therefore uses the sentence-edge fixture directly and expects the capitalized join.
-     */
-    @Test
-    fun scrollingPastAChipsLastAlternativeCommitsTheJoinedWord() {
-        ImeScenario(autoSpaceFixture = ImeScenarioData.AutoSpaceFixture.JOIN_REEL).also(artifacts::track).run {
-            swipeWord("in")
-            tapSpace(checkpointEach = false)
-            swipeWord("to")
-            tapSpace(checkpointEach = false)
-            val before = state().expectedText
-            // The pure-typing accessibility tree is stale before the first reel gesture, so
-            // locateReelSwipeTarget falls back to the leading sentence-edge reel. With no typed
-            // prefix there is no extra reel between the fallback point and the "in" source.
-            val after = swipeSuggestion(index = 0, verticalDistancePx = -1500f)
-            check(after != before) { "Scrolling past the chip's alternatives did not commit the join: '$before'" }
-            check(after.trim() == "Into") { "Expected the joined word 'Into', got '$after'" }
-            val device = androidx.test.uiautomator.UiDevice.getInstance(
-                androidx.test.InstrumentationRegistry.getInstrumentation(),
-            )
-            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido suggestion 1")) == null) {
-                "Second source chip is still present after the join committed"
-            }
-        }
-    }
-
-    @Ignore(
-        "The core premise of this test can't be automated with the current harness: LazyRow items " +
-            "in this strip only publish to the accessibility tree when directly touched, never from " +
-            "touching a sibling (confirmed via UiDevice.dumpWindowHierarchy after dragging an " +
-            "unrelated chip to a real alternative -- only that chip's own subtree appeared; neither " +
-            "the untouched 'wh'/'at' chips nor the replacement-slot item showed up anywhere in the " +
-            "tree, even after a 10s/40-attempt poll). Asserting the edge slot's *absence* here would " +
-            "require touching that very node first (as dragReplacement/previewReplacementThenCancel " +
-            "already do for the pre-existing split/join edge-slot tests), which is circular for a " +
-            "negative assertion, and no 'touch without changing the word' primitive exists for a " +
-            "chip's own reel (swipeSuggestion blocks until the editor text changes, and this " +
-            "fixture's chip has only two alternatives -- itself and the join -- so there is no safe " +
-            "landing spot that leaves the wh/at join pairing intact). Manually verified instead " +
-            "(before/after screenshots): before the SuggestionStrip.kt fix, the edge slot shows the " +
-            "join for two already-committed chips; after the fix, it does not. See the Task 9 report " +
-            "(.superpowers/sdd/2026-09-16-suggestion-reel-redesign/task-9-report.md) for the " +
-            "screenshots and full diagnosis. " +
-            "ImeInferenceE2eTest.inferenceOffersJoinedReelThenCommitsItOnReleaseAndKeepsCursorAtTheEnd " +
-            "is the real, automated regression coverage for this behavior's other half (a still-live " +
-            "join must stay in the edge slot) -- it drives the edge slot node directly, so it isn't " +
-            "affected by this staleness limitation.",
-    )
-    @Test
-    fun theEdgeAnchoredReplacementSlotNoLongerAppearsForAJoinCandidate() {
-        ImeScenario().also(artifacts::track).run {
-            swipeWord("wh")
-            tapSpace(checkpointEach = false)
-            swipeWord("at")
-            val device = androidx.test.uiautomator.UiDevice.getInstance(
-                androidx.test.InstrumentationRegistry.getInstrumentation(),
-            )
-            device.waitForIdle()
-            check(device.findObject(androidx.test.uiautomator.By.descStartsWith("Iaido replacement:")) == null) {
-                "The old edge-anchored replacement slot is still rendered for a join candidate"
-            }
+    private fun ImeScenario.typeText(value: String) {
+        value.forEach { character ->
+            if (character == ' ') tapSpace(checkpointEach = false)
+            else tapKey(character.toString(), checkpointEach = false)
         }
     }
 }

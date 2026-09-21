@@ -21,25 +21,51 @@ class ImeInferenceE2eTest {
         }
 
     @Test
-    fun inferenceOffersJoinedReelThenCommitsItOnReleaseAndKeepsCursorAtTheEnd() =
+    fun inferredJoinPreviewsInlineThenCommitsOnReleaseAndKeepsCursorAtTheEnd() =
         scenario(ImeScenarioData.AutoSpaceFixture.JOIN_REEL).run {
             enableInferenceAndPrefix()
             swipeWordExpecting("in", "X in")
             swipeWordExpecting("to", "X in to")
-            previewReplacementThenCancel(sourceWords = 2, replacementWords = 1)
+            val strip = SentenceStripImeDriver()
+            val joinSide = strip.sideForAlternative(1, "into")
+                ?: error("Expected an inline join option on the inferred 'in' word")
+            strip.swipeAlternativeThenCancel(1, joinSide) {
+                check(strip.joinPreviewOrNull() != null) { "Inferred join preview did not span its source words" }
+                check(strip.editorSnapshot().text.trim() == "X in to") {
+                    "Join preview mutated editor text before release"
+                }
+            }
             assertText("X in to")
-            releaseReplacement(sourceWords = 2, replacementWords = 1)
+            strip.swipeAlternative(1, joinSide) {
+                check(strip.editorSnapshot().text.trim() == "X in to") {
+                    "Join preview mutated editor text before release"
+                }
+            }
             assertTextAndCursor("X into")
         }
 
     @Test
-    fun inferenceOffersSplitReelThenCommitsItOnReleaseAndCancellationDoesNotMutate() =
+    fun inferredSplitPreviewsAsSentenceWordsThenCommitsOnReleaseAndCancellationDoesNotMutate() =
         scenario(ImeScenarioData.AutoSpaceFixture.SPLIT_REEL).run {
             enableInferenceAndPrefix()
             swipeWordExpecting("inthe", "X inthe")
-            previewReplacementThenCancel(sourceWords = 1, replacementWords = 2)
+            val strip = SentenceStripImeDriver()
+            val splitSide = strip.sideForAlternative(1, "in the")
+                ?: error("Expected an inline split option on the inferred 'inthe' word")
+            strip.swipeAlternativeThenCancel(1, splitSide) {
+                check(strip.previewTextOrNull().orEmpty().contains("in the", ignoreCase = true)) {
+                    "Split preview did not show its output words"
+                }
+                check(strip.editorSnapshot().text.trim() == "X inthe") {
+                    "Split preview mutated editor text before release"
+                }
+            }
             assertTextAndCursor("X inthe")
-            releaseReplacement(sourceWords = 1, replacementWords = 2)
+            strip.swipeAlternative(1, splitSide) {
+                check(strip.editorSnapshot().text.trim() == "X inthe") {
+                    "Split preview mutated editor text before release"
+                }
+            }
             assertTextAndCursor("X in the")
         }
 

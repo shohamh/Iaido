@@ -7,6 +7,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import android.os.SystemClock
 import androidx.work.WorkManager
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Test
@@ -24,7 +25,7 @@ class SettingsImeReelE2eTest {
     }
 
     @Test
-    fun settingsPreviewUsesTheRealImeReelAndCapturesItsBoundedHeight() {
+    fun settingsPreviewUsesTheRealImeSentenceStripAndCapturesTheKeyboard() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
         val system = ImeSystemController(instrumentation, device, instrumentation.uiAutomation)
@@ -66,10 +67,18 @@ class SettingsImeReelE2eTest {
             "Typing the second letter did not update the Settings preview",
             device.wait(Until.hasObject(By.textContains("Hi")), 5_000L),
         )
-        val hiScreenshot = ArtifactWriter.captureScreenshot("settings-ime-typed-hi-reel", device)
+        assertTrue(
+            "The real IME sentence strip was not exposed in Settings",
+            device.wait(Until.hasObject(By.desc("Iaido sentence strip")), 5_000L),
+        )
+        assertTrue(
+            "The typed word did not appear as one inline word lane",
+            device.wait(Until.hasObject(By.descStartsWith("Iaido sentence word index=0")), 5_000L),
+        )
+        val hiScreenshot = ArtifactWriter.captureScreenshot("settings-ime-typed-hi-sentence-strip", device)
         instrumentation.uiAutomation
             .executeShellCommand(
-                "cp ${hiScreenshot.absolutePath} /sdcard/Download/settings-ime-typed-hi-reel.png",
+                "cp ${hiScreenshot.absolutePath} /sdcard/Download/settings-ime-typed-hi-sentence-strip.png",
             )
             .close()
 
@@ -78,10 +87,19 @@ class SettingsImeReelE2eTest {
             "Typing the third letter did not update the Settings preview",
             device.wait(Until.hasObject(By.textContains("Him")), 5_000L),
         )
-        val screenshot = ArtifactWriter.captureScreenshot("settings-ime-reel-per-height", device)
+        assertEquals(
+            "Typing another letter should refresh the existing lane instead of duplicating it",
+            1,
+            device.findObjects(By.descStartsWith("Iaido sentence word index=")).size,
+        )
+        assertTrue(
+            "Sentence-strip cursor was not synchronized to the IME cursor",
+            device.findObject(By.desc("Iaido sentence cursor offset=3")) != null,
+        )
+        val screenshot = ArtifactWriter.captureScreenshot("settings-ime-sentence-strip-per-height", device)
         instrumentation.uiAutomation
             .executeShellCommand(
-                "cp ${screenshot.absolutePath} /sdcard/Download/settings-ime-reel-per-height.png",
+                "cp ${screenshot.absolutePath} /sdcard/Download/settings-ime-sentence-strip.png",
             )
             .close()
     }

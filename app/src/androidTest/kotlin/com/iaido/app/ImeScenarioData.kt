@@ -7,6 +7,7 @@ object ImeScenarioData {
         SEPARATE("separate"),
         JOIN_REEL("join_reel"),
         SPLIT_REEL("split_reel"),
+        SPLIT_ALOT("split_alot"),
         CONTEXT_REVISION("context_revision"),
         TWO_FINGER_MERGE("two_finger_merge"),
         TWO_FINGER_BOUNDARY("two_finger_boundary"),
