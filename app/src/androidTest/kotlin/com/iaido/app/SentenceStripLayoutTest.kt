@@ -51,9 +51,9 @@ class SentenceStripLayoutTest {
                 selection = start
                 return true
             }
-            override fun commitWordReplacement(wordId: String, replacement: String) = false
-            override fun commitReplacement(optionId: String) = false
-            override fun commitDeletion(start: Int, endExclusive: Int) = false
+            override fun commitWordReplacement(wordId: String, expectedCurrent: String, replacement: String) = false
+            override fun commitReplacement(replacement: SentenceStripReplacement) = false
+            override fun commitDeletion(preview: SentenceDeletionPreview) = false
             override fun undo() = false
             override fun redo() = false
         }

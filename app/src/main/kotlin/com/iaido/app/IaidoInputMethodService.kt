@@ -112,8 +112,9 @@ class IaidoInputMethodService : InputMethodService() {
             return true
         }
 
-        override fun commitWordReplacement(wordId: String, replacement: String): Boolean {
+        override fun commitWordReplacement(wordId: String, expectedCurrent: String, replacement: String): Boolean {
             val word = sentenceStripState.value.words.firstOrNull { it.id == wordId } ?: return false
+            if (word.text != expectedCurrent) return false
             val sessionWordId = wordId.substringAfter("session:", "").toIntOrNull()
             return if (sessionWordId != null) {
                 replaceSessionWord(sessionWordId, replacement)
@@ -128,23 +129,36 @@ class IaidoInputMethodService : InputMethodService() {
             }
         }
 
-        override fun commitReplacement(optionId: String): Boolean {
-            val replacement = sentenceStripState.value.replacementOptions
-                .firstOrNull { it.option.id == optionId }?.option ?: return false
-            return releaseReplacementOption(replacement)
-        }
+        override fun commitReplacement(replacement: SentenceStripReplacement): Boolean =
+            commitSentenceStripReplacement(replacement)
 
-        override fun commitDeletion(start: Int, endExclusive: Int): Boolean {
-            if (start < 0 || endExclusive <= start) return false
+        override fun commitDeletion(preview: SentenceDeletionPreview): Boolean {
+            val strip = sentenceStripState.value
+            val currentIndices = preview.sourceWordIds.map { id -> strip.words.indexOfFirst { it.id == id } }
+            if (currentIndices.isEmpty() || currentIndices.any { it < 0 } ||
+                currentIndices.zipWithNext().any { (a, b) -> b != a + 1 }
+            ) {
+                return false
+            }
+            val current = SentenceStripPreviewMath.deletion(
+                strip,
+                currentIndices.first()..currentIndices.last(),
+            ) ?: return false
+            if (current.sourceStart != preview.sourceStart ||
+                current.sourceEndExclusive != preview.sourceEndExclusive ||
+                current.deletedText != preview.deletedText ||
+                current.sourceWordIds != preview.sourceWordIds
+            ) return false
             val changed = applyEditorReplacement(
-                start = start,
-                endExclusive = endExclusive,
+                start = current.sourceStart,
+                endExclusive = current.sourceEndExclusive,
                 replacement = "",
                 kind = SentenceEditKind.DELETION,
-                cursorAfter = start,
+                expectedSourceText = current.deletedText,
+                cursorAfter = current.sourceStart,
             )
             if (changed) {
-                correctionHistory.deleteRange(start, endExclusive)
+                correctionHistory.deleteRange(current.sourceStart, current.sourceEndExclusive)
                 typedWords.reset()
                 refreshSuggestionChips()
             }
@@ -1271,6 +1285,8 @@ class IaidoInputMethodService : InputMethodService() {
         ).copy(
             canUndo = sentenceEditHistory.canUndo,
             canRedo = sentenceEditHistory.canRedo,
+            undoPreview = sentenceEditHistory.undoPreview(),
+            redoPreview = sentenceEditHistory.redoPreview(),
         )
     }
 
@@ -1317,6 +1333,38 @@ class IaidoInputMethodService : InputMethodService() {
             )
         }
         return released
+    }
+
+    private fun commitSentenceStripReplacement(replacement: SentenceStripReplacement): Boolean {
+        val current = sentenceStripState.value.replacementOptions
+            .firstOrNull { option ->
+                option.option.id == replacement.option.id &&
+                    option.option == replacement.option &&
+                    option.sourceStart == replacement.sourceStart &&
+                    option.sourceEndExclusive == replacement.sourceEndExclusive &&
+                    option.sourceWordIds == replacement.sourceWordIds
+            } ?: return false
+        if (current.option.id in liveReplacementOptionIds.value) {
+            return releaseReplacementOption(current.option)
+        }
+
+        if (current.sourceWordIds.size == 2 && current.option.replacementWords.size == 1) {
+            val ids = current.sourceWordIds.map { id ->
+                id.substringAfter("session:", "").toIntOrNull() ?: return false
+            }
+            val words = correctionHistory.words()
+            val firstIndex = words.indexOfFirst { it.id == ids[0] }
+            val first = words.getOrNull(firstIndex) ?: return false
+            val second = words.getOrNull(firstIndex + 1) ?: return false
+            if (current.option.sourceWords.size != 2 || second.id != ids[1] || first.start != current.sourceStart ||
+                second.end != current.sourceEndExclusive ||
+                listOf(first.current, second.current).zip(current.option.sourceWords)
+                    .any { (actual, expected) -> !actual.equals(expected, ignoreCase = true) }
+            ) return false
+            return joinSessionWords(ids[0], ids[1], current.option.replacementWords.single())
+        }
+
+        return releaseReplacementOption(current.option)
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {

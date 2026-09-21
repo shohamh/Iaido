@@ -84,9 +84,9 @@ internal data class SentenceHistoryPreview(
 
 internal interface SentenceStripActions {
     fun setSelection(start: Int, endExclusive: Int = start): Boolean
-    fun commitWordReplacement(wordId: String, replacement: String): Boolean
-    fun commitReplacement(optionId: String): Boolean
-    fun commitDeletion(start: Int, endExclusive: Int): Boolean
+    fun commitWordReplacement(wordId: String, expectedCurrent: String, replacement: String): Boolean
+    fun commitReplacement(replacement: SentenceStripReplacement): Boolean
+    fun commitDeletion(preview: SentenceDeletionPreview): Boolean
     fun undo(): Boolean
     fun redo(): Boolean
 }
@@ -182,8 +182,8 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - [x] Implement a pure geometry snapshot with measured word widths, glyph bounds, hit bounds, UTF-16 spans, caret anchors, content width, and focus scroll offset. Extend each hit bound halfway through the additional 4 CSS-pixel visual gap.
 - [x] Add pure helpers for word hit testing, two-word join unions, midpoint-based reversible deletion ranges, cursor-anchor mapping, LTR/RTL ordering, and clamped focus scrolling. Tighten deletion arming so the finger must enter an adjacent word target before the source word becomes a deletion preview.
 - [x] Build the initial measured `SentenceStrip` from Compose text metrics and a keyed horizontal row. The actual text layouts render from the same measured lane widths; gesture-time `TextLayoutResult` mapping is completed in Task 6.
-- [ ] Keep one geometry snapshot frozen for the pointer lifetime. Candidate preview text, focus color, and animation progress may recompose, but they must not change the active gesture’s word bounds or restart its pointer handler.
-- [ ] Publish all semantic states consumed by `SentenceStripImeDriver`. The strip root, indexed words, upper/lower alternatives, caret, and undo/redo are present; dynamic preview, join, deletion, and edge-zone fields will be added with their gesture tasks.
+- [x] Keep one geometry snapshot frozen for the pointer lifetime. Candidate preview text, focus color, and animation progress may recompose, but they must not change the active gesture’s word bounds or restart its pointer handler.
+- [x] Publish all semantic states consumed by `SentenceStripImeDriver`: strip root, indexed words, upper/lower alternatives, caret, undo/redo, full-sentence preview, join, deletion, history preview, and active edge zones.
 - [x] Add geometry tests for half-gap hit targets, short “it” beside long words, midpoint inclusion/exclusion, reversible selection, join union coverage/centering, LTR/RTL coordinates, content clamping, and cursor-offset mapping.
 - [x] Run `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:assembleDebugAndroidTest`. The focused Compose semantics test is compiled and will be run with the deferred final device pass.
 - [x] Commit the geometry and measured-strip foundation with the visual foundation and the deferred connected-test decision recorded.
@@ -220,13 +220,13 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Modify: `app/src/main/kotlin/com/iaido/app/IaidoInputMethodService.kt`
 - Test: `app/src/androidTest/kotlin/com/iaido/app/ImeReelE2eTest.kt`
 
-- [ ] Attach one stable `pointerInput` detector to the strip. Do not key detector identity on changing preview/state values. Use `rememberUpdatedState` for callbacks so every held gesture survives its own recompositions.
-- [ ] On a short tap, map a whole-word target to its end, a glyph target to the nearest legal UTF-16 grapheme boundary, and a gap target to that exact boundary; call `SentenceStripActions.setSelection` immediately.
-- [ ] On a hold, set the cursor under the initial finger location. While held, horizontal movement updates the host selection at the character below the pointer before it enters an edge zone.
-- [ ] Handle horizontal strip swipes separately from vertical word gestures. Scroll continuously with clamped content bounds and no wrap. When the cursor or focused word changes, bring it into view quickly; center it when the available preceding/following sentence content permits and clamp at either sentence edge.
-- [ ] On vertical motion over an alternative, render a full-sentence preview and animate the selected candidate into the current row in 160–170 ms with an ease-out and no bounce. On release, commit once; place the previous word into the chosen alternative side so the next same-direction swipe swaps it back.
-- [ ] On pointer cancel or release outside a candidate, clear preview without changing host text, selection, or history. Keep the opposite-side option intact and candidates non-wrapping.
-- [ ] Defer the connected STRIP-02…09, STRIP-20, and STRIP-21 journeys to Task 9. Keep preview non-mutation and cursor synchronization covered by pure/controller tests where possible.
+- [x] Attach one stable `pointerInput` detector to the strip. Do not key detector identity on changing preview/state values. Use `rememberUpdatedState` for callbacks so every held gesture survives its own recompositions.
+- [x] On a short tap, map text to the nearest legal UTF-16 grapheme boundary and map a gap target to its nearest legal boundary; call `SentenceStripActions.setSelection` immediately.
+- [x] On a hold, set the cursor under the initial finger location. While held, horizontal movement updates the host selection at the character below the pointer before it enters an edge zone.
+- [x] Handle horizontal strip swipes separately from vertical word gestures. Scroll continuously with clamped content bounds and no wrap. When the cursor or focused word changes, bring it into view quickly; center it when the available preceding/following sentence content permits and clamp at either sentence edge.
+- [x] On vertical motion over an alternative, render a full-sentence preview and animate the selected candidate into the current row in 165 ms with an ease-out and no bounce. On release, commit once; place the previous word into the chosen alternative side so the next same-direction swipe swaps it back.
+- [x] On pointer cancellation or release with no preview, clear preview without changing host text, selection, or history. Keep the opposite-side option intact and candidates non-wrapping.
+- [x] Defer the connected STRIP-02…09, STRIP-20, and STRIP-21 journeys to Task 9, per the user’s request. Keep preview non-mutation and cursor synchronization covered by pure/controller tests.
 
 **Produces:** reliable word/character/gap cursor setting, horizontal browsing, focus-centered scrolling, and reversible upper/lower correction swaps.
 
@@ -244,14 +244,14 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Test: `app/src/test/kotlin/com/iaido/app/SwipeInferenceTransactionTest.kt`
 - Test: `app/src/androidTest/kotlin/com/iaido/app/ImeReelE2eTest.kt`, `ImeInferenceE2eTest.kt`
 
-- [ ] Accept an alternative as a split/join only when its `ReplacementOption` source span includes the corresponding source words. Apply a normal one-word choice such as “inside” to only that word and preserve the following “to”.
-- [ ] Preview `alot` → `a lot` as two ordinary lanes with normal spacing. Preview `in to` → `into` from either source lane as one joined word centered in the union of both source lanes and their gap. Do not add a third lane or shift neighboring geometry.
-- [ ] Keep `InputConnection` unchanged until release. On release, validate the option ID/source offsets against the latest service state, then commit one range replacement and one history entry. Invalidate alternatives immediately after an external edit or stale source change.
-- [ ] Remove host edits from the strip’s `SwipeTypingCoordinator.previewReplacement` path. That method may validate and publish the pending option, but it must not call `SwipeInferenceTransaction.replaceCurrent` or the host `replaceHostSpan` callback. Make `releaseReplacement` apply the selected inferred words exactly once; make cancel clear preview state without restoring text because preview never changed it.
-- [ ] Switch from alternative selection to deletion only after a vertically armed pointer crosses from its source lane into a neighboring lane. Select that neighbor only after its midpoint is crossed. Returning over the original lane restores the vertical alternative preview.
-- [ ] While deletion is previewed, strike through only selected word text, hide those words’ alternatives, and draw one red rectangle around the selected contiguous range. Pulling back across a midpoint removes that word from preview. Release deletes exactly the selected text and preserves surrounding punctuation/spaces.
-- [ ] Add or extend deterministic debug fixture data only where current `SPLIT_ALOT`, `JOIN_REEL`, and `inside` entries do not make the expected choice unique. Keep fixture content in `app/src/debug/assets/auto-space-fixtures.txt` and fixture IDs in `ImeScenarioData.kt`.
-- [ ] Defer connected STRIP-10…17, STRIP-13a, and `ImeInferenceE2eTest` to Task 9. Validate the reducer and transaction boundaries with JVM tests during implementation.
+- [x] Accept an alternative as a split/join only when its `ReplacementOption` source span includes the corresponding source words. Apply a normal one-word choice such as “inside” to only that word and preserve the following “to”.
+- [x] Preview `alot` → `a lot` as two ordinary lanes with normal spacing. Preview `in to` → `into` from either source lane as one joined word centered in the union of both source lanes and their gap. Do not add a third lane or shift neighboring geometry.
+- [x] Keep `InputConnection` unchanged until release. On release, validate the full option and source IDs/offsets against the latest service state, then commit one range replacement and one history entry.
+- [x] Remove host edits from `SwipeTypingCoordinator.previewReplacement`. Preview validates and publishes the candidate without calling `SwipeInferenceTransaction.replaceCurrent` or the host callback; release applies the selected inferred words exactly once; cancel clears preview without restoring text.
+- [x] Switch from alternative selection to deletion only after a vertically armed pointer crosses from its source lane into a neighboring lane. Select that neighbor only after its midpoint is crossed. Returning over the original hit target restores the vertical alternative preview.
+- [x] While deletion is previewed, strike through only selected word text, hide those words’ alternatives, and draw one red rectangle around the selected contiguous range. Pulling back across a midpoint removes that word from preview. Release deletes the validated range and preserves surrounding punctuation/spaces.
+- [x] Existing deterministic `SPLIT_ALOT`, `JOIN_REEL`, and `inside` fixture data already makes each expected choice unique; no fixture edits were needed.
+- [x] Defer connected STRIP-10…17, STRIP-13a, and `ImeInferenceE2eTest` to Task 9, per the user’s request. Validate preview and transaction boundaries with JVM tests.
 
 **Produces:** correct split/join preview geometry and a reversible midpoint-based deletion gesture.
 
@@ -265,13 +265,13 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Modify: `app/src/main/kotlin/com/iaido/app/IaidoInputMethodService.kt`
 - Test: `app/src/androidTest/kotlin/com/iaido/app/ImeReelE2eTest.kt`
 
-- [ ] Add left/right edge zones with no border and no red. Use the accent gradient from transparent at the inner edge to no more than 50% opacity at the outside; use a clearly visible slim chevron sized to the screenshot reference. Keep the touch zone narrower than the prior 14%-wide prototype zone and do not let its overlay intercept ordinary word taps outside the strip.
-- [ ] Drive scrolling from elapsed frame time (`withFrameNanos`). For normalized penetration `p` into the edge zone, apply `24 + 780 * p²` CSS pixels/second converted with display density. Clamp frame delta after a pause and clamp content offset at both ends.
-- [ ] Keep the finger fixed in viewport coordinates while edge-scrolling. Recompute the selected character or crossed word midpoint from the shifted geometry every frame; cursor scrubbing and deletion must continue selecting in the scroll direction without wrapping.
-- [ ] Show an edge affordance only during a held cursor/deletion gesture in its zone. Fade in/out in about 110 ms; keep the arrow visually clear and the region subtle as shown by the embedded reference.
-- [ ] Finish the 40-entry history module integration. Tapping an enabled undo/redo icon applies one step immediately. Holding for about 380 ms reveals the action and before/after sentence; releasing while still held applies that step, while pointer cancellation dismisses it. Disabled controls remain visible, grey, and inert.
-- [ ] Ensure undo/redo restore editor text, the InputConnection selection, sentence spans, and strip caret together. A fresh edit after undo clears redo only; the independent stack availability is reflected immediately in `SentenceStripState`.
-- [ ] Defer connected STRIP-18, STRIP-19, STRIP-22…24, and RTL variants to Task 9. Cover edge-rate math and history state transitions with fast JVM tests.
+- [x] Add left/right edge zones with no border and no red. Use a subdued cyan gradient from transparent inward to 32% opacity at the outside, plus a slim chevron. Keep the 44 dp touch zone narrower than the prior 14%-wide prototype zone; the visual overlay does not intercept touches.
+- [x] Drive scrolling from elapsed frame time (`withFrameNanos`). For normalized penetration `p` into the edge zone, apply `24 + 780 * p²` CSS pixels/second converted with display density. Clamp frame delta after a pause and clamp content offset at both ends.
+- [x] Keep the finger fixed in viewport coordinates while edge-scrolling. Recompute the selected character or crossed word midpoint from shifted geometry every frame; cursor scrubbing and deletion continue in the scroll direction without wrapping.
+- [x] Show an edge affordance only during a held cursor/deletion gesture in its zone. Fade in/out in about 110 ms; keep the arrow visually clear and the region subtle.
+- [x] Finish the 40-entry history module integration. Tapping an enabled undo/redo icon applies one step immediately. Holding for 380 ms reveals the action and before/after text; release applies that step, while cancellation dismisses it. Disabled controls remain visible, grey, and inert.
+- [x] Ensure undo/redo restore editor text, the InputConnection selection, sentence spans, and strip caret together. A fresh edit after undo clears redo only; the independent stack availability and previews are reflected immediately in `SentenceStripState`.
+- [x] Defer connected STRIP-18, STRIP-19, STRIP-22…24, and RTL variants to Task 9, per the user’s request. Cover edge-rate math and history state transitions with fast JVM tests.
 
 **Produces:** frame-rate-stable edge scrolling for both cursor and deletion gestures, and usable multi-step undo/redo controls.
 

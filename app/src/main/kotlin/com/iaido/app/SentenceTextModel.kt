@@ -61,13 +61,14 @@ internal object SentenceTextModel {
             selection = snapshot.selectionStart,
             locale = locale,
         )
+        val wordsWithStructuredChoices = exposeReplacementChoices(words, replacements)
 
         return SentenceStripState(
             sentenceText = sentenceText,
             sentenceStart = sentenceStart,
             selectionStart = snapshot.selectionStart,
             selectionEnd = snapshot.selectionEnd,
-            words = words,
+            words = wordsWithStructuredChoices,
             replacementOptions = replacements,
             language = language,
         )
@@ -181,7 +182,12 @@ internal object SentenceTextModel {
         options: List<ReplacementOption>,
         selection: Int,
         locale: Locale,
-    ): List<SentenceStripReplacement> = options.distinctBy(ReplacementOption::id).mapNotNull { option ->
+    ): List<SentenceStripReplacement> = options.asSequence()
+        .distinctBy(ReplacementOption::id)
+        .filterNot { option ->
+            option.sourceWords.joinToString(" ").equals(option.replacementWords.joinToString(" "), ignoreCase = true)
+        }
+        .mapNotNull { option ->
         val sources = option.sourceWords
         val matches = words.indices
             .filter { startIndex -> startIndex + sources.size <= words.size }
@@ -207,6 +213,36 @@ internal object SentenceTextModel {
             sourceEndExclusive = end,
             sourceWordIds = range.map(SentenceStripWord::id),
         )
+        }
+        .distinctBy { replacement ->
+            "${replacement.sourceStart}:${replacement.sourceEndExclusive}:" +
+                replacement.option.replacementWords.joinToString(" ").lowercase(locale)
+        }
+        .toList()
+
+    private fun exposeReplacementChoices(
+        words: List<SentenceStripWord>,
+        replacements: List<SentenceStripReplacement>,
+    ): List<SentenceStripWord> {
+        val result = words.toMutableList()
+        replacements.forEach { replacement ->
+            val candidate = replacement.option.replacementWords.joinToString(" ")
+            replacement.sourceWordIds.forEach wordLoop@{ wordId ->
+                val index = result.indexOfFirst { it.id == wordId }
+                if (index < 0) return@wordLoop
+                val word = result[index]
+                if (candidate.equals(word.text, ignoreCase = true) ||
+                    candidate.equals(word.above, ignoreCase = true) ||
+                    candidate.equals(word.below, ignoreCase = true)
+                ) return@wordLoop
+                result[index] = when {
+                    word.above == null -> word.copy(above = candidate)
+                    word.below == null -> word.copy(below = candidate)
+                    else -> word.copy(below = candidate)
+                }
+            }
+        }
+        return result
     }
 
     private fun generatedId(

@@ -122,44 +122,37 @@ class SwipeTypingCoordinator(
     /** Complete structured candidates for the active inference span. */
     fun replacementOptions(): List<ReplacementOption> {
         val selection = replacementSelection ?: activeReplacementSelection() ?: return emptyList()
-        // The option identity must remain anchored to the original source span so release still
-        // matches the coordinator selection, but the reel must display the words currently in the
-        // editor after a preview. Otherwise a selected replacement such as "in the" keeps
-        // rendering reels for the stale source "inthe" and poisons the next refresh.
-        val displayedSourceWords = transaction.currentWords.ifEmpty { selection.sourceWords }
         return selection.alternatives
             .map { option ->
                 val stableId = ReplacementOption(selection.sourceWords, option.words, option.score).id
-                ReplacementOption(displayedSourceWords, option.words, option.score, stableId)
+                ReplacementOption(selection.sourceWords, option.words, option.score, stableId)
             }
             .distinctBy(ReplacementOption::id)
     }
 
-    /** Replaces the active span with a candidate while its reel is being dragged. */
+    /** Validates and publishes a pending candidate without changing host text. */
     fun previewReplacement(option: ReplacementOption): Boolean {
         val selection = replacementSelection ?: activeReplacementSelection() ?: return false
-        val selected = replacementOption(selection, option) ?: return false
-        if (!transaction.replaceCurrent(selected.words, selection.alternatives)) return false
+        if (replacementOption(selection, option) == null) return false
         replacementSelection = selection
         notifyReplacementOptionsChanged()
         return true
     }
 
-    /** Finalizes the whole selected replacement group after the reel is released. */
+    /** Applies the selected candidate once, then finalizes the whole inference group. */
     fun releaseReplacement(option: ReplacementOption): Boolean {
         val selection = replacementSelection ?: activeReplacementSelection() ?: return false
         val selected = replacementOption(selection, option) ?: return false
-        if (transaction.currentWords != selected.words && !previewReplacement(option)) return false
+        if (transaction.currentWords != selected.words &&
+            !transaction.replaceCurrent(selected.words, selection.alternatives)
+        ) return false
         finalizeAndClear()
         return true
     }
 
-    /** Restores the transaction's words when a reel drag is cancelled. */
+    /** Discards a pending choice; the editor was never changed by preview. */
     fun cancelReplacement(): Boolean {
         val selection = replacementSelection ?: return false
-        if (transaction.currentWords != selection.sourceWords &&
-            !transaction.replaceCurrent(selection.sourceWords, selection.alternatives)
-        ) return false
         replacementSelection = null
         notifyReplacementOptionsChanged()
         return true

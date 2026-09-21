@@ -66,7 +66,7 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
-    fun `replacement reel previews restores and commits a full inference group`() {
+    fun `replacement preview stays non mutating until release and cancellation needs no restore`() {
         val editor = FakeEditor()
         val finalized = mutableListOf<List<String>>()
         val coordinator = coordinator(
@@ -80,11 +80,13 @@ class SwipeTypingCoordinatorTest {
         val split = coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }
 
         assertEquals(listOf("inthe"), split.sourceWords)
+        val committedReplacementCount = editor.replacements.size
         assertTrue(coordinator.previewReplacement(split))
-        assertEquals("in the", editor.text)
-        assertEquals(6, editor.cursor())
+        assertEquals("inthe", editor.text)
+        assertEquals(5, editor.cursor())
+        assertEquals(committedReplacementCount, editor.replacements.size)
         assertEquals(
-            listOf("in", "the"),
+            listOf("inthe"),
             coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }.sourceWords,
         )
         val previewedSplit = coordinator.replacementOptions().single { it.replacementWords == listOf("in", "the") }
@@ -93,11 +95,13 @@ class SwipeTypingCoordinatorTest {
         coordinator.cancelReplacement()
 
         assertEquals("inthe", editor.text)
+        assertEquals(committedReplacementCount, editor.replacements.size)
         assertTrue(coordinator.replacementOptions().any { it.replacementWords == listOf("in", "the") })
         assertTrue(coordinator.previewReplacement(split))
         assertTrue(coordinator.releaseReplacement(split))
         assertEquals("in the", editor.text)
         assertEquals(6, editor.cursor())
+        assertEquals(committedReplacementCount + 1, editor.replacements.size)
         assertEquals(listOf(listOf("in", "the")), finalized)
         assertFalse(coordinator.replacementOptions().isNotEmpty())
     }

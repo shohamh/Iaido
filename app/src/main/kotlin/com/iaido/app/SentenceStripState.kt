@@ -41,9 +41,9 @@ internal data class SentenceHistoryPreview(
 
 internal interface SentenceStripActions {
     fun setSelection(start: Int, endExclusive: Int = start): Boolean
-    fun commitWordReplacement(wordId: String, replacement: String): Boolean
-    fun commitReplacement(optionId: String): Boolean
-    fun commitDeletion(start: Int, endExclusive: Int): Boolean
+    fun commitWordReplacement(wordId: String, expectedCurrent: String, replacement: String): Boolean
+    fun commitReplacement(replacement: SentenceStripReplacement): Boolean
+    fun commitDeletion(preview: SentenceDeletionPreview): Boolean
     fun undo(): Boolean
     fun redo(): Boolean
 }

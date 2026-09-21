@@ -8,6 +8,22 @@ import org.junit.jupiter.api.Test
 
 class SentenceEditHistoryTest {
     @Test
+    fun historyPreviewsDescribeTheEditDirectionForUndoAndRedo() {
+        val history = SentenceEditHistory()
+        history.recordAppliedEdit(edit(3, "put", "set", SentenceEditKind.CORRECTION))
+
+        assertEquals(
+            SentenceHistoryPreview("Undo correction", "set", "put"),
+            history.undoPreview(),
+        )
+        assertTrue(history.undo { HistoryApplyResult.APPLIED })
+        assertEquals(
+            SentenceHistoryPreview("Redo correction", "put", "set"),
+            history.redoPreview(),
+        )
+    }
+
+    @Test
     fun supportsMultipleUndoRedoStepsAndRestoresSelections() {
         val history = SentenceEditHistory()
         history.recordAppliedEdit(edit(0, "", "we", SentenceEditKind.TYPING, before = 0, after = 2))

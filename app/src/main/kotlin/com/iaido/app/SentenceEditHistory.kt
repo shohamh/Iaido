@@ -52,6 +52,10 @@ internal class SentenceEditHistory {
 
     fun redoCandidate(): SentenceEdit? = redoStack.lastOrNull()
 
+    fun undoPreview(): SentenceHistoryPreview? = undoCandidate()?.toPreview(undo = true)
+
+    fun redoPreview(): SentenceHistoryPreview? = redoCandidate()?.toPreview(undo = false)
+
     /** Record only after the corresponding InputConnection edit has succeeded. */
     fun recordAppliedEdit(edit: SentenceEdit) {
         if (edit.replacedText == edit.replacementText) return
@@ -162,6 +166,23 @@ internal class SentenceEditHistory {
             )
         }
         return null
+    }
+
+    private fun SentenceEdit.toPreview(undo: Boolean): SentenceHistoryPreview {
+        val action = if (undo) "Undo" else "Redo"
+        val description = when (kind) {
+            SentenceEditKind.TYPING -> "typing"
+            SentenceEditKind.BACKSPACE -> "backspace"
+            SentenceEditKind.CORRECTION -> "correction"
+            SentenceEditKind.SPLIT -> "split"
+            SentenceEditKind.JOIN -> "join"
+            SentenceEditKind.DELETION -> "deletion"
+        }
+        return if (undo) {
+            SentenceHistoryPreview("$action $description", replacementText, replacedText)
+        } else {
+            SentenceHistoryPreview("$action $description", replacedText, replacementText)
+        }
     }
 
     companion object {

@@ -87,6 +87,30 @@ class SentenceTextModelTest {
         assertEquals(1, state.replacementOptions.size)
         assertEquals(state.sentenceStart + 0, state.replacementOptions.single().sourceStart)
         assertEquals(state.sentenceStart + 5, state.replacementOptions.single().sourceEndExclusive)
+        assertTrue(state.words[0].above == "into" || state.words[0].below == "into")
+        assertTrue(state.words[1].above == "into" || state.words[1].below == "into")
+    }
+
+    @Test
+    fun exposesSplitAsOneUniqueInlineAlternativeAndFiltersCaseOnlyStructuredOptions() {
+        val split = ReplacementOption(listOf("alot"), listOf("a", "lot"), score = 1.0)
+        val duplicateJoin = listOf(
+            ReplacementOption(listOf("in", "to"), listOf("into"), 1.0, id = "into-one"),
+            ReplacementOption(listOf("in", "to"), listOf("into"), 0.9, id = "into-two"),
+        )
+        val splitState = model("we alot now", cursor = 6, options = listOf(split))
+        val joinState = model("in to", cursor = 3, options = duplicateJoin)
+        val caseOnly = model(
+            "we",
+            cursor = 2,
+            options = listOf(ReplacementOption(listOf("we"), listOf("We"), 1.0)),
+        )
+
+        assertTrue("a lot" in listOf(splitState.words[1].above, splitState.words[1].below))
+        assertEquals(1, joinState.replacementOptions.size)
+        assertTrue("into" in listOf(joinState.words[0].above, joinState.words[0].below))
+        assertTrue("into" in listOf(joinState.words[1].above, joinState.words[1].below))
+        assertTrue(caseOnly.replacementOptions.isEmpty())
     }
 
     @Test
