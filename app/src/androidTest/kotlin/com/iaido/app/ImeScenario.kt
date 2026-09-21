@@ -919,6 +919,8 @@ class ImeScenario(
 
     fun recreateInputView() {
         system.enableAndSelect(system.iaidoImeId)
+        system.waitForImeVisible(system.iaidoImeId)
+        editor.focus()
         expectedIme = system.iaidoImeId
         checkpoint("recreateInputView", verifyEnvironment = true)
     }
