@@ -154,16 +154,16 @@ All selection and word-span offsets in this interface are absolute editor UTF-16
 - Test: `app/src/test/kotlin/com/iaido/app/SwipeTypingCoordinatorTest.kt`
 - Reuse: `EditorTextChangeDetector.kt`, `InferenceSelectionGuard.kt`
 
-- [ ] Define an edit record with source start/end, replaced text, replacement text, selection before/after, and a logical edit kind (`Typing`, `Backspace`, `Correction`, `Split`, `Join`, or `Deletion`). Retain at most 40 logical transactions across the undo/redo history.
-- [ ] Keep `SessionCorrectionHistory` as candidate/span provenance. Do not use it as the host text undo stack; the new `SentenceEditHistory` owns editor before/after text and selections.
-- [ ] Add `recordAppliedEdit`, `undoCandidate`, `redoCandidate`, `markExternalEdit`, `undo`, and `redo` to the history module. A failed `InputConnection` operation must not move either history stack.
-- [ ] Route sentence-strip commits through one service method that validates the current source span, sets the range selection, commits replacement text once, restores the requested cursor, updates `EditorTextChangeDetector`, records one history action, and refreshes `SentenceStripState`.
-- [ ] Route strip deletion through the same method with an empty replacement. Record the whole contiguous range as one transaction and place the restored cursor at the range start.
-- [ ] Record typing through the existing `commitText` path. Coalesce adjacent character insertion into one typing group until whitespace/punctuation, cursor movement, backspace, a strip correction, or an external host edit closes that group. Coalesce a repeated backspace gesture as one group.
-- [ ] Record edits from `replaceInferenceHostSpan` as typing actions too. Coalesce replacements of the same live inference source span into that typing group; close it when `recordFinalizedInferenceWords` finalizes the span or `finalizeAndClear` ends the inference transaction.
-- [ ] On undo/redo, verify the expected text at the target range before applying the inverse/forward replacement. If the host has changed that span externally, drop the stale entry and refresh state without overwriting the host edit.
-- [ ] Add unit tests for multiple undo/redo steps, before/after selection restoration, one transaction for split/join/multi-word delete, typing/backspace coalescing, redo clearing after a new edit, 40-entry cap, failed InputConnection application, and stale external text.
-- [ ] Run `./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest`; commit the history and service transaction change after the focused and full app JVM tests pass.
+- [x] Define an edit record with source start/end, replaced text, replacement text, selection before/after, and a logical edit kind (`Typing`, `Backspace`, `Correction`, `Split`, `Join`, or `Deletion`). Retain at most 40 logical transactions across the undo/redo history.
+- [x] Keep `SessionCorrectionHistory` as candidate/span provenance. Do not use it as the host text undo stack; the new `SentenceEditHistory` owns editor before/after text and selections.
+- [x] Add `recordAppliedEdit`, `undoCandidate`, `redoCandidate`, `markExternalEdit`, `undo`, and `redo` to the history module. A failed `InputConnection` operation must not move either history stack.
+- [ ] Wire sentence-strip commits and deletion through the shared service method in Task 7, when the measured strip action callbacks are added. The method already validates the observed source span, sets the range selection, commits replacement text once, restores selection, updates `EditorTextChangeDetector`, records one history action, and refreshes `SentenceStripState`.
+- [x] Route existing correction and join edits through that method. Strip deletion will record its full contiguous range as one transaction and restore the cursor at the range start when it is integrated in Task 7.
+- [x] Record typing through the existing `commitText` path. Coalesce adjacent character insertion until whitespace/punctuation, cursor movement, backspace, a correction, or an external host edit closes the group. Coalesce a repeated backspace gesture as one group.
+- [x] Record edits from `replaceInferenceHostSpan` as typing actions too. Coalesce replacements of the same live inference source span into that typing group; close it when `recordFinalizedInferenceWords` finalizes the span or `finalizeAndClear` ends the inference transaction.
+- [x] On undo/redo, verify the expected text at the target range before applying the inverse/forward replacement. If the host has changed that span externally, drop the stale entry and refresh state without overwriting the host edit.
+- [x] Add unit tests for multiple undo/redo steps, before/after selection restoration, one transaction for split/join/multi-word delete, typing/backspace coalescing, redo clearing after a new edit, 40-entry cap, failed application, and stale external text.
+- [x] Run `./gradlew --no-daemon --max-workers=2 :core-engine:test :app:testDebugUnitTest`; the history and service transaction change is ready to commit after the focused and full app JVM tests pass.
 
 **Produces:** one service-owned atomic edit/history seam used by candidate selection, split, join, deletion, typing, and backspace.
 

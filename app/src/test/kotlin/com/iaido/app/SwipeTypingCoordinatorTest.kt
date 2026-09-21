@@ -103,6 +103,28 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
+    fun `inference group completion is signaled only after an active transaction ends`() {
+        val editor = FakeEditor()
+        var completedGroups = 0
+        val coordinator = coordinator(
+            editor,
+            SpacingMode.INFER_SPACES,
+            dictionary("in"),
+            onInferenceTransactionFinished = { completedGroups++ },
+        )
+
+        coordinator.onNonSwipeInput()
+        assertEquals(0, completedGroups)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        assertEquals(0, completedGroups)
+        coordinator.onNonSwipeInput()
+        assertEquals(1, completedGroups)
+        coordinator.onNonSwipeInput()
+        assertEquals(1, completedGroups)
+    }
+
+    @Test
     fun `inference can rewrite two units into one word without offset drift`() {
         val editor = FakeEditor()
         val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("some", "thing", "something"))
@@ -483,6 +505,7 @@ class SwipeTypingCoordinatorTest {
         textBeforeCursor: () -> String = { "mid-sentence " },
         segmenter: InferenceSegmenter = InferenceSegmenter(),
         recognize: (GesturePath, KeyboardLayout) -> List<ScoredCandidate> = { path, _ -> candidatesFor(path) },
+        onInferenceTransactionFinished: () -> Unit = {},
     ) = SwipeTypingCoordinator(
         segmenter = segmenter,
         spacingMode = { mode },
@@ -496,6 +519,7 @@ class SwipeTypingCoordinatorTest {
         hasFollowingWhitespace = hasFollowingWhitespace,
         pollSplitParts = pollSplitParts,
         isSplitPending = isSplitPending,
+        onInferenceTransactionFinished = onInferenceTransactionFinished,
     )
 
     private fun candidatesFor(path: GesturePath): List<ScoredCandidate> = when (path.points.firstOrNull()?.x?.toInt()) {

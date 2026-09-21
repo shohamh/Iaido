@@ -60,6 +60,11 @@ import java.util.concurrent.Executors
  */
 internal const val VISIBLE_HISTORY_WORDS = 4
 
+private data class CapturedEditorEdit(
+    val snapshot: EditorSnapshot,
+    val sourceText: String,
+)
+
 class IaidoInputMethodService : InputMethodService() {
     private var composeInputView: ComposeView? = null
     private val inputMethodLifecycleOwner = InputMethodLifecycleOwner()
@@ -89,6 +94,7 @@ class IaidoInputMethodService : InputMethodService() {
     private val commandMode = CommandModeController(::executeCommand)
     private val commandDispatcher = CommandGestureDispatcher(commandBindings, ::executeCommand)
     private val correctionHistory = SessionCorrectionHistory()
+    private val sentenceEditHistory = SentenceEditHistory()
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
     private val sentenceStripState = mutableStateOf(SentenceTextModel.emptyState(Language.ENGLISH))
@@ -120,6 +126,7 @@ class IaidoInputMethodService : InputMethodService() {
     private var backspaceSwipeText = ""
     private var backspaceSwipeCursor = 0
     private var backspaceSwipeDeletedCount = 0
+    private var backspaceSwipeInitialSnapshot: EditorSnapshot? = null
     private val inferenceSelectionGuard = InferenceSelectionGuard()
     private val correctionExecutor = Executors.newSingleThreadExecutor()
     private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -219,8 +226,11 @@ class IaidoInputMethodService : InputMethodService() {
             isSplitPending = splitController::isPending,
             onReplacementOptionsChanged = { options ->
                 liveReplacementOptionIds.value = options.map { it.id }.toSet()
-                replacementOptions.value = mergedReplacementOptions(options)
+                val merged = mergedReplacementOptions(options)
+                replacementOptions.value = merged
+                publishSentenceStripState(merged)
             },
+            onInferenceTransactionFinished = sentenceEditHistory::closeGroup,
         )
     }
 
@@ -271,6 +281,7 @@ class IaidoInputMethodService : InputMethodService() {
         researchTraceId = null
         typedWords.reset()
         correctionHistory.clear()
+        sentenceEditHistory.clear()
         sessionChips.value = emptyList()
         sentenceStripState.value = SentenceTextModel.emptyState(activeLanguage)
         latestEditorSnapshot = null
@@ -319,6 +330,7 @@ class IaidoInputMethodService : InputMethodService() {
         researchTraceId = null
         typedWords.reset()
         correctionHistory.clear()
+        sentenceEditHistory.clear()
         sessionChips.value = emptyList()
         sentenceStripState.value = SentenceTextModel.emptyState(activeLanguage)
         latestEditorSnapshot = null
@@ -351,6 +363,7 @@ class IaidoInputMethodService : InputMethodService() {
         )
         if (!suppressedAsInferenceReplacement && (newSelStart != cursorPosition || newSelEnd != newSelStart)) {
             swipeTypingCoordinator.onCursorMoved()
+            sentenceEditHistory.closeGroup()
         }
         cursorPosition = newSelStart
         selectionEndPosition = newSelEnd
@@ -703,25 +716,17 @@ class IaidoInputMethodService : InputMethodService() {
         DebugAutoSpaceFixtures.active(applicationContext)
 
     private fun replaceInferenceHostSpan(span: HostTextSpan, replacement: String): Boolean {
-        val inputConnection = currentInputConnection ?: return false
         val expectedCursor = span.start + replacement.length
-        // Arm before making any framework calls: onUpdateSelection callbacks for this edit can be
-        // delivered asynchronously, after this function has already returned, so the guard must stay
-        // armed until it actually observes the matching callback (see InferenceSelectionGuard's doc).
-        inferenceSelectionGuard.arm(expectedCursor, expectedCursor)
-        if (!inputConnection.setSelection(span.start, span.end)) {
-            inferenceSelectionGuard.clear()
-            return false
-        }
-        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(span.start, span.end, replacement)
-        if (!inputConnection.commitText(replacement, 1)) {
-            inferenceSelectionGuard.clear()
-            return false
-        }
-        cursorPosition = expectedCursor
-        selectionEndPosition = expectedCursor
-        inputConnection.setSelection(cursorPosition, cursorPosition)
-        return true
+        return applyEditorReplacement(
+            start = span.start,
+            endExclusive = span.end,
+            replacement = replacement,
+            kind = SentenceEditKind.TYPING,
+            coalescingKey = "inference:${span.start}",
+            cursorAfter = expectedCursor,
+            guardInferenceSelection = true,
+            refresh = false,
+        )
     }
 
     private fun recordFinalizedInferenceWords(
@@ -729,6 +734,7 @@ class IaidoInputMethodService : InputMethodService() {
         words: List<String>,
         alternatives: List<SegmentationOption>,
     ) {
+        sentenceEditHistory.closeGroup()
         pendingCandidates = null
         val candidatesByWord = inferenceWordCandidates(words, alternatives)
         val outputIds = correctionHistory.replaceRange(
@@ -744,13 +750,34 @@ class IaidoInputMethodService : InputMethodService() {
     private fun commitText(text: String) {
         val inputConnection = currentInputConnection ?: return
         val start = cursorPosition
+        val end = selectionEndPosition
         // A commit that carries recognition candidates is a swiped word, which is recorded from
         // those candidates below; everything else is the user typing.
         val swipedWord = pendingCandidates != null
-        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, start, text)
+        val coalescingKey = if (!swipedWord && start == end && text.isNotEmpty() && text.all(::isTypingCharacter)) {
+            "typing"
+        } else null
+        if (coalescingKey == null) sentenceEditHistory.closeGroup()
+        val captured = if (textObservationEnabled) captureEditorEdit(start, end) else null
+        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(start, end, text)
         if (!inputConnection.commitText(text, 1)) return
         cursorPosition = start + text.length
         selectionEndPosition = cursorPosition
+        captured?.let { before ->
+            recordSuccessfulEditorEdit(
+                captured = before,
+                start = start,
+                endExclusive = end,
+                replacement = text,
+                kind = SentenceEditKind.TYPING,
+                coalescingKey = coalescingKey,
+                selectionBeforeStart = start,
+                selectionBeforeEnd = end,
+                selectionAfterStart = cursorPosition,
+                selectionAfterEnd = cursorPosition,
+            )
+        }
+        if (coalescingKey == null) sentenceEditHistory.closeGroup()
         val deletedWord = lastDeletedWord
         lastDeletedWord = null
         if (deletedWord != null && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
@@ -775,6 +802,187 @@ class IaidoInputMethodService : InputMethodService() {
         if (swipedWord) refreshSuggestionChips()
     }
 
+    private fun captureEditorEdit(start: Int, endExclusive: Int): CapturedEditorEdit? {
+        return captureEditorEdit(latestEditorSnapshot, start, endExclusive)
+    }
+
+    private fun captureEditorEdit(
+        snapshot: EditorSnapshot?,
+        start: Int,
+        endExclusive: Int,
+    ): CapturedEditorEdit? {
+        snapshot ?: return null
+        val localStart = start - snapshot.offset
+        val localEnd = endExclusive - snapshot.offset
+        if (localStart < 0 || localEnd < localStart || localEnd > snapshot.text.length) return null
+        return CapturedEditorEdit(snapshot, snapshot.text.substring(localStart, localEnd))
+    }
+
+    /** One editor mutation seam shared by corrections, joins, strip edits, and deletion. */
+    private fun applyEditorReplacement(
+        start: Int,
+        endExclusive: Int,
+        replacement: String,
+        kind: SentenceEditKind,
+        expectedSourceText: String? = null,
+        coalescingKey: String? = null,
+        cursorAfter: Int = start + replacement.length,
+        selectionAfterEnd: Int = cursorAfter,
+        requireObservedSnapshot: Boolean = false,
+        guardInferenceSelection: Boolean = false,
+        recordHistory: Boolean = true,
+        refresh: Boolean = true,
+    ): Boolean {
+        val inputConnection = currentInputConnection ?: return false
+        if (start < 0 || endExclusive < start) return false
+        val selectionBeforeStart = cursorPosition
+        val selectionBeforeEnd = selectionEndPosition
+        val captured = if (textObservationEnabled) captureEditorEdit(start, endExclusive) else null
+        if (expectedSourceText != null && captured?.sourceText != expectedSourceText) return false
+        if (requireObservedSnapshot && captured == null) return false
+
+        if (guardInferenceSelection) inferenceSelectionGuard.arm(cursorAfter, cursorAfter)
+        if (!inputConnection.setSelection(start, endExclusive)) {
+            if (guardInferenceSelection) inferenceSelectionGuard.clear()
+            return false
+        }
+        if (textObservationEnabled) {
+            editorTextChangeDetector.expectOwnEdit(start, endExclusive, replacement)
+        }
+        if (!inputConnection.commitText(replacement, 1)) {
+            captured?.let { editorTextChangeDetector.reset(it.snapshot) }
+            inputConnection.setSelection(selectionBeforeStart, selectionBeforeEnd)
+            if (guardInferenceSelection) inferenceSelectionGuard.clear()
+            return false
+        }
+
+        // The text commit is authoritative even if an editor declines the follow-up caret call.
+        inputConnection.setSelection(cursorAfter, selectionAfterEnd)
+        cursorPosition = cursorAfter
+        selectionEndPosition = selectionAfterEnd
+        captured?.let { before ->
+            if (recordHistory) {
+                recordSuccessfulEditorEdit(
+                    captured = before,
+                    start = start,
+                    endExclusive = endExclusive,
+                    replacement = replacement,
+                    kind = kind,
+                    coalescingKey = coalescingKey,
+                    selectionBeforeStart = selectionBeforeStart,
+                    selectionBeforeEnd = selectionBeforeEnd,
+                    selectionAfterStart = cursorAfter,
+                    selectionAfterEnd = selectionAfterEnd,
+                )
+            } else {
+                updateLatestEditorSnapshot(before, start, endExclusive, replacement, cursorAfter, selectionAfterEnd)
+            }
+        }
+        if (refresh) refreshSuggestionChips()
+        return true
+    }
+
+    internal fun undoSentenceEdit(): Boolean = applySentenceHistoryEdit(undo = true)
+
+    internal fun redoSentenceEdit(): Boolean = applySentenceHistoryEdit(undo = false)
+
+    private fun applySentenceHistoryEdit(undo: Boolean): Boolean {
+        if (!textObservationEnabled) return false
+        val applied = if (undo) {
+            sentenceEditHistory.undo { edit -> applyHistoryEdit(edit, undo = true) }
+        } else {
+            sentenceEditHistory.redo { edit -> applyHistoryEdit(edit, undo = false) }
+        }
+        refreshSuggestionChips()
+        return applied
+    }
+
+    private fun applyHistoryEdit(edit: SentenceEdit, undo: Boolean): HistoryApplyResult {
+        val expected = if (undo) edit.replacementText else edit.replacedText
+        val replacement = if (undo) edit.replacedText else edit.replacementText
+        val start = edit.sourceStart
+        val end = start + expected.length
+        val capture = captureEditorEdit(start, end)
+        if (capture == null || capture.sourceText != expected) return HistoryApplyResult.STALE
+
+        val selectionStart = if (undo) edit.selectionBeforeStart else edit.selectionAfterStart
+        val selectionEnd = if (undo) edit.selectionBeforeEnd else edit.selectionAfterEnd
+        return if (applyEditorReplacement(
+                start = start,
+                endExclusive = end,
+                replacement = replacement,
+                kind = edit.kind,
+                expectedSourceText = expected,
+                cursorAfter = selectionStart,
+                selectionAfterEnd = selectionEnd,
+                recordHistory = false,
+                refresh = false,
+            )
+        ) HistoryApplyResult.APPLIED else HistoryApplyResult.FAILED
+    }
+
+    private fun recordSuccessfulEditorEdit(
+        captured: CapturedEditorEdit,
+        start: Int,
+        endExclusive: Int,
+        replacement: String,
+        kind: SentenceEditKind,
+        coalescingKey: String?,
+        selectionBeforeStart: Int,
+        selectionBeforeEnd: Int,
+        selectionAfterStart: Int,
+        selectionAfterEnd: Int,
+    ) {
+        val snapshot = captured.snapshot
+        val localStart = start - snapshot.offset
+        val localEnd = endExclusive - snapshot.offset
+        if (localStart < 0 || localEnd < localStart || localEnd > snapshot.text.length) return
+        val replacedText = snapshot.text.substring(localStart, localEnd)
+        sentenceEditHistory.recordAppliedEdit(
+            SentenceEdit(
+                sourceStart = start,
+                sourceEndExclusive = endExclusive,
+                replacedText = replacedText,
+                replacementText = replacement,
+                selectionBeforeStart = selectionBeforeStart,
+                selectionBeforeEnd = selectionBeforeEnd,
+                selectionAfterStart = selectionAfterStart,
+                selectionAfterEnd = selectionAfterEnd,
+                kind = kind,
+                coalescingKey = coalescingKey,
+            ),
+        )
+        updateLatestEditorSnapshot(captured, start, endExclusive, replacement, selectionAfterStart, selectionAfterEnd)
+    }
+
+    private fun updateLatestEditorSnapshot(
+        captured: CapturedEditorEdit,
+        start: Int,
+        endExclusive: Int,
+        replacement: String,
+        selectionAfterStart: Int,
+        selectionAfterEnd: Int = selectionAfterStart,
+    ) {
+        val snapshot = captured.snapshot
+        val localStart = start - snapshot.offset
+        val localEnd = endExclusive - snapshot.offset
+        if (localStart < 0 || localEnd < localStart || localEnd > snapshot.text.length) return
+        val updatedText = snapshot.text.substring(0, localStart) + replacement + snapshot.text.substring(localEnd)
+        latestEditorSnapshot = snapshot.copy(
+            text = updatedText,
+            selectionStart = selectionAfterStart,
+            selectionEnd = selectionAfterEnd,
+        )
+    }
+
+    private fun isTypingCharacter(character: Char): Boolean =
+        character.isLetterOrDigit() || when (Character.getType(character)) {
+            Character.NON_SPACING_MARK.toInt(),
+            Character.COMBINING_SPACING_MARK.toInt(),
+            Character.ENCLOSING_MARK.toInt(), -> true
+            else -> false
+        }
+
     /**
      * Mirrors a typed word into the session history so every correction path a swiped word already
      * gets - suggestion chips, the replacement reel, flow correction, learning - can address it.
@@ -796,22 +1004,23 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun deleteSurroundingText(count: Int) {
-        val inputConnection = currentInputConnection ?: return
         val oldCursor = cursorPosition
         typedWords.onDeleted(count, cursorBefore = oldCursor)
-        if (textObservationEnabled) {
-            editorTextChangeDetector.expectOwnEdit(
-                start = (oldCursor - count).coerceAtLeast(0),
-                end = oldCursor,
+        val start = (oldCursor - count).coerceAtLeast(0)
+        if (!applyEditorReplacement(
+                start = start,
+                endExclusive = oldCursor,
                 replacement = "",
+                kind = SentenceEditKind.BACKSPACE,
+                coalescingKey = "backspace",
+                cursorAfter = start,
+                refresh = false,
             )
-        }
-        if (!inputConnection.deleteSurroundingText(count, 0)) return
+        ) return
         correctionHistory.words()
             .filter { it.start < oldCursor && it.end > (oldCursor - count).coerceAtLeast(0) }
             .forEach { correctionHistory.breakCompositeGroupFor(it.id) }
         lastDeletedWord = correctionHistory.words().firstOrNull { it.end == oldCursor }?.current
-        val start = (oldCursor - count).coerceAtLeast(0)
         correctionHistory.deleteRange(start, oldCursor)
         cursorPosition = start
         selectionEndPosition = start
@@ -829,12 +1038,15 @@ class IaidoInputMethodService : InputMethodService() {
             return
         }
         val inputConnection = currentInputConnection ?: return
+        observeCurrentEditorText()
         backspaceSwipeText = inputConnection
             .getTextBeforeCursor(MAX_BACKSPACE_SWIPE_CHARS, 0)
             ?.toString()
             .orEmpty()
         backspaceSwipeCursor = cursorPosition
         backspaceSwipeDeletedCount = 0
+        backspaceSwipeInitialSnapshot = latestEditorSnapshot
+        sentenceEditHistory.closeGroup()
     }
 
     private fun updateBackspaceSwipe(requestedCharacters: Int) {
@@ -850,18 +1062,22 @@ class IaidoInputMethodService : InputMethodService() {
         val currentCursor = backspaceSwipeCursor - backspaceSwipeDeletedCount
         if (!inputConnection.setSelection(currentCursor, currentCursor)) return
         if (delta > 0) {
+            val capture = if (textObservationEnabled) captureEditorEdit(currentCursor - delta, currentCursor) else null
             if (textObservationEnabled) {
                 editorTextChangeDetector.expectOwnEdit(currentCursor - delta, currentCursor, "")
             }
             if (!inputConnection.deleteSurroundingText(delta, 0)) return
+            capture?.let { updateLatestEditorSnapshot(it, currentCursor - delta, currentCursor, "", currentCursor - delta) }
         } else {
             val restoreStart = backspaceSwipeText.length - backspaceSwipeDeletedCount
             val restoreEnd = backspaceSwipeText.length - target
             val restored = backspaceSwipeText.substring(restoreStart, restoreEnd)
+            val capture = if (textObservationEnabled) captureEditorEdit(currentCursor, currentCursor) else null
             if (textObservationEnabled) {
                 editorTextChangeDetector.expectOwnEdit(currentCursor, currentCursor, restored)
             }
             if (!inputConnection.commitText(restored, 1)) return
+            capture?.let { updateLatestEditorSnapshot(it, currentCursor, currentCursor, restored, currentCursor + restored.length) }
         }
         backspaceSwipeDeletedCount = target
         cursorPosition = backspaceSwipeCursor - target
@@ -870,8 +1086,25 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun finishBackspaceSwipe() {
         if (backspaceSwipeDeletedCount > 0) {
+            val start = backspaceSwipeCursor - backspaceSwipeDeletedCount
+            val initial = backspaceSwipeInitialSnapshot
+            val capture = captureEditorEdit(initial, start, backspaceSwipeCursor)
+            if (capture != null) {
+                recordSuccessfulEditorEdit(
+                    captured = capture,
+                    start = start,
+                    endExclusive = backspaceSwipeCursor,
+                    replacement = "",
+                    kind = SentenceEditKind.BACKSPACE,
+                    coalescingKey = null,
+                    selectionBeforeStart = backspaceSwipeCursor,
+                    selectionBeforeEnd = backspaceSwipeCursor,
+                    selectionAfterStart = start,
+                    selectionAfterEnd = start,
+                )
+            }
             correctionHistory.deleteRange(
-                backspaceSwipeCursor - backspaceSwipeDeletedCount,
+                start,
                 backspaceSwipeCursor,
             )
             refreshSuggestionChips()
@@ -889,6 +1122,7 @@ class IaidoInputMethodService : InputMethodService() {
         backspaceSwipeText = ""
         backspaceSwipeCursor = 0
         backspaceSwipeDeletedCount = 0
+        backspaceSwipeInitialSnapshot = null
     }
 
     private fun undoBackspace() {
@@ -960,6 +1194,10 @@ class IaidoInputMethodService : InputMethodService() {
         liveReplacementOptionIds.value = live.map { it.id }.toSet()
         val merged = mergedReplacementOptions(live)
         replacementOptions.value = merged
+        publishSentenceStripState(merged)
+    }
+
+    private fun publishSentenceStripState(mergedReplacementOptions: List<ReplacementOption> = replacementOptions.value) {
         val snapshot = latestEditorSnapshot?.copy(
             selectionStart = cursorPosition,
             selectionEnd = selectionEndPosition,
@@ -969,8 +1207,11 @@ class IaidoInputMethodService : InputMethodService() {
             snapshot = snapshot,
             language = activeLanguage,
             history = correctionHistory.words(),
-            replacementOptions = merged,
+            replacementOptions = mergedReplacementOptions,
             textObservationAllowed = textObservationEnabled,
+        ).copy(
+            canUndo = sentenceEditHistory.canUndo,
+            canRedo = sentenceEditHistory.canRedo,
         )
     }
 
@@ -978,18 +1219,20 @@ class IaidoInputMethodService : InputMethodService() {
         (liveOptions + cachedHistoryJoinCandidates).distinctBy(ReplacementOption::id)
 
     private fun joinSessionWords(firstId: Int, secondId: Int, replacement: String): Boolean {
-        val inputConnection = currentInputConnection ?: return false
         val words = correctionHistory.words()
         val first = words.firstOrNull { it.id == firstId } ?: return false
         val second = words.firstOrNull { it.id == secondId } ?: return false
-        if (!inputConnection.setSelection(first.start, second.end)) return false
-        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(first.start, second.end, replacement)
-        if (!inputConnection.commitText(replacement, 1)) return false
+        if (!applyEditorReplacement(
+                start = first.start,
+                endExclusive = second.end,
+                replacement = replacement,
+                kind = SentenceEditKind.JOIN,
+                cursorAfter = first.start + replacement.length,
+                refresh = false,
+            )
+        ) return false
         correctionHistory.join(firstId, secondId, replacement)
         typedWords.reset()
-        cursorPosition = first.start + replacement.length
-        selectionEndPosition = cursorPosition
-        inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips(firstId)
         return true
     }
@@ -1132,21 +1375,25 @@ class IaidoInputMethodService : InputMethodService() {
             ?.let { id -> correctionHistory.words().firstOrNull { it.id == id } }
 
     private fun replaceSessionWord(id: Int, replacement: String, preserveCursor: Boolean = false): Boolean {
-        val inputConnection = currentInputConnection ?: return false
         val word = correctionHistory.words().firstOrNull { it.id == id } ?: return false
         if (word.current == replacement) return false
         val oldCursor = cursorPosition
-        if (!inputConnection.setSelection(word.start, word.end)) return false
-        if (textObservationEnabled) editorTextChangeDetector.expectOwnEdit(word.start, word.end, replacement)
-        if (!inputConnection.commitText(replacement, 1)) return false
+        val delta = replacement.length - word.current.length
+        val cursorAfter = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
+        else word.start + replacement.length
+        if (!applyEditorReplacement(
+                start = word.start,
+                endExclusive = word.end,
+                replacement = replacement,
+                kind = SentenceEditKind.CORRECTION,
+                expectedSourceText = word.current,
+                cursorAfter = cursorAfter,
+                refresh = false,
+            )
+        ) return false
         correctionHistory.breakCompositeGroupFor(id)
         correctionHistory.replace(id, replacement)
         typedWords.reset()
-        val delta = replacement.length - word.current.length
-        cursorPosition = if (preserveCursor && word.end <= oldCursor) oldCursor + delta
-        else word.start + replacement.length
-        selectionEndPosition = cursorPosition
-        inputConnection.setSelection(cursorPosition, cursorPosition)
         refreshSuggestionChips(id)
         return true
     }
@@ -1209,9 +1456,13 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun observeEditorSnapshot(snapshot: EditorSnapshot) {
+        val previousSnapshot = latestEditorSnapshot
+        if (previousSnapshot != null && previousSnapshot.text != snapshot.text) {
+            swipeTypingCoordinator.onExternalEdit()
+            sentenceEditHistory.markExternalEdit()
+        }
         latestEditorSnapshot = snapshot
         editorTextChangeDetector.observe(snapshot)?.let { candidate ->
-            swipeTypingCoordinator.onExternalEdit()
             if (pendingManualEdit.value == null) pendingManualEdit.value = candidate
         }
         cursorPosition = snapshot.selectionStart

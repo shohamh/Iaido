@@ -37,6 +37,7 @@ class SwipeTypingCoordinator(
     private val isSplitPending: () -> Boolean = { false },
     private val segmenter: InferenceSegmenter = InferenceSegmenter(),
     private val onReplacementOptionsChanged: (List<ReplacementOption>) -> Unit = {},
+    private val onInferenceTransactionFinished: () -> Unit = {},
 ) {
     private val transaction = SwipeInferenceTransaction(
         cursorPosition = cursorPosition,
@@ -221,10 +222,12 @@ class SwipeTypingCoordinator(
     }
 
     private fun finalizeAndClear() {
+        val hadActiveTransaction = transaction.sourceSpan != null || transaction.units.isNotEmpty()
         replacementSelection = null
         capitalizeFirstWord = false
         transaction.finalize()
         transaction.clear()
+        if (hadActiveTransaction) onInferenceTransactionFinished()
         notifyReplacementOptionsChanged()
     }
 
