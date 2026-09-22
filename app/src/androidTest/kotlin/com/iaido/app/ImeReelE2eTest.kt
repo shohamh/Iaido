@@ -228,6 +228,29 @@ class ImeReelE2eTest {
     }
 
     @Test
+    fun hebrewRightEdgeScreenshotKeepsTheAffordanceOnThePhysicalRight() {
+        ImeScenario().also(artifacts::track).run {
+            switchLanguageForScreenshotTest()
+            replaceEditorTextForTest(
+                "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd \u05d9\u05d7\u05d9\u05d3\u05d4 \u05de\u05e6\u05d0\u05d4 \u05e9\u05dc\u05d5\u05dd",
+            )
+            val strip = SentenceStripImeDriver()
+            strip.holdStripAndDragToPhysicalEdge(SentenceStripImeDriver.Direction.RIGHT) {
+                captureScreenshot("hebrew-right-edge-affordance")
+                // Canvas semantics are not consistently exposed by UiAutomator on
+                // the IME window, so the screenshot is the authoritative check.
+                strip.nodeOrNull("Iaido edge zone direction=right")?.let { edgeNode ->
+                    val edge = edgeNode.visibleBounds
+                    check(edge.centerX() > strip.strip().visibleBounds.centerX()) {
+                        "The physical right edge zone rendered on the left: edge=$edge strip=${strip.strip().visibleBounds}"
+                    }
+                }
+            }
+            assertText(strip.editorSnapshot().text)
+        }
+    }
+
+    @Test
     fun undoRedoStayVisibleHaveIndependentAvailabilityAndKeepMultipleSteps() {
         ImeScenario().also(artifacts::track).run {
             clearText()

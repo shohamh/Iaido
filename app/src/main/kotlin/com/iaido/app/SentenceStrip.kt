@@ -521,19 +521,23 @@ internal fun SentenceStrip(
                     animationSpec = tween(110),
                     label = "edge-scroll-affordance",
                 )
+                // Edge zones are physical screen affordances. Resolve their
+                // alignment against the parent direction explicitly; using
+                // CenterStart/CenterEnd without this mapping mirrors the zone
+                // in Hebrew while the chevron still points physically right.
+                val edgeAlignment = when {
+                    rtl && lastEdgeDirection == EdgeScrollDirection.LEFT -> Alignment.CenterEnd
+                    rtl && lastEdgeDirection == EdgeScrollDirection.RIGHT -> Alignment.CenterStart
+                    !rtl && lastEdgeDirection == EdgeScrollDirection.LEFT -> Alignment.CenterStart
+                    else -> Alignment.CenterEnd
+                }
                 EdgeScrollAffordance(
                     direction = lastEdgeDirection,
                     penetration = edgeScrollTargetState.value?.penetration ?: 0f,
                     active = edgeScrollTargetState.value != null,
                     modifier = Modifier
                         .graphicsLayer { alpha = edgeFade }
-                        .align(
-                            if (lastEdgeDirection == EdgeScrollDirection.LEFT) {
-                                Alignment.CenterStart
-                            } else {
-                                Alignment.CenterEnd
-                            },
-                    ),
+                        .align(edgeAlignment),
                 )
                 replacementPreview?.takeIf(SentenceReplacementPreview::isJoin)?.let { join ->
                     JoinPreviewOverlay(

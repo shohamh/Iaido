@@ -189,6 +189,20 @@ internal class SentenceStripImeDriver(
         )
     }
 
+    fun holdStripAndDragToPhysicalEdge(direction: Direction, whilePreviewing: () -> Unit) {
+        val bounds = strip().visibleBounds
+        val start = PointF(bounds.exactCenterX(), bounds.exactCenterY())
+        val edgeX = if (direction == Direction.RIGHT) bounds.right - 8f else bounds.left + 8f
+        val edge = PointF(edgeX, bounds.exactCenterY())
+        dragPathAndObserve(
+            listOf(start, start, edge, edge),
+            edge,
+            whilePreviewing,
+            holdBeforeMoveMs = 480L,
+            holdAfterMoveMs = 600L,
+        )
+    }
+
     fun tapUndo() = tapCenter(requiredNode("Iaido undo").visibleBounds)
 
     fun tapRedo() = tapCenter(requiredNode("Iaido redo").visibleBounds)
