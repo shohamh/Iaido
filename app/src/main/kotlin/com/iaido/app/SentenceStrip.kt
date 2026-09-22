@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -64,6 +65,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -71,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -368,6 +371,7 @@ internal fun SentenceStrip(
                 .background(KeyboardPalette.Screen)
                 .semantics {
                     contentDescription = "Iaido sentence strip"
+                    isTraversalGroup = true
                 },
         ) {
             Row(
@@ -586,7 +590,8 @@ private fun JoinPreviewOverlay(
     )
     // Measured bounds are already in the viewport's coordinate space. Only
     // use the model-space transform as a fallback before the first layout pass.
-    val leftPx = viewportBounds?.left ?: stripViewportX(
+    val renderedBounds = viewportBounds?.takeUnless { isRtl }
+    val leftPx = renderedBounds?.left ?: stripViewportX(
         bounds.left,
         geometry.contentWidthPx,
         scrollValue,
@@ -595,7 +600,7 @@ private fun JoinPreviewOverlay(
         viewportCoordinates,
         rowCoordinates,
     )
-    val rightPx = viewportBounds?.right ?: stripViewportX(
+    val rightPx = renderedBounds?.right ?: stripViewportX(
         bounds.right,
         geometry.contentWidthPx,
         scrollValue,
@@ -614,61 +619,63 @@ private fun JoinPreviewOverlay(
         .filterNotNull()
         .firstOrNull { it != preview.replacementText && it != originalText }
     val shape = RoundedCornerShape(12.dp)
-    Box(
-        modifier = Modifier
-            .absoluteOffset(x = left, y = 6.dp)
-            .width(width)
-            .height(66.dp)
-            .background(KeyboardPalette.Screen, shape)
-            .border(1.2.dp, KeyboardPalette.Accent, shape)
-            .semantics {
-                contentDescription = "Iaido join preview text=${preview.replacementText} " +
-                    "sourceStart=${preview.sourceStart} sourceEnd=${preview.sourceEndExclusive}"
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 1.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier = Modifier
+                .absoluteOffset(x = left, y = 6.dp)
+                .width(width)
+                .height(66.dp)
+                .background(KeyboardPalette.Screen, shape)
+                .border(1.2.dp, KeyboardPalette.Accent, shape)
+                .semantics {
+                    contentDescription = "Iaido join preview text=${preview.replacementText} " +
+                        "sourceStart=${preview.sourceStart} sourceEnd=${preview.sourceEndExclusive}"
+                },
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .requiredWidth(44.dp)
-                    .background(KeyboardPalette.Accent, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 7.dp, vertical = 1.dp),
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 1.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
+                Box(
+                    modifier = Modifier
+                        .requiredWidth(44.dp)
+                        .background(KeyboardPalette.Accent, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 7.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        "JOIN",
+                        color = KeyboardPalette.Page,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
                 Text(
-                    "JOIN",
-                    color = KeyboardPalette.Page,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = originalText,
+                    color = KeyboardPalette.PrimaryInk.copy(alpha = 0.64f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    text = preview.replacementText,
+                    color = KeyboardPalette.Accent,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    text = alternative.orEmpty(),
+                    color = KeyboardPalette.PrimaryInk.copy(alpha = 0.64f),
+                    fontSize = 12.sp,
                     maxLines = 1,
                     softWrap = false,
                 )
             }
-            Text(
-                text = originalText,
-                color = KeyboardPalette.PrimaryInk.copy(alpha = 0.64f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                softWrap = false,
-            )
-            Text(
-                text = preview.replacementText,
-                color = KeyboardPalette.Accent,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                softWrap = false,
-            )
-            Text(
-                text = alternative.orEmpty(),
-                color = KeyboardPalette.PrimaryInk.copy(alpha = 0.64f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                softWrap = false,
-            )
         }
     }
 }
@@ -693,12 +700,12 @@ private fun DeletionPreviewOverlay(
         viewportCoordinates = viewportCoordinates,
         wordCoordinates = wordCoordinates,
     )
-    if (viewportCoordinates?.isAttached == true && viewportBounds == null) return
     if (viewportBounds == null && bounds == null) return
-    // The rendered lanes are laid out by Compose's bidi-aware Row. Use their
-    // measured viewport bounds whenever available; transforming model-space
-    // bounds again mirrors the RTL row a second time and clips the overlay.
-    val leftPx = viewportBounds?.left ?: bounds?.let {
+    // Compose's RTL Row reports child coordinates in a different logical order
+    // while the geometry model already places words physically. Use model-space
+    // bounds for RTL and measured bounds for LTR.
+    val renderedBounds = viewportBounds?.takeUnless { isRtl }
+    val leftPx = renderedBounds?.left ?: bounds?.let {
         stripViewportX(
             it.left,
             geometry.contentWidthPx,
@@ -709,7 +716,7 @@ private fun DeletionPreviewOverlay(
             rowCoordinates,
         )
     } ?: return
-    val rightPx = viewportBounds?.right ?: bounds?.let {
+    val rightPx = renderedBounds?.right ?: bounds?.let {
         stripViewportX(
             it.right,
             geometry.contentWidthPx,
@@ -731,36 +738,39 @@ private fun DeletionPreviewOverlay(
             ).toDp()
     }
     val shape = RoundedCornerShape(12.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .semantics {
-                contentDescription = "Iaido deletion preview startWord=${preview.wordRange.first} " +
-                    "endWord=${preview.wordRange.last} start=${preview.sourceStart} " +
-                    "end=${preview.sourceEndExclusive}"
-            },
-    ) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Box(
             modifier = Modifier
-                .absoluteOffset(x = left, y = 6.dp)
-                .width(width)
-                .height(66.dp)
-                .background(KeyboardPalette.Delete.copy(alpha = 0.12f), shape)
-                .border(1.5.dp, KeyboardPalette.Delete, shape),
-        )
-        Text(
-            text = "DELETE",
-            modifier = Modifier
-                .absoluteOffset(x = badgeLeft, y = 6.dp)
-                .requiredWidth(badgeWidth)
-                .background(KeyboardPalette.Delete, RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
-                .padding(horizontal = 8.dp, vertical = 1.dp),
-            color = KeyboardPalette.Page,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
-        )
+                .fillMaxSize()
+                .zIndex(2f)
+                .semantics {
+                    contentDescription = "Iaido deletion preview startWord=${preview.wordRange.first} " +
+                        "endWord=${preview.wordRange.last} start=${preview.sourceStart} " +
+                        "end=${preview.sourceEndExclusive}"
+                },
+        ) {
+            Box(
+                modifier = Modifier
+                    .absoluteOffset(x = left, y = 6.dp)
+                    .width(width)
+                    .height(66.dp)
+                    .background(KeyboardPalette.Delete.copy(alpha = 0.12f), shape)
+                    .border(1.5.dp, KeyboardPalette.Delete, shape),
+            )
+            Text(
+                text = "DELETE",
+                modifier = Modifier
+                    .absoluteOffset(x = badgeLeft, y = 6.dp)
+                    .requiredWidth(badgeWidth)
+                    .background(KeyboardPalette.Delete, RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
+                color = KeyboardPalette.Page,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
 }
 
@@ -848,7 +858,17 @@ private fun SentenceWordLane(
 ) {
     val hasCaret = cursorOffset != null
     Column(
-        modifier = Modifier.width(laneWidth).onGloballyPositioned(onPositioned),
+        modifier = Modifier
+            .width(laneWidth)
+            .onGloballyPositioned(onPositioned)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Iaido sentence word index=$wordIndex start=${word.start} " +
+                    "end=${word.endExclusive} deleting=$isDeleting text=${word.text}"
+                onClick(label = "Place cursor at end of word") {
+                    onSelect()
+                    true
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

@@ -134,6 +134,14 @@ class ImeScenario(
         checkpoint("clearText")
     }
 
+    fun replaceEditorTextForTest(value: String) {
+        editor.replaceText(value)
+        expectedText = value
+        expectedSelection = editor.selection().last
+        expectedLastInputWasSwipe = false
+        checkpoint("replaceEditorTextForTest")
+    }
+
     fun swipeWord(word: String) {
         swipePath(word)
     }
@@ -248,6 +256,14 @@ class ImeScenario(
     }
 
     fun switchLanguage() = tapKey("globe")
+
+    /** Switches the visual IME language without trusting a stale accessibility snapshot. */
+    fun switchLanguageForScreenshotTest() {
+        val before = expectedLanguage
+        pendingPointerEvents = editor.tapMarkedKey(keyDescription("globe"))
+        expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
+        SystemClock.sleep(750L)
+    }
 
     fun twoFingerLanguageSwitch() {
         val window = keyboard()

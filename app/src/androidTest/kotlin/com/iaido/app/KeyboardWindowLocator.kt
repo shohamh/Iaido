@@ -28,7 +28,10 @@ object KeyboardWindowLocator {
     const val LANGUAGE_DESCRIPTION_PREFIX = "Iaido language "
     const val KEY_DESCRIPTION_PREFIX = "Iaido key "
 
-    private val requiredKeys = listOf("globe", "settings", "space", "backspace")
+    // The current bottom row is globe, comma, space, period, enter. Settings is
+    // opened from the Settings activity now, so it is no longer a required IME
+    // key and older emulator tests must not block on it.
+    private val requiredKeys = listOf("globe", "space", "backspace", "enter")
 
     fun locate(device: UiDevice, timeoutMs: Long = 5_000L): KeyboardWindow {
         val startedAtMs = SystemClock.elapsedRealtime()

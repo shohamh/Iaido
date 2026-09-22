@@ -183,6 +183,20 @@ class SentenceStripGeometryTest {
     }
 
     @Test
+    fun `RTL focus runway stays after the words instead of shifting them right`() {
+        val geometry = SentenceStripGeometry.create(
+            words = listOf(word("one", 0, 3, 40f), word("two", 4, 7, 40f)),
+            gapWidthsPx = listOf(0f),
+            viewportWidthPx = 50f,
+            isRtl = true,
+        )
+
+        assertEquals(25f, geometry.focusRunwayWidthPx)
+        assertEquals(84f, geometry.words.first().laneBounds.right)
+        assertEquals(0f, geometry.words.last().laneBounds.left)
+    }
+
+    @Test
     fun `join union covers both lanes and their separating gap`() {
         val geometry = SentenceStripGeometry.create(
             words = listOf(word("in", 0, 2, 20f), word("to", 3, 5, 18f)),

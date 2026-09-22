@@ -56,6 +56,11 @@ class ImeEditorDriver(
         waitForText("")
     }
 
+    fun replaceText(value: String) {
+        setMarkedText("ime_test_editor", value)
+        waitForText(value)
+    }
+
     fun snapshot(): ImeEditorSnapshot {
         repeat(SNAPSHOT_READ_ATTEMPTS) {
             val status = readMarked("ime_test_status") {

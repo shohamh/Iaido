@@ -504,10 +504,10 @@ class IaidoInputMethodService : InputMethodService() {
                         onTap = { value ->
                             swipeTypingCoordinator.onNonSwipeInput()
                             when (value) {
-                                "⌫" -> typingController.backspace()
+                                BACKSPACE_KEY -> typingController.backspace()
                                 ENTER_KEY -> performEnterAction()
                                 SETTINGS_KEY -> openSettings()
-                                "🌐" -> switchLanguage()
+                                GLOBE_KEY -> switchLanguage()
                             else -> typingController.tap(value)
                         }
                     },

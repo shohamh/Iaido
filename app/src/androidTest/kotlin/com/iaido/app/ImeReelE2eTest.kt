@@ -1,5 +1,6 @@
 package com.iaido.app
 
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -171,6 +172,31 @@ class ImeReelE2eTest {
             assertText(before)
             strip.tapRedo()
             assertText(after)
+        }
+    }
+
+    @Test
+    fun hebrewDeletionPreviewBoundsCoverTheRenderedWords() {
+        ImeScenario().also(artifacts::track).run {
+            switchLanguageForScreenshotTest()
+            replaceEditorTextForTest(
+                "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd \u05d7\u05dc\u05e7\u05d9\u05dd " +
+                    "\u05d9\u05d7\u05d9\u05d3\u05d4 \u05de\u05e6\u05d0\u05d4 \u05de\u05e6\u05d0\u05d4",
+            )
+            val strip = SentenceStripImeDriver()
+
+            strip.swipeApproximateHebrewDeletion {
+                SystemClock.sleep(350L)
+                captureScreenshot("hebrew-deletion-preview-bounds")
+                val deletion = strip.deletionPreviewOrNull()
+                if (deletion != null) {
+                    check(strip.strip().visibleBounds.contains(deletion.visibleBounds)) {
+                        "Hebrew delete outline ${deletion.visibleBounds} escaped the strip " +
+                        "${strip.strip().visibleBounds}"
+                    }
+                }
+            }
+            assertText(strip.editorSnapshot().text)
         }
     }
 

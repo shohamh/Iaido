@@ -20,13 +20,13 @@ class KeyboardGeometryTest {
     }
 
     @Test
-    fun `Hebrew lower row keeps shift and backspace at least one unit wide`() {
-        assertEquals(1f, modifierKeyWeight(9), 0.001f)
+    fun `Hebrew lower row fits nine letters between narrow side modifiers`() {
+        assertEquals(0.5f, modifierKeyWeight(9, showShift = false), 0.001f)
         assertEquals(1.5f, modifierKeyWeight(7), 0.001f)
-        assertEquals(8f / 9f, modifierLetterKeyWeight(9), 0.001f)
-        assertEquals(10f, modifierKeyWeight(9) * 2 + modifierLetterKeyWeight(9) * 9, 0.001f)
-        assertEquals(100f * 13f / 9f, modifierRowLetterCenterPx(0, 9, 100f), 0.001f)
-        assertEquals(100f * 77f / 9f, modifierRowLetterCenterPx(8, 9, 100f), 0.001f)
+        assertEquals(1f, modifierLetterKeyWeight(9, showShift = false), 0.001f)
+        assertEquals(10f, modifierKeyWeight(9, false) * 2 + modifierLetterKeyWeight(9, false) * 9, 0.001f)
+        assertEquals(100f, modifierRowLetterCenterPx(0, 9, 100f, showShift = false), 0.001f)
+        assertEquals(900f, modifierRowLetterCenterPx(8, 9, 100f, showShift = false), 0.001f)
     }
 
     @Test
@@ -35,7 +35,8 @@ class KeyboardGeometryTest {
 
         assertEquals(150f, layout.centerOf('\u05e7').x, 0.001f)
         assertEquals(850f, layout.centerOf('\u05e4').x, 0.001f)
-        assertEquals(modifierRowLetterCenterPx(0, 9, 100f), layout.centerOf('\u05d6').x, 0.001f)
+        assertEquals(modifierRowLetterCenterPx(0, 9, 100f, showShift = false), layout.centerOf('\u05d6').x, 0.001f)
+        assertEquals(900f, layout.centerOf('\u05e5').x, 0.001f)
     }
 
     @Test

@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,7 +67,7 @@ import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.delay
 
-private const val GLOBE_KEY = "\uD83C\uDF10"
+internal const val GLOBE_KEY = "\uD83C\uDF10"
 internal const val SETTINGS_KEY = "\u2699"
 internal const val BACKSPACE_KEY = "\u232B"
 internal const val SHIFT_KEY = "shift"
@@ -256,13 +257,15 @@ internal fun KeyboardInputView(
                     .fillMaxWidth()
                     .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION },
             ) {
-            Text(
-                text = language.name,
-                modifier = Modifier
-                    .size(1.dp)
-                    .semantics { contentDescription = "Iaido language ${language.name}" },
-                color = androidx.compose.ui.graphics.Color.Transparent,
-            )
+            key(language) {
+                Text(
+                    text = language.name,
+                    modifier = Modifier
+                        .size(1.dp)
+                        .semantics { contentDescription = "Iaido language ${language.name}" },
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                )
+            }
             SentenceStrip(
                 state = sentenceStripState,
                 rtl = language == Language.HEBREW,
@@ -547,26 +550,28 @@ internal fun KeyboardInputView(
                     },
             ) {
                 val rows = keyboardLetterRowsFor(language)
-                if (showNumberRow) KeyboardNumberRow(keyHeight, pressedKey = startKey)
-                rows.take(2).forEachIndexed { index, row ->
-                    KeyboardRow(
-                        letters = row,
-                        offset = keySize * keyboardRowOffsetUnits(row.length, columnCount),
-                        y = keyHeight * (index + if (showNumberRow) 1 else 0),
+                key(language) {
+                    if (showNumberRow) KeyboardNumberRow(keyHeight, pressedKey = startKey)
+                    rows.take(2).forEachIndexed { index, row ->
+                        KeyboardRow(
+                            letters = row,
+                            offset = keySize * keyboardRowOffsetUnits(row.length, columnCount),
+                            y = keyHeight * (index + if (showNumberRow) 1 else 0),
+                            keySize = keyHeight,
+                            pressedKey = startKey,
+                            shiftState = visibleShiftState,
+                        )
+                    }
+                    KeyboardModifierRow(
+                        letters = rows[2],
+                        y = keyHeight * (rowCount - 2),
                         keySize = keyHeight,
                         pressedKey = startKey,
                         shiftState = visibleShiftState,
+                        showShift = language == Language.ENGLISH,
                     )
+                    KeyboardBottomRow(keyHeight, rowCount, language, pressedKey = startKey)
                 }
-                KeyboardModifierRow(
-                    letters = rows[2],
-                    y = keyHeight * (rowCount - 2),
-                    keySize = keyHeight,
-                    pressedKey = startKey,
-                    shiftState = visibleShiftState,
-                    showShift = language == Language.ENGLISH,
-                )
-                KeyboardBottomRow(keyHeight, rowCount, language, pressedKey = startKey)
                 Canvas(modifier = Modifier.fillMaxWidth().height(keyboardSurfaceHeight)) {
                     drawSwipeTrail(trailPoints, KeyboardPalette.Accent, trailOpacity)
                 }
@@ -610,16 +615,18 @@ private fun KeyboardRow(
         modifier = Modifier.offset(x = offset + gap / 2, y = y),
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
-        letters.forEach { letter ->
-            KeyboardKey(
-                label = letter.toString().let { key ->
-                    if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
-                },
-                width = keySize - gap,
-                height = keySize,
-                pressed = pressedKey == letter.toString(),
-                testKey = letter.toString(),
-            )
+        key(letters) {
+            letters.forEach { letter ->
+                KeyboardKey(
+                    label = letter.toString().let { key ->
+                        if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
+                    },
+                    width = keySize - gap,
+                    height = keySize,
+                    pressed = pressedKey == letter.toString(),
+                    testKey = letter.toString(),
+                )
+            }
         }
     }
 }
@@ -634,10 +641,10 @@ private fun KeyboardModifierRow(
     showShift: Boolean,
 ) {
     val gap = 3.dp
-    val modifierWeight = modifierKeyWeight(letters.length)
-    val letterWeight = modifierLetterKeyWeight(letters.length)
+    val modifierWeight = modifierKeyWeight(letters.length, showShift)
+    val letterWeight = modifierLetterKeyWeight(letters.length, showShift)
     Row(
-        modifier = Modifier.offset(y = y),
+        modifier = Modifier.fillMaxWidth().offset(y = y),
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         if (showShift) {
@@ -653,16 +660,18 @@ private fun KeyboardModifierRow(
         } else {
             Spacer(Modifier.weight(modifierWeight).height(keySize))
         }
-        letters.forEach { letter ->
-            KeyboardKey(
-                label = letter.toString().let { key ->
-                    if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
-                },
-                modifier = Modifier.weight(letterWeight),
-                height = keySize,
-                pressed = pressedKey == letter.toString(),
-                testKey = letter.toString(),
-            )
+        key(letters) {
+            letters.forEach { letter ->
+                KeyboardKey(
+                    label = letter.toString().let { key ->
+                        if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
+                    },
+                    modifier = Modifier.weight(letterWeight),
+                    height = keySize,
+                    pressed = pressedKey == letter.toString(),
+                    testKey = letter.toString(),
+                )
+            }
         }
         KeyboardKey(
             label = "",
@@ -887,7 +896,8 @@ internal fun keyAt(
     }
     val modifierRowTop = keyboardBottomRowTopPx(size, keyboardRowCount(showNumberRow)) - size
     if (y >= modifierRowTop) {
-        val modifierWeight = modifierKeyWeight(keyboardLetterRowsFor(language).last().length)
+        val showShift = language == Language.ENGLISH
+        val modifierWeight = modifierKeyWeight(keyboardLetterRowsFor(language).last().length, showShift)
         if (x < modifierWeight * size) {
             return if (language == Language.ENGLISH) SHIFT_KEY else null
         }
@@ -932,20 +942,27 @@ internal fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> 
     ENTER_KEY to 1f,
 )
 
-internal fun modifierKeyWeight(letterCount: Int): Float =
-    if (letterCount <= 0) 0f else maxOf(
-        1f,
-        ((KEYBOARD_LETTER_ROW_COLUMN_COUNT - letterCount).coerceAtLeast(0)) / 2f,
-    )
-
-internal fun modifierLetterKeyWeight(letterCount: Int): Float =
+internal fun modifierKeyWeight(letterCount: Int, showShift: Boolean = true): Float =
     if (letterCount <= 0) 0f else {
-        (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierKeyWeight(letterCount) * 2f) / letterCount
+        ((KEYBOARD_LETTER_ROW_COLUMN_COUNT - letterCount).coerceAtLeast(0)) / 2f
     }
 
-internal fun modifierRowLetterCenterPx(index: Int, letterCount: Int, keySizePx: Float): Float {
+internal fun modifierLetterKeyWeight(letterCount: Int, showShift: Boolean = true): Float =
+    if (letterCount <= 0) 0f else {
+        (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierKeyWeight(letterCount, showShift) * 2f) / letterCount
+    }
+
+internal fun modifierRowLetterCenterPx(
+    index: Int,
+    letterCount: Int,
+    keySizePx: Float,
+    showShift: Boolean = true,
+): Float {
     require(index in 0 until letterCount)
-    return (modifierKeyWeight(letterCount) + (index + 0.5f) * modifierLetterKeyWeight(letterCount)) * keySizePx
+    return (
+        modifierKeyWeight(letterCount, showShift) +
+            (index + 0.5f) * modifierLetterKeyWeight(letterCount, showShift)
+        ) * keySizePx
 }
 
 /** Letter rows retain the existing QWERTY and Hebrew ordering. */
@@ -968,7 +985,7 @@ internal fun keyboardLayoutFor(size: Float, language: Language, showNumberRow: B
         rows.forEachIndexed { row, letters ->
             val layoutRow = row + if (showNumberRow) 1 else 0
             if (row == rows.lastIndex) {
-                addModifierRow(letters, layoutRow, size)
+                addModifierRow(letters, layoutRow, size, showShift = language == Language.ENGLISH)
             } else {
                 addRow(letters, keyboardRowOffsetUnits(letters.length, columnCount), layoutRow, size)
             }
@@ -981,12 +998,17 @@ private fun MutableList<KeyPosition>.addRow(letters: String, offset: Float, row:
     letters.forEachIndexed { index, letter -> add(KeyPosition(letter, (index + 0.5f + offset) * size, (row + 0.5f) * size)) }
 }
 
-private fun MutableList<KeyPosition>.addModifierRow(letters: String, row: Int, size: Float) {
+private fun MutableList<KeyPosition>.addModifierRow(
+    letters: String,
+    row: Int,
+    size: Float,
+    showShift: Boolean,
+) {
     letters.forEachIndexed { index, letter ->
         add(
             KeyPosition(
                 letter,
-                modifierRowLetterCenterPx(index, letters.length, size),
+                modifierRowLetterCenterPx(index, letters.length, size, showShift),
                 (row + 0.5f) * size,
             ),
         )

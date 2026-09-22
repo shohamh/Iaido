@@ -142,6 +142,19 @@ internal class SentenceStripImeDriver(
         )
     }
 
+    fun swipeApproximateHebrewDeletion(whilePreviewing: () -> Unit) {
+        val bounds = strip().visibleBounds
+        val y = bounds.top + bounds.height() * 0.55f
+        val start = PointF(bounds.right - 300f, y)
+        val lifted = PointF(start.x, y - 24f * instrumentationDensity())
+        val target = PointF(bounds.right - 150f, lifted.y)
+        dragPathAndObserve(
+            listOf(start, lifted, target),
+            target,
+            whilePreviewing,
+        )
+    }
+
     fun horizontalStripSwipe(direction: Direction) {
         val bounds = strip().visibleBounds
         val centerY = bounds.exactCenterY()

@@ -188,7 +188,10 @@ internal data class SentenceStripGeometry(
                 0f
             }
             val totalWidth = measuredContentWidth + focusRunwayWidth
-            var position = if (isRtl) totalWidth else 0f
+            // The trailing focus runway is appended after the word row. Compose's RTL Row
+            // places that trailing content on the physical left, so the first word starts at
+            // the measured word content edge rather than after the runway.
+            var position = if (isRtl) measuredContentWidth else 0f
             val geometries = words.mapIndexed { index, word ->
                 val laneLeft = if (isRtl) {
                     position -= word.laneWidthPx
