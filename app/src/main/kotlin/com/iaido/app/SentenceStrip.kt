@@ -773,12 +773,13 @@ private fun viewportWordUnion(
     val boundsById = ids.mapNotNull { id ->
         val word = wordCoordinates[id] ?: return@mapNotNull null
         if (!word.isAttached) return@mapNotNull null
-        val left = viewportCoordinates.localPositionOf(word, Offset.Zero).x
-        val right = viewportCoordinates.localPositionOf(
-            word,
-            Offset(word.size.width.toFloat(), 0f),
-        ).x
-        id to StripRect(minOf(left, right), 0f, maxOf(left, right), 0f)
+        // Use Compose's transformed bounding box instead of transforming two
+        // endpoints. This preserves the actual RTL placement and horizontal
+        // scroll translation applied to the lane, including any intermediate
+        // graphics layers.
+        val bounds = viewportCoordinates.localBoundingBoxOf(word, clipBounds = false)
+        if (bounds.width <= 0f || bounds.height <= 0f) return@mapNotNull null
+        id to StripRect(bounds.left, bounds.top, bounds.right, bounds.bottom)
     }
     return unionRenderedWordBounds(ids, boundsById.toMap())
 }
