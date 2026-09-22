@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
@@ -77,6 +78,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.withFrameNanos
@@ -120,6 +123,8 @@ internal fun SentenceStrip(
     val edgeScrollTargetState = remember { mutableStateOf<EdgeScrollTarget?>(null) }
     val gestureActiveState = remember { mutableStateOf(false) }
     var lastEdgeDirection by remember { mutableStateOf(EdgeScrollDirection.RIGHT) }
+    var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var rowCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val separators = remember(state.words, state.sentenceText, currentStyle, textMeasurer) {
         state.words.zipWithNext().map { (word, next) ->
             val start = (word.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length)
@@ -225,6 +230,8 @@ internal fun SentenceStrip(
 
     val liveState = rememberUpdatedState(state.copy(words = displayWords))
     val liveMetrics = rememberUpdatedState(metrics)
+    val liveViewportCoordinates = rememberUpdatedState(viewportCoordinates)
+    val liveRowCoordinates = rememberUpdatedState(rowCoordinates)
     LaunchedEffect(gestureActiveState.value, rtl) {
         if (gestureActiveState.value) return@LaunchedEffect
         var lastSentenceStart: Int? = null
@@ -400,8 +407,9 @@ internal fun SentenceStrip(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp)
-                .height(78.dp)
+                    .height(78.dp)
                     .onSizeChanged { viewportWidthPx = it.width }
+                    .onGloballyPositioned { viewportCoordinates = it }
                     .sentenceStripInput(
                         state = liveState,
                         geometry = liveMetrics,
@@ -415,12 +423,15 @@ internal fun SentenceStrip(
                         edgeScrollTarget = edgeScrollTargetState,
                         gestureActive = gestureActiveState,
                         rtl = rtl,
+                        viewportCoordinates = liveViewportCoordinates,
+                        rowCoordinates = liveRowCoordinates,
                     ),
             ) {
                 Row(
                     modifier = Modifier
                         .height(78.dp)
                         .horizontalScroll(scrollState)
+                        .onGloballyPositioned { rowCoordinates = it }
                         .semantics {
                             preview?.let { contentDescription = "Iaido sentence preview text=${it.sentenceText}" }
                         },
@@ -526,6 +537,8 @@ internal fun SentenceStrip(
                         maxScrollValue = scrollState.maxValue,
                         isRtl = rtl,
                         density = density,
+                        viewportCoordinates = viewportCoordinates,
+                        rowCoordinates = rowCoordinates,
                     )
                 }
                 deletionPreview?.let { deletion ->
@@ -536,6 +549,8 @@ internal fun SentenceStrip(
                         maxScrollValue = scrollState.maxValue,
                         isRtl = rtl,
                         density = density,
+                        viewportCoordinates = viewportCoordinates,
+                        rowCoordinates = rowCoordinates,
                     )
                 }
             }
@@ -552,12 +567,28 @@ private fun JoinPreviewOverlay(
     maxScrollValue: Int,
     isRtl: Boolean,
     density: Density,
+    viewportCoordinates: LayoutCoordinates?,
+    rowCoordinates: LayoutCoordinates?,
 ) {
     val first = preview.sourceWordIndices.minOrNull() ?: return
     val last = preview.sourceWordIndices.maxOrNull() ?: return
     val bounds = geometry.joinUnion(first, last)
-    val leftPx = stripViewportX(bounds.left, scrollValue, maxScrollValue, isRtl)
-    val rightPx = stripViewportX(bounds.right, scrollValue, maxScrollValue, isRtl)
+    val leftPx = stripViewportX(
+        bounds.left,
+        scrollValue,
+        maxScrollValue,
+        isRtl,
+        viewportCoordinates,
+        rowCoordinates,
+    )
+    val rightPx = stripViewportX(
+        bounds.right,
+        scrollValue,
+        maxScrollValue,
+        isRtl,
+        viewportCoordinates,
+        rowCoordinates,
+    )
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
     val originalText = preview.sourceWordIndices.sorted().mapNotNull(state.words::getOrNull)
@@ -635,10 +666,26 @@ private fun DeletionPreviewOverlay(
     maxScrollValue: Int,
     isRtl: Boolean,
     density: Density,
+    viewportCoordinates: LayoutCoordinates?,
+    rowCoordinates: LayoutCoordinates?,
 ) {
     val bounds = geometry.joinUnion(preview.wordRange.first, preview.wordRange.last)
-    val leftPx = stripViewportX(bounds.left, scrollValue, maxScrollValue, isRtl)
-    val rightPx = stripViewportX(bounds.right, scrollValue, maxScrollValue, isRtl)
+    val leftPx = stripViewportX(
+        bounds.left,
+        scrollValue,
+        maxScrollValue,
+        isRtl,
+        viewportCoordinates,
+        rowCoordinates,
+    )
+    val rightPx = stripViewportX(
+        bounds.right,
+        scrollValue,
+        maxScrollValue,
+        isRtl,
+        viewportCoordinates,
+        rowCoordinates,
+    )
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
     val badgeWidth = 64.dp
@@ -688,12 +735,25 @@ private fun stripViewportX(
     scrollValue: Int,
     maxScrollValue: Int,
     isRtl: Boolean,
-): Float = SentenceStripScrollMath.viewportXFromContent(
-    contentX = contentX,
-    scrollValuePx = scrollValue.toFloat(),
-    maxScrollPx = maxScrollValue.toFloat(),
-    isRtl = isRtl,
-)
+    viewportCoordinates: LayoutCoordinates? = null,
+    rowCoordinates: LayoutCoordinates? = null,
+): Float = if (
+    viewportCoordinates != null && rowCoordinates != null &&
+    viewportCoordinates.isAttached && rowCoordinates.isAttached
+) {
+    viewportCoordinates.localPositionOf(rowCoordinates, Offset(contentX, 0f)).x
+} else {
+    val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
+        scrollValuePx = scrollValue.toFloat(),
+        maxScrollPx = maxScrollValue.toFloat(),
+        isRtl = isRtl,
+    )
+    SentenceStripCoordinateMath.viewportXFromContent(
+        contentX = contentX,
+        viewportLeftInRoot = 0f,
+        rowLeftInRoot = -contentOffset,
+    )
+}
 
 @Composable
 private fun SentenceWordLane(
@@ -871,6 +931,8 @@ private fun Modifier.sentenceStripInput(
     edgeScrollTarget: MutableState<EdgeScrollTarget?>,
     gestureActive: MutableState<Boolean>,
     rtl: Boolean,
+    viewportCoordinates: State<LayoutCoordinates?>,
+    rowCoordinates: State<LayoutCoordinates?>,
 ): Modifier = pointerInput(Unit) {
     coroutineScope {
         val gestureScope = this
@@ -881,15 +943,25 @@ private fun Modifier.sentenceStripInput(
         val frozenGeometry = geometry.value
 
         fun contentPosition(position: Offset): Offset {
-            return Offset(
-                SentenceStripScrollMath.contentXFromViewport(
-                    viewportX = position.x,
+            val viewport = viewportCoordinates.value
+            val row = rowCoordinates.value
+            val contentX = if (
+                viewport != null && row != null && viewport.isAttached && row.isAttached
+            ) {
+                row.localPositionOf(viewport, position).x
+            } else {
+                val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
                     scrollValuePx = scrollState.value.toFloat(),
                     maxScrollPx = scrollState.maxValue.toFloat(),
                     isRtl = rtl,
-                ),
-                position.y,
-            )
+                )
+                SentenceStripCoordinateMath.contentXFromViewport(
+                    viewportX = position.x,
+                    viewportLeftInRoot = 0f,
+                    rowLeftInRoot = -contentOffset,
+                )
+            }
+            return Offset(contentX, position.y)
         }
 
         fun selectionAt(position: Offset): Int {
@@ -1312,34 +1384,33 @@ private fun HistoryIcon(
     ) {
         Canvas(Modifier.size(30.dp)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.minDimension * 0.34f
             val direction = if (isUndo) -1f else 1f
-            val startAngle = if (isUndo) 205f else 335f
-            drawArc(
+            val radius = size.minDimension * 0.38f
+            val tipX = center.x + direction * radius
+            val shoulderX = tipX - direction * radius * 0.46f
+            val arc = Path().apply {
+                moveTo(shoulderX, center.y - radius * 0.42f)
+                cubicTo(
+                    center.x - direction * radius * 1.03f,
+                    center.y - radius * 0.76f,
+                    center.x - direction * radius * 1.03f,
+                    center.y + radius * 0.76f,
+                    shoulderX,
+                    center.y + radius * 0.42f,
+                )
+            }
+            drawPath(
+                path = arc,
                 color = color,
-                startAngle = startAngle,
-                sweepAngle = if (isUndo) 245f else -245f,
-                useCenter = false,
-                topLeft = Offset(center.x - radius, center.y - radius),
-                size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
-                style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round),
+                style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round),
             )
-            val x = center.x + direction * radius
-            val y = center.y
-            drawLine(
-                color = color,
-                start = Offset(x, y),
-                end = Offset(x - direction * radius * 0.58f, y - radius * 0.48f),
-                strokeWidth = 2.4.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(x, y),
-                end = Offset(x - direction * radius * 0.58f, y + radius * 0.48f),
-                strokeWidth = 2.4.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
+            val arrow = Path().apply {
+                moveTo(tipX, center.y)
+                lineTo(shoulderX, center.y - radius * 0.46f)
+                lineTo(shoulderX, center.y + radius * 0.46f)
+                close()
+            }
+            drawPath(path = arrow, color = color)
         }
         if (showPreview && previewState.value != null) {
             val density = LocalDensity.current

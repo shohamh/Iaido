@@ -5,6 +5,26 @@ import org.junit.jupiter.api.Test
 
 class SentenceStripScrollMathTest {
     @Test
+    fun `coordinate fallback preserves physical RTL row origin`() {
+        assertEquals(
+            264f,
+            SentenceStripCoordinateMath.contentXFromViewport(
+                viewportX = 24f,
+                viewportLeftInRoot = 100f,
+                rowLeftInRoot = -140f,
+            ),
+        )
+        assertEquals(
+            24f,
+            SentenceStripCoordinateMath.viewportXFromContent(
+                contentX = 264f,
+                viewportLeftInRoot = 100f,
+                rowLeftInRoot = -140f,
+            ),
+        )
+    }
+
+    @Test
     fun `physical focus offsets map to logical scroll values in both directions`() {
         assertEquals(120f, SentenceStripScrollMath.valueForContentOffset(120f, 300f, isRtl = false))
         assertEquals(180f, SentenceStripScrollMath.valueForContentOffset(120f, 300f, isRtl = true))
