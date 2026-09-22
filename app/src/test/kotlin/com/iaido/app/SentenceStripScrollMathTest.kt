@@ -53,6 +53,43 @@ class SentenceStripScrollMathTest {
     }
 
     @Test
+    fun `cursor correction centers a measured cursor in both directions`() {
+        assertEquals(
+            90f,
+            SentenceStripScrollMath.targetValueForCursorViewport(
+                cursorViewportX = 190f,
+                viewportWidthPx = 200f,
+                currentScrollValuePx = 0f,
+                maxScrollPx = 400f,
+                isRtl = false,
+                comfortMarginPx = 28f,
+            ),
+        )
+        assertEquals(
+            90f,
+            SentenceStripScrollMath.targetValueForCursorViewport(
+                cursorViewportX = 10f,
+                viewportWidthPx = 200f,
+                currentScrollValuePx = 0f,
+                maxScrollPx = 400f,
+                isRtl = true,
+                comfortMarginPx = 28f,
+            ),
+        )
+        assertEquals(
+            null,
+            SentenceStripScrollMath.targetValueForCursorViewport(
+                cursorViewportX = 100f,
+                viewportWidthPx = 200f,
+                currentScrollValuePx = 0f,
+                maxScrollPx = 400f,
+                isRtl = false,
+                comfortMarginPx = 28f,
+            ),
+        )
+    }
+
+    @Test
     fun `overlay coordinates subtract physical scroll offset in both directions`() {
         assertEquals(50f, SentenceStripScrollMath.viewportXFromContent(170f, 120f, 300f, isRtl = false))
         assertEquals(50f, SentenceStripScrollMath.viewportXFromContent(170f, 180f, 300f, isRtl = true))

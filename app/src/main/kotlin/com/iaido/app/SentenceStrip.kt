@@ -100,6 +100,7 @@ private data class SentenceStripFocusTarget(
     val selectionStart: Int,
     val scrollValue: Int,
     val cursorContentX: Float,
+    val cursorViewportX: Float?,
     val viewportWidthPx: Int,
 )
 
@@ -164,6 +165,13 @@ internal fun SentenceStrip(
         alternativeOverrides.toMap().forEach { (id, override) ->
             if (wordsById[id]?.text != override.selectedText) alternativeOverrides.remove(id)
         }
+        val liveIds = wordsById.keys
+        wordCoordinates.keys.toList()
+            .filterNot(liveIds::contains)
+            .forEach(wordCoordinates::remove)
+        currentLayouts.keys.toList()
+            .filterNot(liveIds::contains)
+            .forEach(currentLayouts::remove)
     }
     val displayWords = state.words.map { word ->
         alternativeOverrides[word.id]?.apply(word) ?: word
@@ -253,16 +261,31 @@ internal fun SentenceStrip(
                 previousFocusedIndex = previousFocusIndex,
             ) ?: -1
             val word = currentState.words.getOrNull(focused)
-            val lane = currentMetrics.words.getOrNull(focused)
             val cursorOffset = word?.let {
                 (currentState.selectionStart - it.start).coerceIn(0, it.text.length)
             }
             val renderedLayout = word?.let { currentLayouts[it.id] }
-            val cursorX = if (lane != null && cursorOffset != null && renderedLayout != null) {
-                lane.laneBounds.left + renderedLayout.getCursorRect(cursorOffset).left
+            // Prefer the measured viewport position. Model-space RTL bounds can
+            // be stale for one frame while a long, newly typed sentence is
+            // being remeasured, which otherwise makes the strip follow a gap.
+            val viewport = liveViewportCoordinates.value
+            val renderedWord = word?.let { wordCoordinates[it.id] }
+            val renderedCursorViewportX = if (
+                viewport != null && viewport.isAttached &&
+                renderedWord != null && renderedWord.isAttached &&
+                cursorOffset != null && renderedLayout != null
+            ) {
+                val textLeft = (renderedWord.size.width - renderedLayout.size.width) / 2f
+                val cursorLocalX = textLeft + renderedLayout.getCursorRect(cursorOffset).left
+                viewport.localPositionOf(renderedWord, Offset(cursorLocalX, 0f)).x
             } else {
-                currentMetrics.cursorContentX(focused, currentState.selectionStart)
+                null
             }
+            val cursorX = renderedCursorViewportX?.let { it + SentenceStripScrollMath.contentOffsetForValue(
+                scrollValuePx = scrollState.value.toFloat(),
+                maxScrollPx = scrollState.maxValue.toFloat(),
+                isRtl = rtl,
+            ) } ?: currentMetrics.cursorContentX(focused, currentState.selectionStart)
             if (word == null || cursorX == null) {
                 null
             } else {
@@ -278,6 +301,7 @@ internal fun SentenceStrip(
                     selectionStart = currentState.selectionStart,
                     scrollValue = targetPx,
                     cursorContentX = cursorX,
+                    cursorViewportX = renderedCursorViewportX,
                     viewportWidthPx = viewportWidthPx,
                 )
             }
@@ -287,59 +311,36 @@ internal fun SentenceStrip(
                 target.wordStart != lastFocusedWordStart ||
                 (target.viewportWidthPx > 0 && target.viewportWidthPx != lastViewportWidthPx)
             val comfortMarginPx = minOf(with(density) { 28.dp.toPx() }, viewportWidthPx / 3f)
+            val currentContentOffset = SentenceStripScrollMath.contentOffsetForValue(
+                scrollValuePx = scrollState.value.toFloat(),
+                maxScrollPx = scrollState.maxValue.toFloat(),
+                isRtl = rtl,
+            )
+            val cursorViewportX = target.cursorViewportX ?: (target.cursorContentX - currentContentOffset)
+            val measuredFollowTarget = SentenceStripScrollMath.targetValueForCursorViewport(
+                cursorViewportX = cursorViewportX,
+                viewportWidthPx = viewportWidthPx.toFloat(),
+                currentScrollValuePx = scrollState.value.toFloat(),
+                maxScrollPx = scrollState.maxValue.toFloat(),
+                isRtl = rtl,
+                comfortMarginPx = comfortMarginPx,
+            )
             if (isNewFocus) {
-                val centeredWordOffset = SentenceStripScrollMath.contentOffsetForValue(
-                    scrollValuePx = target.scrollValue.toFloat(),
-                    maxScrollPx = scrollState.maxValue.toFloat(),
-                    isRtl = rtl,
-                )
-                val centeredWordCursorX = target.cursorContentX - centeredWordOffset
-                val focusTarget = if (
-                    SentenceStripScrollMath.cursorNeedsFollow(
-                        viewportX = centeredWordCursorX,
-                        viewportWidthPx = viewportWidthPx.toFloat(),
-                        comfortMarginPx = comfortMarginPx,
-                    )
-                ) {
-                    SentenceStripScrollMath.valueForContentOffset(
-                        contentOffsetPx = SentenceStripScrollMath.centeredContentOffset(
-                            contentX = target.cursorContentX,
-                            viewportWidthPx = viewportWidthPx.toFloat(),
-                            maxScrollPx = scrollState.maxValue.toFloat(),
-                        ),
-                        maxScrollPx = scrollState.maxValue.toFloat(),
-                        isRtl = rtl,
-                    ).toInt().coerceIn(0, scrollState.maxValue)
-                } else {
-                    target.scrollValue
+                val focusTarget = when {
+                    measuredFollowTarget != null -> measuredFollowTarget.toInt()
+                        .coerceIn(0, scrollState.maxValue)
+                    target.cursorViewportX != null -> null
+                    else -> target.scrollValue
                 }
-                scrollState.animateScrollTo(
-                    focusTarget,
-                    tween(durationMillis = 120, easing = FastOutSlowInEasing),
-                )
+                focusTarget?.let {
+                    scrollState.animateScrollTo(
+                        it,
+                        tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                    )
+                }
             } else {
-                val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
-                    scrollValuePx = scrollState.value.toFloat(),
-                    maxScrollPx = scrollState.maxValue.toFloat(),
-                    isRtl = rtl,
-                )
-                val cursorViewportX = target.cursorContentX - contentOffset
-                if (SentenceStripScrollMath.cursorNeedsFollow(
-                        viewportX = cursorViewportX,
-                        viewportWidthPx = viewportWidthPx.toFloat(),
-                        comfortMarginPx = comfortMarginPx,
-                    )
-                ) {
-                    val cursorOffset = SentenceStripScrollMath.centeredContentOffset(
-                        contentX = target.cursorContentX,
-                        viewportWidthPx = viewportWidthPx.toFloat(),
-                        maxScrollPx = scrollState.maxValue.toFloat(),
-                    )
-                    val cursorTarget = SentenceStripScrollMath.valueForContentOffset(
-                        contentOffsetPx = cursorOffset,
-                        maxScrollPx = scrollState.maxValue.toFloat(),
-                        isRtl = rtl,
-                    ).toInt().coerceIn(0, scrollState.maxValue)
+                if (measuredFollowTarget != null) {
+                    val cursorTarget = measuredFollowTarget.toInt().coerceIn(0, scrollState.maxValue)
                     scrollState.animateScrollTo(
                         cursorTarget,
                         tween(durationMillis = 90, easing = FastOutSlowInEasing),
@@ -685,33 +686,40 @@ private fun DeletionPreviewOverlay(
     rowCoordinates: LayoutCoordinates?,
     wordCoordinates: Map<String, LayoutCoordinates>,
 ) {
-    val bounds = geometry.joinUnion(preview.wordRange.first, preview.wordRange.last)
+    val bounds = preview.wordRange.first
+        .takeIf { it >= 0 && preview.wordRange.last < geometry.words.size }
+        ?.let { geometry.joinUnion(it, preview.wordRange.last) }
     val viewportBounds = viewportWordUnion(
-        ids = preview.wordRange.mapNotNull { geometry.words.getOrNull(it)?.id },
+        ids = preview.sourceWordIds,
         viewportCoordinates = viewportCoordinates,
         wordCoordinates = wordCoordinates,
     )
+    if (viewportBounds == null && bounds == null) return
     // The rendered lanes are laid out by Compose's bidi-aware Row. Use their
     // measured viewport bounds whenever available; transforming model-space
     // bounds again mirrors the RTL row a second time and clips the overlay.
-    val leftPx = viewportBounds?.left ?: stripViewportX(
-        bounds.left,
-        geometry.contentWidthPx,
-        scrollValue,
-        maxScrollValue,
-        isRtl,
-        viewportCoordinates,
-        rowCoordinates,
-    )
-    val rightPx = viewportBounds?.right ?: stripViewportX(
-        bounds.right,
-        geometry.contentWidthPx,
-        scrollValue,
-        maxScrollValue,
-        isRtl,
-        viewportCoordinates,
-        rowCoordinates,
-    )
+    val leftPx = viewportBounds?.left ?: bounds?.let {
+        stripViewportX(
+            it.left,
+            geometry.contentWidthPx,
+            scrollValue,
+            maxScrollValue,
+            isRtl,
+            viewportCoordinates,
+            rowCoordinates,
+        )
+    } ?: return
+    val rightPx = viewportBounds?.right ?: bounds?.let {
+        stripViewportX(
+            it.right,
+            geometry.contentWidthPx,
+            scrollValue,
+            maxScrollValue,
+            isRtl,
+            viewportCoordinates,
+            rowCoordinates,
+        )
+    } ?: return
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
     val badgeWidth = 64.dp
@@ -762,17 +770,17 @@ private fun viewportWordUnion(
     wordCoordinates: Map<String, LayoutCoordinates>,
 ): StripRect? {
     if (ids.isEmpty() || viewportCoordinates == null || !viewportCoordinates.isAttached) return null
-    val bounds = ids.map { id ->
-        val word = wordCoordinates[id] ?: return null
-        if (!word.isAttached) return null
+    val boundsById = ids.mapNotNull { id ->
+        val word = wordCoordinates[id] ?: return@mapNotNull null
+        if (!word.isAttached) return@mapNotNull null
         val left = viewportCoordinates.localPositionOf(word, Offset.Zero).x
         val right = viewportCoordinates.localPositionOf(
             word,
             Offset(word.size.width.toFloat(), 0f),
         ).x
-        StripRect(minOf(left, right), 0f, maxOf(left, right), 0f)
+        id to StripRect(minOf(left, right), 0f, maxOf(left, right), 0f)
     }
-    return bounds.reduce(StripRect::union)
+    return unionRenderedWordBounds(ids, boundsById.toMap())
 }
 
 private fun stripViewportX(

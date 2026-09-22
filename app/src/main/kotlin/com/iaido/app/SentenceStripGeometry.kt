@@ -25,6 +25,14 @@ internal data class StripRect(
     )
 }
 
+/** Union the currently rendered bounds for a preview's stable word ids. */
+internal fun unionRenderedWordBounds(
+    ids: List<String>,
+    boundsById: Map<String, StripRect>,
+): StripRect? = ids.asSequence()
+    .mapNotNull(boundsById::get)
+    .reduceOrNull(StripRect::union)
+
 internal data class SentenceStripMeasuredWord(
     val id: String,
     val start: Int,

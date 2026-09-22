@@ -53,6 +53,28 @@ class SentenceStripGeometryTest {
     }
 
     @Test
+    fun `RTL focus offsets still reach every word in a long generated sentence`() {
+        val words = (0 until 30).map { index ->
+            word("אב${index}", index * 4, index * 4 + 3, 32f + (index % 4) * 7f)
+        }
+        val geometry = SentenceStripGeometry.create(
+            words = words,
+            gapWidthsPx = List(words.lastIndex) { 6f },
+            viewportWidthPx = 180f,
+            isRtl = true,
+        )
+
+        words.indices.forEach { index ->
+            val offset = geometry.focusScrollOffset(index)
+            val wordBounds = geometry.words[index].hitBounds
+            assertTrue(
+                wordBounds.right >= offset && wordBounds.left <= offset + geometry.viewportWidthPx,
+                "focused RTL word $index should remain visible (offset=$offset)",
+            )
+        }
+    }
+
+    @Test
     fun `cursor content position follows measured caret anchors within the same word`() {
         val measured = SentenceStripMeasuredWord(
             id = "cursor-word",
@@ -119,6 +141,19 @@ class SentenceStripGeometryTest {
 
         assertEquals(0..1, rendered.deletionWordRange(1, 100f))
         assertEquals(1..2, rendered.deletionWordRange(1, 20f))
+    }
+
+    @Test
+    fun `deletion overlay unions stable source ids even when an old id is absent`() {
+        val union = unionRenderedWordBounds(
+            ids = listOf("new-left", "old-missing", "new-right"),
+            boundsById = mapOf(
+                "new-left" to StripRect(12f, 0f, 38f, 26f),
+                "new-right" to StripRect(64f, 0f, 92f, 26f),
+            ),
+        )
+
+        assertEquals(StripRect(12f, 0f, 92f, 26f), union)
     }
 
     @Test

@@ -22,6 +22,22 @@ internal object SentenceStripScrollMath {
     fun cursorNeedsFollow(viewportX: Float, viewportWidthPx: Float, comfortMarginPx: Float): Boolean =
         viewportX < comfortMarginPx || viewportX > viewportWidthPx - comfortMarginPx
 
+    /** Return a logical scroll value that centers a measured viewport cursor when needed. */
+    fun targetValueForCursorViewport(
+        cursorViewportX: Float,
+        viewportWidthPx: Float,
+        currentScrollValuePx: Float,
+        maxScrollPx: Float,
+        isRtl: Boolean,
+        comfortMarginPx: Float,
+    ): Float? {
+        if (!cursorNeedsFollow(cursorViewportX, viewportWidthPx, comfortMarginPx)) return null
+        val currentContentOffset = contentOffsetForValue(currentScrollValuePx, maxScrollPx, isRtl)
+        val cursorContentX = cursorViewportX + currentContentOffset
+        val centeredOffset = centeredContentOffset(cursorContentX, viewportWidthPx, maxScrollPx)
+        return valueForContentOffset(centeredOffset, maxScrollPx, isRtl)
+    }
+
     fun valueForContentOffset(contentOffsetPx: Float, maxScrollPx: Float, isRtl: Boolean): Float {
         val maxScroll = maxScrollPx.coerceAtLeast(0f)
         val boundedOffset = contentOffsetPx.coerceIn(0f, maxScroll)
