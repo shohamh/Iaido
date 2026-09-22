@@ -12,6 +12,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -51,11 +52,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -120,6 +121,7 @@ internal fun SentenceStrip(
     var preview by previewState
     val alternativeOverrides = remember { mutableStateMapOf<String, SentenceWordAlternativeOverride>() }
     val currentLayouts = remember { mutableStateMapOf<String, TextLayoutResult>() }
+    val wordCoordinates = remember { mutableStateMapOf<String, LayoutCoordinates>() }
     val edgeScrollTargetState = remember { mutableStateOf<EdgeScrollTarget?>(null) }
     val gestureActiveState = remember { mutableStateOf(false) }
     var lastEdgeDirection by remember { mutableStateOf(EdgeScrollDirection.RIGHT) }
@@ -425,6 +427,7 @@ internal fun SentenceStrip(
                         rtl = rtl,
                         viewportCoordinates = liveViewportCoordinates,
                         rowCoordinates = liveRowCoordinates,
+                        wordCoordinates = wordCoordinates,
                     ),
             ) {
                 Row(
@@ -471,6 +474,7 @@ internal fun SentenceStrip(
                                 isPreviewing = selected != null || split != null,
                                 previewSide = selected?.side ?: split?.side,
                                 onCurrentTextLayout = { currentLayouts[word.id] = it },
+                                onPositioned = { wordCoordinates[word.id] = it },
                                 splitPreviewWords = split?.replacementWords,
                                 isDeleting = deleting,
                             )
@@ -520,11 +524,10 @@ internal fun SentenceStrip(
                     modifier = Modifier
                         .graphicsLayer { alpha = edgeFade }
                         .align(
-                            when {
-                                lastEdgeDirection == EdgeScrollDirection.LEFT && !rtl -> Alignment.CenterStart
-                                lastEdgeDirection == EdgeScrollDirection.LEFT && rtl -> Alignment.CenterEnd
-                                lastEdgeDirection == EdgeScrollDirection.RIGHT && !rtl -> Alignment.CenterEnd
-                                else -> Alignment.CenterStart
+                            if (lastEdgeDirection == EdgeScrollDirection.LEFT) {
+                                Alignment.CenterStart
+                            } else {
+                                Alignment.CenterEnd
                             },
                     ),
                 )
@@ -539,6 +542,7 @@ internal fun SentenceStrip(
                         density = density,
                         viewportCoordinates = viewportCoordinates,
                         rowCoordinates = rowCoordinates,
+                        wordCoordinates = wordCoordinates,
                     )
                 }
                 deletionPreview?.let { deletion ->
@@ -551,6 +555,7 @@ internal fun SentenceStrip(
                         density = density,
                         viewportCoordinates = viewportCoordinates,
                         rowCoordinates = rowCoordinates,
+                        wordCoordinates = wordCoordinates,
                     )
                 }
             }
@@ -569,11 +574,19 @@ private fun JoinPreviewOverlay(
     density: Density,
     viewportCoordinates: LayoutCoordinates?,
     rowCoordinates: LayoutCoordinates?,
+    wordCoordinates: Map<String, LayoutCoordinates>,
 ) {
     val first = preview.sourceWordIndices.minOrNull() ?: return
     val last = preview.sourceWordIndices.maxOrNull() ?: return
     val bounds = geometry.joinUnion(first, last)
-    val leftPx = stripViewportX(
+    val viewportBounds = viewportWordUnion(
+        ids = (first..last).mapNotNull { state.words.getOrNull(it)?.id },
+        viewportCoordinates = viewportCoordinates,
+        wordCoordinates = wordCoordinates,
+    )
+    // Measured bounds are already in the viewport's coordinate space. Only
+    // use the model-space transform as a fallback before the first layout pass.
+    val leftPx = viewportBounds?.left ?: stripViewportX(
         bounds.left,
         geometry.contentWidthPx,
         scrollValue,
@@ -582,7 +595,7 @@ private fun JoinPreviewOverlay(
         viewportCoordinates,
         rowCoordinates,
     )
-    val rightPx = stripViewportX(
+    val rightPx = viewportBounds?.right ?: stripViewportX(
         bounds.right,
         geometry.contentWidthPx,
         scrollValue,
@@ -670,9 +683,18 @@ private fun DeletionPreviewOverlay(
     density: Density,
     viewportCoordinates: LayoutCoordinates?,
     rowCoordinates: LayoutCoordinates?,
+    wordCoordinates: Map<String, LayoutCoordinates>,
 ) {
     val bounds = geometry.joinUnion(preview.wordRange.first, preview.wordRange.last)
-    val leftPx = stripViewportX(
+    val viewportBounds = viewportWordUnion(
+        ids = preview.wordRange.mapNotNull { geometry.words.getOrNull(it)?.id },
+        viewportCoordinates = viewportCoordinates,
+        wordCoordinates = wordCoordinates,
+    )
+    // The rendered lanes are laid out by Compose's bidi-aware Row. Use their
+    // measured viewport bounds whenever available; transforming model-space
+    // bounds again mirrors the RTL row a second time and clips the overlay.
+    val leftPx = viewportBounds?.left ?: stripViewportX(
         bounds.left,
         geometry.contentWidthPx,
         scrollValue,
@@ -681,7 +703,7 @@ private fun DeletionPreviewOverlay(
         viewportCoordinates,
         rowCoordinates,
     )
-    val rightPx = stripViewportX(
+    val rightPx = viewportBounds?.right ?: stripViewportX(
         bounds.right,
         geometry.contentWidthPx,
         scrollValue,
@@ -732,6 +754,25 @@ private fun DeletionPreviewOverlay(
             softWrap = false,
         )
     }
+}
+
+private fun viewportWordUnion(
+    ids: List<String>,
+    viewportCoordinates: LayoutCoordinates?,
+    wordCoordinates: Map<String, LayoutCoordinates>,
+): StripRect? {
+    if (ids.isEmpty() || viewportCoordinates == null || !viewportCoordinates.isAttached) return null
+    val bounds = ids.map { id ->
+        val word = wordCoordinates[id] ?: return null
+        if (!word.isAttached) return null
+        val left = viewportCoordinates.localPositionOf(word, Offset.Zero).x
+        val right = viewportCoordinates.localPositionOf(
+            word,
+            Offset(word.size.width.toFloat(), 0f),
+        ).x
+        StripRect(minOf(left, right), 0f, maxOf(left, right), 0f)
+    }
+    return bounds.reduce(StripRect::union)
 }
 
 private fun stripViewportX(
@@ -792,12 +833,13 @@ private fun SentenceWordLane(
     isPreviewing: Boolean,
     previewSide: SentenceAlternativeSide?,
     onCurrentTextLayout: (TextLayoutResult) -> Unit,
+    onPositioned: (LayoutCoordinates) -> Unit,
     splitPreviewWords: List<String>?,
     isDeleting: Boolean,
 ) {
     val hasCaret = cursorOffset != null
     Column(
-        modifier = Modifier.width(laneWidth),
+        modifier = Modifier.width(laneWidth).onGloballyPositioned(onPositioned),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -958,6 +1000,7 @@ private fun Modifier.sentenceStripInput(
     rtl: Boolean,
     viewportCoordinates: State<LayoutCoordinates?>,
     rowCoordinates: State<LayoutCoordinates?>,
+    wordCoordinates: Map<String, LayoutCoordinates>,
 ): Modifier = pointerInput(Unit) {
     coroutineScope {
         val gestureScope = this
@@ -966,6 +1009,22 @@ private fun Modifier.sentenceStripInput(
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         val frozenState = state.value
         val frozenGeometry = geometry.value
+
+        fun renderedGeometry(): SentenceStripGeometry? {
+            val viewport = viewportCoordinates.value
+            if (viewport == null || !viewport.isAttached) return null
+            val bounds = frozenState.words.map { word ->
+                val coordinates = wordCoordinates[word.id] ?: return null
+                if (!coordinates.isAttached || coordinates.size.width <= 0) return null
+                val left = viewport.localPositionOf(coordinates, Offset.Zero).x
+                val right = viewport.localPositionOf(
+                    coordinates,
+                    Offset(coordinates.size.width.toFloat(), 0f),
+                ).x
+                StripRect(minOf(left, right), 0f, maxOf(left, right), coordinates.size.height.toFloat())
+            }
+            return frozenGeometry.withRenderedLaneBounds(bounds)
+        }
 
         fun contentPosition(position: Offset): Offset {
             val viewport = viewportCoordinates.value
@@ -994,20 +1053,22 @@ private fun Modifier.sentenceStripInput(
 
         fun selectionAt(position: Offset): Int {
             val content = contentPosition(position)
-            val wordIndex = frozenGeometry.wordAt(content.x)
+            val visualGeometry = renderedGeometry()
+            val hitX = if (visualGeometry != null) position.x else content.x
+            val wordIndex = (visualGeometry ?: frozenGeometry).wordAt(hitX)
             if (wordIndex != null) {
                 val word = frozenState.words.getOrNull(wordIndex) ?: return frozenState.selectionStart
                 val layout = layouts[word.id]
                 val rawOffset = if (layout != null) {
-                    val laneLeft = frozenGeometry.words[wordIndex].laneBounds.left
+                    val laneLeft = (visualGeometry ?: frozenGeometry).words[wordIndex].laneBounds.left
                     layout.getOffsetForPosition(
                         Offset(
-                            x = (content.x - laneLeft).coerceIn(0f, layout.size.width.toFloat()),
+                            x = (hitX - laneLeft).coerceIn(0f, layout.size.width.toFloat()),
                             y = layout.size.height / 2f,
                         ),
                     )
                 } else {
-                    frozenGeometry.cursorOffsetAt(wordIndex, content.x)?.minus(word.start) ?: 0
+                    (visualGeometry ?: frozenGeometry).cursorOffsetAt(wordIndex, hitX)?.minus(word.start) ?: 0
                 }
                 return word.start + SentenceTextModel.snapToGraphemeBoundary(
                     word.text,
@@ -1035,7 +1096,11 @@ private fun Modifier.sentenceStripInput(
                 ?.second ?: frozenState.selectionStart
         }
 
-        val originIndex = frozenGeometry.wordAt(contentPosition(down.position).x)
+        val downContent = contentPosition(down.position)
+        val downVisualGeometry = renderedGeometry()
+        val originIndex = (downVisualGeometry ?: frozenGeometry).wordAt(
+            if (downVisualGeometry != null) down.position.x else downContent.x,
+        )
         var mode = SentencePointerMode.PENDING
         var released = false
         var latestPosition = down.position
@@ -1055,12 +1120,14 @@ private fun Modifier.sentenceStripInput(
         }
 
         fun updateAlternativeAt(position: Offset) {
+            val visualGeometry = renderedGeometry()
+            val content = contentPosition(position)
             activePreview = originIndex?.let { index ->
                 SentenceStripPreviewMath.gestureAt(
                     state = frozenState,
-                    geometry = frozenGeometry,
+                    geometry = visualGeometry ?: frozenGeometry,
                     originWordIndex = index,
-                    contentX = contentPosition(position).x,
+                    contentX = if (visualGeometry != null) position.x else content.x,
                     side = if (position.y < down.position.y) SentenceAlternativeSide.ABOVE
                     else SentenceAlternativeSide.BELOW,
                 )
@@ -1410,36 +1477,14 @@ private fun HistoryIcon(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(30.dp)) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val direction = if (isUndo) -1f else 1f
-            val radius = size.minDimension * 0.38f
-            val tipX = center.x + direction * radius
-            val shoulderX = tipX - direction * radius * 0.46f
-            val arc = Path().apply {
-                moveTo(shoulderX, center.y - radius * 0.42f)
-                cubicTo(
-                    center.x - direction * radius * 1.03f,
-                    center.y - radius * 0.76f,
-                    center.x - direction * radius * 1.03f,
-                    center.y + radius * 0.76f,
-                    shoulderX,
-                    center.y + radius * 0.42f,
-                )
-            }
-            drawPath(
-                path = arc,
-                color = color,
-                style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round),
-            )
-            val arrow = Path().apply {
-                moveTo(tipX, center.y)
-                lineTo(shoulderX, center.y - radius * 0.46f)
-                lineTo(shoulderX, center.y + radius * 0.46f)
-                close()
-            }
-            drawPath(path = arrow, color = color)
-        }
+        Image(
+            painter = painterResource(
+                if (isUndo) R.drawable.ic_undo_material else R.drawable.ic_redo_material,
+            ),
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            colorFilter = ColorFilter.tint(color),
+        )
         if (showPreview && previewState.value != null) {
             val density = LocalDensity.current
             Popup(alignment = Alignment.TopCenter, offset = with(density) { IntOffset(0, -76.dp.roundToPx()) }) {

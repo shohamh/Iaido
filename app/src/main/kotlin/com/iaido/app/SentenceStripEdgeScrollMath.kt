@@ -45,8 +45,9 @@ internal object SentenceStripEdgeScrollMath {
         ((frameNanos - previousFrameNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
 
     fun scrollSign(direction: EdgeScrollDirection, isRtl: Boolean): Float {
-        val physicalDirection = if (direction == EdgeScrollDirection.LEFT) -1f else 1f
-        return physicalDirection * if (isRtl) -1f else 1f
+        // dispatchRawDelta operates on the physical scroll axis. RTL changes
+        // word order, but it must not make a left edge scroll rightward.
+        return if (direction == EdgeScrollDirection.LEFT) -1f else 1f
     }
 
     fun affordanceAlpha(penetration: Float): Float =

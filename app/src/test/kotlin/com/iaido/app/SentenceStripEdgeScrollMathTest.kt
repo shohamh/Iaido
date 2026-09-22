@@ -19,12 +19,13 @@ class SentenceStripEdgeScrollMathTest {
     }
 
     @Test
-    fun `elapsed edge scroll time is clamped and RTL reverses the visual direction`() {
+    fun `elapsed edge scroll time is clamped and edge zones keep physical direction in RTL`() {
         assertEquals(0.016f, SentenceStripEdgeScrollMath.frameDeltaSeconds(1_000_000_000L, 1_016_000_000L))
         assertEquals(0.05f, SentenceStripEdgeScrollMath.frameDeltaSeconds(1_000_000_000L, 2_000_000_000L))
         assertEquals(0f, SentenceStripEdgeScrollMath.frameDeltaSeconds(2_000_000_000L, 1_000_000_000L))
         assertEquals(-1f, SentenceStripEdgeScrollMath.scrollSign(EdgeScrollDirection.LEFT, isRtl = false))
-        assertEquals(1f, SentenceStripEdgeScrollMath.scrollSign(EdgeScrollDirection.LEFT, isRtl = true))
+        assertEquals(-1f, SentenceStripEdgeScrollMath.scrollSign(EdgeScrollDirection.LEFT, isRtl = true))
+        assertEquals(1f, SentenceStripEdgeScrollMath.scrollSign(EdgeScrollDirection.RIGHT, isRtl = true))
     }
 
     @Test

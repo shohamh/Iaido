@@ -102,6 +102,26 @@ class SentenceStripGeometryTest {
     }
 
     @Test
+    fun `rendered lane bounds can drive RTL deletion hit testing`() {
+        val geometry = SentenceStripGeometry.create(
+            words = listOf(word("one", 0, 3, 20f), word("two", 4, 7, 24f), word("three", 8, 13, 28f)),
+            gapWidthsPx = listOf(4f, 4f),
+            viewportWidthPx = 120f,
+            isRtl = true,
+        )
+        val rendered = geometry.withRenderedLaneBounds(
+            listOf(
+                StripRect(84f, 0f, 104f, 26f),
+                StripRect(50f, 0f, 74f, 26f),
+                StripRect(10f, 0f, 38f, 26f),
+            ),
+        )
+
+        assertEquals(0..1, rendered.deletionWordRange(1, 100f))
+        assertEquals(1..2, rendered.deletionWordRange(1, 20f))
+    }
+
+    @Test
     fun `trailing sentence text participates in RTL row geometry`() {
         val geometry = SentenceStripGeometry.create(
             words = listOf(word("one", 0, 3, 20f), word("two", 4, 7, 30f)),

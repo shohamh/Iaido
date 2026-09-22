@@ -69,6 +69,26 @@ internal data class SentenceStripGeometry(
             .reduce(StripRect::union)
     }
 
+    /** Rebind the model to the lanes' measured screen bounds for live gesture hit testing. */
+    fun withRenderedLaneBounds(renderedBounds: List<StripRect>): SentenceStripGeometry {
+        require(renderedBounds.size == words.size)
+        val halfGap = addedGapPx / 2f
+        val renderedWords = words.mapIndexed { index, word ->
+            val lane = renderedBounds[index]
+            word.copy(
+                laneBounds = lane,
+                glyphBounds = lane,
+                hitBounds = StripRect(
+                    left = lane.left - halfGap,
+                    top = lane.top,
+                    right = lane.right + halfGap,
+                    bottom = lane.bottom,
+                ),
+            )
+        }
+        return copy(words = renderedWords)
+    }
+
     /**
      * A vertical swipe becomes deletion only after it leaves its source lane. The source word is
      * then selected; another word joins the range only once its glyph midpoint is crossed. Moving
