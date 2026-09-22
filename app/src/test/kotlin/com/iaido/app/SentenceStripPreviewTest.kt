@@ -45,6 +45,20 @@ class SentenceStripPreviewTest {
     }
 
     @Test
+    fun `committed choice does not duplicate a displaced alternative`() {
+        val word = state().words[1]
+
+        val overridden = SentenceWordAlternativeOverride(
+            selectedText = "set",
+            displacedText = "out",
+            side = SentenceAlternativeSide.ABOVE,
+        ).apply(word.copy(text = "set"))
+
+        assertEquals(null, overridden.above)
+        assertEquals("out", overridden.below)
+    }
+
+    @Test
     fun `join preview can be selected from either source word`() {
         val state = joinedState()
         val option = state.replacementOptions.single()

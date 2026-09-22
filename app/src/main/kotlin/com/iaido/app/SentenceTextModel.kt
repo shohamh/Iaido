@@ -238,7 +238,7 @@ internal object SentenceTextModel {
                 result[index] = when {
                     word.above == null -> word.copy(above = candidate)
                     word.below == null -> word.copy(below = candidate)
-                    else -> word.copy(below = candidate)
+                    else -> word
                 }
             }
         }

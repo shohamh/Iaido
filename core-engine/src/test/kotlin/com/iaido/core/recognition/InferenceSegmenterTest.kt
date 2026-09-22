@@ -273,6 +273,23 @@ class InferenceSegmenterTest {
     }
 
     @Test
+    fun `whole word score leads while a plausible self segmentation remains available`() {
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(scoredUnit("yes", "yes" to 1.0)),
+            previousWords = emptyList(),
+            dictionary = listOf(
+                WordEntry("yes", 0.000316227766017),
+                WordEntry("ye", 0.0000177827941004),
+                WordEntry("s", 0.000724435960075),
+            ),
+        )
+
+        assertEquals(listOf("yes"), options.first().words)
+        val split = options.first { it.words == listOf("ye", "s") }
+        assertTrue(options.first().score > split.score)
+    }
+
+    @Test
     fun `a confident whole-word swipe does not fragment against the real shipped dictionary and ngram data`() {
         val entries = realDictionaryEntries()
         val store = CompactNgramScoreStore.fromBytes(

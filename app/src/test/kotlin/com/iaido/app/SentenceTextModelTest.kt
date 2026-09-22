@@ -124,6 +124,22 @@ class SentenceTextModelTest {
     }
 
     @Test
+    fun `keeps the first two distinct structured alternatives stable`() {
+        val state = model(
+            "one",
+            cursor = 3,
+            options = listOf(
+                ReplacementOption(listOf("one"), listOf("two"), 3.0, id = "two"),
+                ReplacementOption(listOf("one"), listOf("three"), 2.0, id = "three"),
+                ReplacementOption(listOf("one"), listOf("four"), 1.0, id = "four"),
+            ),
+        )
+
+        assertEquals("two", state.words.single().above)
+        assertEquals("three", state.words.single().below)
+    }
+
+    @Test
     fun removesCaseOnlyAndDuplicateAlternativesUsingLanguageLocale() {
         val history = listOf(
             SessionWord(

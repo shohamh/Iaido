@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.State
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.setValue
@@ -428,49 +429,51 @@ internal fun SentenceStrip(
                 ) {
                     measuredLanes.forEachIndexed { index, (_, measured) ->
                         val word = displayWords[index]
-                        val laneWidth = with(density) { measured.laneWidthPx.toDp() }
-                        val selected = wordPreview?.takeIf { it.wordIndex == index }
-                        val split = replacementPreview?.takeIf {
-                            it.isSplit && it.sourceWordIndices.singleOrNull() == index
-                        }
-                        val deleting = deletionPreview?.wordRange?.contains(index) == true
-                        val renderWord = selected?.let {
-                            word.copy(
-                                text = it.replacement,
-                                above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
-                                below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+                        key(word.id) {
+                            val laneWidth = with(density) { measured.laneWidthPx.toDp() }
+                            val selected = wordPreview?.takeIf { it.wordIndex == index }
+                            val split = replacementPreview?.takeIf {
+                                it.isSplit && it.sourceWordIndices.singleOrNull() == index
+                            }
+                            val deleting = deletionPreview?.wordRange?.contains(index) == true
+                            val renderWord = selected?.let {
+                                word.copy(
+                                    text = it.replacement,
+                                    above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
+                                    below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+                                )
+                            } ?: split?.let {
+                                word.copy(
+                                    above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
+                                    below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+                                )
+                            } ?: if (deleting) word.copy(above = null, below = null) else word
+                            SentenceWordLane(
+                                word = renderWord,
+                                wordIndex = index,
+                                laneWidth = laneWidth,
+                                currentStyle = currentStyle,
+                                alternativeStyle = alternativeStyle,
+                                cursorOffset = (state.selectionStart - word.start)
+                                    .takeIf { split == null && !deleting && it in 0..(word.endExclusive - word.start) },
+                                onSelect = { actions?.setSelection(word.endExclusive) },
+                                isPreviewing = selected != null || split != null,
+                                previewSide = selected?.side ?: split?.side,
+                                onCurrentTextLayout = { currentLayouts[word.id] = it },
+                                splitPreviewWords = split?.replacementWords,
+                                isDeleting = deleting,
                             )
-                        } ?: split?.let {
-                            word.copy(
-                                above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
-                                below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
-                            )
-                        } ?: if (deleting) word.copy(above = null, below = null) else word
-                        SentenceWordLane(
-                            word = renderWord,
-                            wordIndex = index,
-                            laneWidth = laneWidth,
-                            currentStyle = currentStyle,
-                            alternativeStyle = alternativeStyle,
-                            cursorOffset = (state.selectionStart - word.start)
-                                .takeIf { split == null && !deleting && it in 0..(word.endExclusive - word.start) },
-                            onSelect = { actions?.setSelection(word.endExclusive) },
-                            isPreviewing = selected != null || split != null,
-                            previewSide = selected?.side ?: split?.side,
-                            onCurrentTextLayout = { currentLayouts[word.id] = it },
-                            splitPreviewWords = split?.replacementWords,
-                            isDeleting = deleting,
-                        )
-                        if (index < separators.size) {
-                            Text(
-                                text = separators[index],
-                                color = KeyboardPalette.PrimaryInk,
-                                style = currentStyle,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.widthIn(min = 0.dp),
-                            )
-                            Spacer(Modifier.width(SentenceStripGeometry.WORD_GAP_CSS_PX.dp))
+                            if (index < separators.size) {
+                                Text(
+                                    text = separators[index],
+                                    color = KeyboardPalette.PrimaryInk,
+                                    style = currentStyle,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.widthIn(min = 0.dp),
+                                )
+                                Spacer(Modifier.width(SentenceStripGeometry.WORD_GAP_CSS_PX.dp))
+                            }
                         }
                     }
                     if (trailingText.isNotEmpty()) {
@@ -1307,34 +1310,34 @@ private fun HistoryIcon(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(32.dp)) {
+        Canvas(Modifier.size(30.dp)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.minDimension * 0.25f
+            val radius = size.minDimension * 0.34f
             val direction = if (isUndo) -1f else 1f
-            val startAngle = if (isUndo) 35f else 145f
+            val startAngle = if (isUndo) 205f else 335f
             drawArc(
                 color = color,
                 startAngle = startAngle,
-                sweepAngle = 265f,
+                sweepAngle = if (isUndo) 245f else -245f,
                 useCenter = false,
                 topLeft = Offset(center.x - radius, center.y - radius),
                 size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
-                style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round),
+                style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round),
             )
-            val x = if (isUndo) center.x - radius else center.x + radius
-            val y = center.y - radius * 0.45f
+            val x = center.x + direction * radius
+            val y = center.y
             drawLine(
                 color = color,
                 start = Offset(x, y),
-                end = Offset(x - direction * radius * 0.55f, y - radius * 0.45f),
-                strokeWidth = 1.6.dp.toPx(),
+                end = Offset(x - direction * radius * 0.58f, y - radius * 0.48f),
+                strokeWidth = 2.4.dp.toPx(),
                 cap = StrokeCap.Round,
             )
             drawLine(
                 color = color,
                 start = Offset(x, y),
-                end = Offset(x + direction * radius * 0.55f, y - radius * 0.45f),
-                strokeWidth = 1.6.dp.toPx(),
+                end = Offset(x - direction * radius * 0.58f, y + radius * 0.48f),
+                strokeWidth = 2.4.dp.toPx(),
                 cap = StrokeCap.Round,
             )
         }
