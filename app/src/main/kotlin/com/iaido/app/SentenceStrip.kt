@@ -575,6 +575,7 @@ private fun JoinPreviewOverlay(
     val bounds = geometry.joinUnion(first, last)
     val leftPx = stripViewportX(
         bounds.left,
+        geometry.contentWidthPx,
         scrollValue,
         maxScrollValue,
         isRtl,
@@ -583,6 +584,7 @@ private fun JoinPreviewOverlay(
     )
     val rightPx = stripViewportX(
         bounds.right,
+        geometry.contentWidthPx,
         scrollValue,
         maxScrollValue,
         isRtl,
@@ -672,6 +674,7 @@ private fun DeletionPreviewOverlay(
     val bounds = geometry.joinUnion(preview.wordRange.first, preview.wordRange.last)
     val leftPx = stripViewportX(
         bounds.left,
+        geometry.contentWidthPx,
         scrollValue,
         maxScrollValue,
         isRtl,
@@ -680,6 +683,7 @@ private fun DeletionPreviewOverlay(
     )
     val rightPx = stripViewportX(
         bounds.right,
+        geometry.contentWidthPx,
         scrollValue,
         maxScrollValue,
         isRtl,
@@ -732,6 +736,7 @@ private fun DeletionPreviewOverlay(
 
 private fun stripViewportX(
     contentX: Float,
+    contentWidthPx: Float,
     scrollValue: Int,
     maxScrollValue: Int,
     isRtl: Boolean,
@@ -739,9 +744,10 @@ private fun stripViewportX(
     rowCoordinates: LayoutCoordinates? = null,
 ): Float = if (
     viewportCoordinates != null && rowCoordinates != null &&
-    viewportCoordinates.isAttached && rowCoordinates.isAttached
+    viewportCoordinates.isAttached && rowCoordinates.isAttached && contentWidthPx > 0f
 ) {
-    viewportCoordinates.localPositionOf(rowCoordinates, Offset(contentX, 0f)).x
+    val transform = stripAxisTransform(viewportCoordinates, rowCoordinates, contentWidthPx)
+    transform?.viewportXFromContent(contentX) ?: contentX
 } else {
     val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
         scrollValuePx = scrollValue.toFloat(),
@@ -752,6 +758,25 @@ private fun stripViewportX(
         contentX = contentX,
         viewportLeftInRoot = 0f,
         rowLeftInRoot = -contentOffset,
+    )
+}
+
+private fun stripAxisTransform(
+    viewportCoordinates: LayoutCoordinates,
+    rowCoordinates: LayoutCoordinates,
+    contentWidthPx: Float,
+): SentenceStripCoordinateMath.AxisTransform? {
+    if (contentWidthPx <= 0f || rowCoordinates.size.width <= 0) return null
+    val viewportLeft = viewportCoordinates.localPositionOf(rowCoordinates, Offset.Zero).x
+    val viewportRight = viewportCoordinates.localPositionOf(
+        rowCoordinates,
+        Offset(rowCoordinates.size.width.toFloat(), 0f),
+    ).x
+    return SentenceStripCoordinateMath.fromBounds(
+        contentLeft = 0f,
+        contentRight = contentWidthPx,
+        viewportLeft = viewportLeft,
+        viewportRight = viewportRight,
     )
 }
 
@@ -946,9 +971,12 @@ private fun Modifier.sentenceStripInput(
             val viewport = viewportCoordinates.value
             val row = rowCoordinates.value
             val contentX = if (
-                viewport != null && row != null && viewport.isAttached && row.isAttached
+                viewport != null && row != null && viewport.isAttached && row.isAttached &&
+                    frozenGeometry.contentWidthPx > 0f
             ) {
-                row.localPositionOf(viewport, position).x
+                val transform = stripAxisTransform(viewport, row, frozenGeometry.contentWidthPx)
+                transform?.contentXFromViewport(position.x)
+                    ?: position.x
             } else {
                 val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
                     scrollValuePx = scrollState.value.toFloat(),

@@ -5,6 +5,20 @@ import org.junit.jupiter.api.Test
 
 class SentenceStripScrollMathTest {
     @Test
+    fun `strip axis transform handles a mirrored RTL row`() {
+        val transform = SentenceStripCoordinateMath.fromBounds(
+            contentLeft = 20f,
+            contentRight = 80f,
+            viewportLeft = 520f,
+            viewportRight = 460f,
+        )
+
+        assertEquals(490f, transform.viewportXFromContent(50f))
+        assertEquals(50f, transform.contentXFromViewport(490f))
+        assertEquals(80f, transform.contentXFromViewport(460f))
+    }
+
+    @Test
     fun `coordinate fallback preserves physical RTL row origin`() {
         assertEquals(
             264f,
