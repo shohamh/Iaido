@@ -53,6 +53,7 @@ internal data class SentenceStripGeometry(
     val viewportWidthPx: Float,
     val contentWidthPx: Float,
     val addedGapPx: Float,
+    val focusRunwayWidthPx: Float,
     val isRtl: Boolean,
 ) {
     /** Return the nearest lane whose expanded target contains x, resolving any overlap by center. */
@@ -123,6 +124,15 @@ internal data class SentenceStripGeometry(
             .coerceIn(0f, max(0f, contentWidthPx - viewportWidthPx))
     }
 
+    /** Physical content x for the editor caret, using the measured text layout anchors. */
+    fun cursorContentX(wordIndex: Int, cursorPosition: Int): Float? {
+        val word = words.getOrNull(wordIndex) ?: return null
+        if (word.cursorAnchorsPx.isEmpty()) return null
+        val anchorIndex = (cursorPosition - word.start).coerceIn(0, word.cursorAnchorsPx.lastIndex)
+        val anchor = word.cursorAnchorsPx.getOrNull(anchorIndex) ?: return null
+        return word.glyphBounds.left + anchor
+    }
+
     companion object {
         const val WORD_GAP_CSS_PX = 4f
 
@@ -132,14 +142,22 @@ internal data class SentenceStripGeometry(
             viewportWidthPx: Float,
             isRtl: Boolean = false,
             addedGapPx: Float = WORD_GAP_CSS_PX,
+            trailingContentWidthPx: Float = 0f,
         ): SentenceStripGeometry {
             require(gapWidthsPx.size == (words.size - 1).coerceAtLeast(0))
             require(words.all { it.laneWidthPx >= 0f && it.glyphWidthPx >= 0f })
             require(gapWidthsPx.all { it >= 0f })
             require(addedGapPx >= 0f)
+            require(trailingContentWidthPx >= 0f)
 
-            val totalWidth = words.fold(0f) { total, word -> total + word.laneWidthPx } +
-                gapWidthsPx.fold(0f, Float::plus) + addedGapPx * gapWidthsPx.size
+            val measuredContentWidth = words.fold(0f) { total, word -> total + word.laneWidthPx } +
+                gapWidthsPx.fold(0f, Float::plus) + addedGapPx * gapWidthsPx.size + trailingContentWidthPx
+            val focusRunwayWidth = if (words.isNotEmpty() && measuredContentWidth > viewportWidthPx) {
+                max(0f, viewportWidthPx) / 2f
+            } else {
+                0f
+            }
+            val totalWidth = measuredContentWidth + focusRunwayWidth
             var position = if (isRtl) totalWidth else 0f
             val geometries = words.mapIndexed { index, word ->
                 val laneLeft = if (isRtl) {
@@ -171,7 +189,14 @@ internal data class SentenceStripGeometry(
                 }
                 geometry
             }
-            return SentenceStripGeometry(geometries, viewportWidthPx, totalWidth, addedGapPx, isRtl)
+            return SentenceStripGeometry(
+                words = geometries,
+                viewportWidthPx = viewportWidthPx,
+                contentWidthPx = totalWidth,
+                addedGapPx = addedGapPx,
+                focusRunwayWidthPx = focusRunwayWidth,
+                isRtl = isRtl,
+            )
         }
     }
 }

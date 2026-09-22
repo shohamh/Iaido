@@ -25,6 +25,16 @@ class SentenceTextModelTest {
     }
 
     @Test
+    fun retainsEveryWordInLongSentencesBeyondTheFirstFifteen() {
+        val text = (1..24).joinToString(" ") { "word$it" }
+        val state = model(text, cursor = text.length)
+
+        assertEquals(24, state.words.size)
+        assertEquals("word24", state.words.last().text)
+        assertEquals(text, state.sentenceText)
+    }
+
+    @Test
     fun preservesPunctuationAndSeparatorsWithoutMakingThemWords() {
         val state = model("well, done!", cursor = 5)
 

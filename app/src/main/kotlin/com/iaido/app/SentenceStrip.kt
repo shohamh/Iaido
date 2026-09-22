@@ -1,5 +1,6 @@
 package com.iaido.app
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,7 +26,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -73,11 +75,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -86,6 +88,15 @@ import kotlin.math.abs
 import kotlin.math.max
 
 private const val CURSOR_HOLD_TIMEOUT_MS = 360L
+
+private data class SentenceStripFocusTarget(
+    val sentenceStart: Int,
+    val wordStart: Int,
+    val selectionStart: Int,
+    val scrollValue: Int,
+    val cursorContentX: Float,
+    val viewportWidthPx: Int,
+)
 
 @Composable
 internal fun SentenceStrip(
@@ -99,7 +110,7 @@ internal fun SentenceStrip(
     val currentStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium)
     val alternativeStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp)
     val scrollState = rememberScrollState()
-    val layoutDirection = if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    val layoutDirection = SentenceStripLayoutMath.textDirection(rtl)
     var viewportWidthPx by remember { mutableIntStateOf(0) }
     val previewState = remember(state.sentenceStart) { mutableStateOf<SentenceStripPreview?>(null) }
     var preview by previewState
@@ -108,16 +119,80 @@ internal fun SentenceStrip(
     val edgeScrollTargetState = remember { mutableStateOf<EdgeScrollTarget?>(null) }
     val gestureActiveState = remember { mutableStateOf(false) }
     var lastEdgeDirection by remember { mutableStateOf(EdgeScrollDirection.RIGHT) }
-    var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var rowCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val measuredLanes = remember(state.words, currentStyle, alternativeStyle, textMeasurer, density) {
-        state.words.map { word ->
-            val currentLayout = textMeasurer.measure(word.text, currentStyle, maxLines = 1, softWrap = false)
+    val separators = remember(state.words, state.sentenceText, currentStyle, textMeasurer) {
+        state.words.zipWithNext().map { (word, next) ->
+            val start = (word.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length)
+            val end = (next.start - state.sentenceStart).coerceIn(start, state.sentenceText.length)
+            state.sentenceText.substring(start, end)
+        }
+    }
+    val trailingText = remember(state.words, state.sentenceText) {
+        state.words.lastOrNull()?.let { last ->
+            state.sentenceText.substring((last.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length))
+        } ?: state.sentenceText
+    }
+    val trailingWidthPx = remember(trailingText, currentStyle, textMeasurer, layoutDirection) {
+        textMeasurer.measure(
+            trailingText,
+            currentStyle,
+            maxLines = 1,
+            softWrap = false,
+            layoutDirection = layoutDirection,
+        ).size.width.toFloat()
+    }
+    val separatorWidthsPx = remember(separators, currentStyle, textMeasurer, layoutDirection) {
+        separators.map {
+            textMeasurer.measure(
+                it,
+                currentStyle,
+                maxLines = 1,
+                softWrap = false,
+                layoutDirection = layoutDirection,
+            ).size.width.toFloat()
+        }
+    }
+    LaunchedEffect(state.words) {
+        val wordsById = state.words.associateBy(SentenceStripWord::id)
+        alternativeOverrides.toMap().forEach { (id, override) ->
+            if (wordsById[id]?.text != override.selectedText) alternativeOverrides.remove(id)
+        }
+    }
+    val displayWords = state.words.map { word ->
+        alternativeOverrides[word.id]?.apply(word) ?: word
+    }
+    val measuredLanes = remember(
+        displayWords,
+        currentStyle,
+        alternativeStyle,
+        textMeasurer,
+        density,
+        layoutDirection,
+    ) {
+        displayWords.map { word ->
+            val currentLayout = textMeasurer.measure(
+                word.text,
+                currentStyle,
+                maxLines = 1,
+                softWrap = false,
+                layoutDirection = layoutDirection,
+            )
             val upperLayout = word.above?.let {
-                textMeasurer.measure(it, alternativeStyle, maxLines = 1, softWrap = false)
+                textMeasurer.measure(
+                    it,
+                    alternativeStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    layoutDirection = layoutDirection,
+                )
             }
             val lowerLayout = word.below?.let {
-                textMeasurer.measure(it, alternativeStyle, maxLines = 1, softWrap = false)
+                textMeasurer.measure(
+                    it,
+                    alternativeStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    layoutDirection = layoutDirection,
+                )
             }
             val maxWidth = max(currentLayout.size.width, max(upperLayout?.size?.width ?: 0, lowerLayout?.size?.width ?: 0))
             val anchors = (0..word.text.length).map { offset ->
@@ -134,61 +209,140 @@ internal fun SentenceStrip(
             )
         }
     }
-
-    val separators = remember(state.words, state.sentenceText, currentStyle, textMeasurer) {
-        state.words.zipWithNext().map { (word, next) ->
-            val start = (word.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length)
-            val end = (next.start - state.sentenceStart).coerceIn(start, state.sentenceText.length)
-            state.sentenceText.substring(start, end)
-        }
-    }
-    val trailingText = remember(state.words, state.sentenceText) {
-        state.words.lastOrNull()?.let { last ->
-            state.sentenceText.substring((last.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length))
-        } ?: state.sentenceText
-    }
-    val separatorWidthsPx = remember(separators, currentStyle, textMeasurer) {
-        separators.map { textMeasurer.measure(it, currentStyle, maxLines = 1, softWrap = false).size.width.toFloat() }
-    }
-    val metrics = remember(measuredLanes, separatorWidthsPx, rtl, viewportWidthPx, density) {
+    val metrics = remember(measuredLanes, separatorWidthsPx, trailingWidthPx, rtl, viewportWidthPx, density) {
         SentenceStripGeometry.create(
             words = measuredLanes.map { it.second },
             gapWidthsPx = separatorWidthsPx,
             viewportWidthPx = viewportWidthPx.toFloat(),
             isRtl = rtl,
-            addedGapPx = with(density) { SentenceStripGeometry.WORD_GAP_CSS_PX.dp.toPx() },
+            addedGapPx = with(density) {
+                SentenceStripGeometry.WORD_GAP_CSS_PX.dp.roundToPx().toFloat()
+            },
+            trailingContentWidthPx = trailingWidthPx,
         )
-    }
-
-    LaunchedEffect(state.words) {
-        val wordsById = state.words.associateBy(SentenceStripWord::id)
-        alternativeOverrides.toMap().forEach { (id, override) ->
-            if (wordsById[id]?.text != override.selectedText) alternativeOverrides.remove(id)
-        }
-    }
-    val displayWords = state.words.map { word ->
-        alternativeOverrides[word.id]?.apply(word) ?: word
-    }
-
-    LaunchedEffect(state.selectionStart, state.words, metrics, gestureActiveState.value) {
-        if (gestureActiveState.value) return@LaunchedEffect
-        val focused = state.words.indexOfFirst { word ->
-            state.selectionStart in word.start..word.endExclusive
-        }
-        if (focused >= 0) {
-            val targetPx = metrics.focusScrollOffset(focused)
-            scrollState.animateScrollTo(
-                targetPx.toInt().coerceAtLeast(0),
-                tween(durationMillis = 180, easing = FastOutSlowInEasing),
-            )
-        }
     }
 
     val liveState = rememberUpdatedState(state.copy(words = displayWords))
     val liveMetrics = rememberUpdatedState(metrics)
+    LaunchedEffect(gestureActiveState.value, rtl) {
+        if (gestureActiveState.value) return@LaunchedEffect
+        var lastSentenceStart: Int? = null
+        var lastFocusedWordStart: Int? = null
+        var lastViewportWidthPx = 0
+        snapshotFlow {
+            val currentState = liveState.value
+            val currentMetrics = liveMetrics.value
+            val previousFocusIndex = lastFocusedWordStart?.let { start ->
+                currentState.words.indexOfFirst { it.start == start }.takeIf { it >= 0 }
+            }
+            val focused = cursorFocusedWordIndex(
+                words = currentState.words,
+                cursorPosition = currentState.selectionStart,
+                start = SentenceStripWord::start,
+                endExclusive = SentenceStripWord::endExclusive,
+                previousFocusedIndex = previousFocusIndex,
+            ) ?: -1
+            val word = currentState.words.getOrNull(focused)
+            val lane = currentMetrics.words.getOrNull(focused)
+            val cursorOffset = word?.let {
+                (currentState.selectionStart - it.start).coerceIn(0, it.text.length)
+            }
+            val renderedLayout = word?.let { currentLayouts[it.id] }
+            val cursorX = if (lane != null && cursorOffset != null && renderedLayout != null) {
+                lane.laneBounds.left + renderedLayout.getCursorRect(cursorOffset).left
+            } else {
+                currentMetrics.cursorContentX(focused, currentState.selectionStart)
+            }
+            if (word == null || cursorX == null) {
+                null
+            } else {
+                val maxScrollPx = scrollState.maxValue.toFloat()
+                val targetPx = SentenceStripScrollMath.valueForContentOffset(
+                    contentOffsetPx = currentMetrics.focusScrollOffset(focused),
+                    maxScrollPx = maxScrollPx,
+                    isRtl = rtl,
+                ).toInt().coerceIn(0, scrollState.maxValue)
+                SentenceStripFocusTarget(
+                    sentenceStart = currentState.sentenceStart,
+                    wordStart = word.start,
+                    selectionStart = currentState.selectionStart,
+                    scrollValue = targetPx,
+                    cursorContentX = cursorX,
+                    viewportWidthPx = viewportWidthPx,
+                )
+            }
+        }.collectLatest { target ->
+            if (target == null) return@collectLatest
+            val isNewFocus = target.sentenceStart != lastSentenceStart ||
+                target.wordStart != lastFocusedWordStart ||
+                (target.viewportWidthPx > 0 && target.viewportWidthPx != lastViewportWidthPx)
+            val comfortMarginPx = minOf(with(density) { 28.dp.toPx() }, viewportWidthPx / 3f)
+            if (isNewFocus) {
+                val centeredWordOffset = SentenceStripScrollMath.contentOffsetForValue(
+                    scrollValuePx = target.scrollValue.toFloat(),
+                    maxScrollPx = scrollState.maxValue.toFloat(),
+                    isRtl = rtl,
+                )
+                val centeredWordCursorX = target.cursorContentX - centeredWordOffset
+                val focusTarget = if (
+                    SentenceStripScrollMath.cursorNeedsFollow(
+                        viewportX = centeredWordCursorX,
+                        viewportWidthPx = viewportWidthPx.toFloat(),
+                        comfortMarginPx = comfortMarginPx,
+                    )
+                ) {
+                    SentenceStripScrollMath.valueForContentOffset(
+                        contentOffsetPx = SentenceStripScrollMath.centeredContentOffset(
+                            contentX = target.cursorContentX,
+                            viewportWidthPx = viewportWidthPx.toFloat(),
+                            maxScrollPx = scrollState.maxValue.toFloat(),
+                        ),
+                        maxScrollPx = scrollState.maxValue.toFloat(),
+                        isRtl = rtl,
+                    ).toInt().coerceIn(0, scrollState.maxValue)
+                } else {
+                    target.scrollValue
+                }
+                scrollState.animateScrollTo(
+                    focusTarget,
+                    tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                )
+            } else {
+                val contentOffset = SentenceStripScrollMath.contentOffsetForValue(
+                    scrollValuePx = scrollState.value.toFloat(),
+                    maxScrollPx = scrollState.maxValue.toFloat(),
+                    isRtl = rtl,
+                )
+                val cursorViewportX = target.cursorContentX - contentOffset
+                if (SentenceStripScrollMath.cursorNeedsFollow(
+                        viewportX = cursorViewportX,
+                        viewportWidthPx = viewportWidthPx.toFloat(),
+                        comfortMarginPx = comfortMarginPx,
+                    )
+                ) {
+                    val cursorOffset = SentenceStripScrollMath.centeredContentOffset(
+                        contentX = target.cursorContentX,
+                        viewportWidthPx = viewportWidthPx.toFloat(),
+                        maxScrollPx = scrollState.maxValue.toFloat(),
+                    )
+                    val cursorTarget = SentenceStripScrollMath.valueForContentOffset(
+                        contentOffsetPx = cursorOffset,
+                        maxScrollPx = scrollState.maxValue.toFloat(),
+                        isRtl = rtl,
+                    ).toInt().coerceIn(0, scrollState.maxValue)
+                    scrollState.animateScrollTo(
+                        cursorTarget,
+                        tween(durationMillis = 90, easing = FastOutSlowInEasing),
+                    )
+                }
+            }
+            lastSentenceStart = target.sentenceStart
+            lastFocusedWordStart = target.wordStart
+            lastViewportWidthPx = target.viewportWidthPx
+        }
+    }
+
     val liveActions = rememberUpdatedState(actions)
-    val liveViewportCoordinates = rememberUpdatedState(viewportCoordinates)
-    val liveRowCoordinates = rememberUpdatedState(rowCoordinates)
     val wordPreview = preview as? SentenceWordPreview
     val replacementPreview = preview as? SentenceReplacementPreview
     val deletionPreview = preview as? SentenceDeletionPreview
@@ -244,17 +398,14 @@ internal fun SentenceStrip(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                .padding(horizontal = 14.dp)
+                    .padding(horizontal = 14.dp)
                 .height(78.dp)
                     .onSizeChanged { viewportWidthPx = it.width }
-                    .onGloballyPositioned { viewportCoordinates = it }
                     .sentenceStripInput(
                         state = liveState,
                         geometry = liveMetrics,
                         actions = liveActions,
                         preview = previewState,
-                        viewport = liveViewportCoordinates,
-                        row = liveRowCoordinates,
                         layouts = currentLayouts,
                         alternativeOverrides = alternativeOverrides,
                         scrollState = scrollState,
@@ -269,7 +420,6 @@ internal fun SentenceStrip(
                     modifier = Modifier
                         .height(78.dp)
                         .horizontalScroll(scrollState)
-                        .onGloballyPositioned { rowCoordinates = it }
                         .semantics {
                             preview?.let { contentDescription = "Iaido sentence preview text=${it.sentenceText}" }
                         },
@@ -332,6 +482,9 @@ internal fun SentenceStrip(
                             softWrap = false,
                         )
                     }
+                    if (metrics.focusRunwayWidthPx > 0f) {
+                        Spacer(Modifier.width(with(density) { metrics.focusRunwayWidthPx.toDp() }))
+                    }
                 }
                 Box(
                     modifier = Modifier
@@ -353,8 +506,12 @@ internal fun SentenceStrip(
                     modifier = Modifier
                         .graphicsLayer { alpha = edgeFade }
                         .align(
-                        if (lastEdgeDirection == EdgeScrollDirection.LEFT) Alignment.CenterStart
-                        else Alignment.CenterEnd,
+                            when {
+                                lastEdgeDirection == EdgeScrollDirection.LEFT && !rtl -> Alignment.CenterStart
+                                lastEdgeDirection == EdgeScrollDirection.LEFT && rtl -> Alignment.CenterEnd
+                                lastEdgeDirection == EdgeScrollDirection.RIGHT && !rtl -> Alignment.CenterEnd
+                                else -> Alignment.CenterStart
+                            },
                     ),
                 )
                 replacementPreview?.takeIf(SentenceReplacementPreview::isJoin)?.let { join ->
@@ -362,9 +519,9 @@ internal fun SentenceStrip(
                         preview = join,
                         state = state,
                         geometry = metrics,
-                        viewportCoordinates = viewportCoordinates,
-                        rowCoordinates = rowCoordinates,
                         scrollValue = scrollState.value,
+                        maxScrollValue = scrollState.maxValue,
+                        isRtl = rtl,
                         density = density,
                     )
                 }
@@ -372,9 +529,9 @@ internal fun SentenceStrip(
                     DeletionPreviewOverlay(
                         preview = deletion,
                         geometry = metrics,
-                        viewportCoordinates = viewportCoordinates,
-                        rowCoordinates = rowCoordinates,
                         scrollValue = scrollState.value,
+                        maxScrollValue = scrollState.maxValue,
+                        isRtl = rtl,
                         density = density,
                     )
                 }
@@ -388,16 +545,16 @@ private fun JoinPreviewOverlay(
     preview: SentenceReplacementPreview,
     state: SentenceStripState,
     geometry: SentenceStripGeometry,
-    viewportCoordinates: LayoutCoordinates?,
-    rowCoordinates: LayoutCoordinates?,
     scrollValue: Int,
+    maxScrollValue: Int,
+    isRtl: Boolean,
     density: Density,
 ) {
     val first = preview.sourceWordIndices.minOrNull() ?: return
     val last = preview.sourceWordIndices.maxOrNull() ?: return
     val bounds = geometry.joinUnion(first, last)
-    val leftPx = stripViewportX(bounds.left, viewportCoordinates, rowCoordinates, scrollValue)
-    val rightPx = stripViewportX(bounds.right, viewportCoordinates, rowCoordinates, scrollValue)
+    val leftPx = stripViewportX(bounds.left, scrollValue, maxScrollValue, isRtl)
+    val rightPx = stripViewportX(bounds.right, scrollValue, maxScrollValue, isRtl)
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
     val originalText = preview.sourceWordIndices.sorted().mapNotNull(state.words::getOrNull)
@@ -410,7 +567,7 @@ private fun JoinPreviewOverlay(
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = Modifier
-            .offset(x = left, y = 6.dp)
+            .absoluteOffset(x = left, y = 6.dp)
             .width(width)
             .height(66.dp)
             .background(KeyboardPalette.Screen, shape)
@@ -428,10 +585,18 @@ private fun JoinPreviewOverlay(
         ) {
             Box(
                 modifier = Modifier
+                    .requiredWidth(44.dp)
                     .background(KeyboardPalette.Accent, RoundedCornerShape(8.dp))
                     .padding(horizontal = 7.dp, vertical = 1.dp),
             ) {
-                Text("JOIN", color = KeyboardPalette.Page, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "JOIN",
+                    color = KeyboardPalette.Page,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
             Text(
                 text = originalText,
@@ -463,53 +628,69 @@ private fun JoinPreviewOverlay(
 private fun DeletionPreviewOverlay(
     preview: SentenceDeletionPreview,
     geometry: SentenceStripGeometry,
-    viewportCoordinates: LayoutCoordinates?,
-    rowCoordinates: LayoutCoordinates?,
     scrollValue: Int,
+    maxScrollValue: Int,
+    isRtl: Boolean,
     density: Density,
 ) {
     val bounds = geometry.joinUnion(preview.wordRange.first, preview.wordRange.last)
-    val leftPx = stripViewportX(bounds.left, viewportCoordinates, rowCoordinates, scrollValue)
-    val rightPx = stripViewportX(bounds.right, viewportCoordinates, rowCoordinates, scrollValue)
+    val leftPx = stripViewportX(bounds.left, scrollValue, maxScrollValue, isRtl)
+    val rightPx = stripViewportX(bounds.right, scrollValue, maxScrollValue, isRtl)
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
+    val badgeWidth = 64.dp
+    val badgeWidthPx = with(density) { badgeWidth.toPx() }
+    val badgeLeft = with(density) {
+        (
+            ((leftPx + rightPx) / 2f - badgeWidthPx / 2f)
+                .coerceIn(0f, (geometry.viewportWidthPx - badgeWidthPx).coerceAtLeast(0f))
+            ).toDp()
+    }
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = Modifier
-            .offset(x = left, y = 6.dp)
-            .width(width)
-            .height(66.dp)
-            .background(KeyboardPalette.Delete.copy(alpha = 0.12f), shape)
-            .border(1.5.dp, KeyboardPalette.Delete, shape)
+            .fillMaxSize()
             .semantics {
                 contentDescription = "Iaido deletion preview startWord=${preview.wordRange.first} " +
                     "endWord=${preview.wordRange.last} start=${preview.sourceStart} " +
                     "end=${preview.sourceEndExclusive}"
             },
     ) {
+        Box(
+            modifier = Modifier
+                .absoluteOffset(x = left, y = 6.dp)
+                .width(width)
+                .height(66.dp)
+                .background(KeyboardPalette.Delete.copy(alpha = 0.12f), shape)
+                .border(1.5.dp, KeyboardPalette.Delete, shape),
+        )
         Text(
             text = "DELETE",
             modifier = Modifier
-                .align(Alignment.TopCenter)
+                .absoluteOffset(x = badgeLeft, y = 6.dp)
+                .requiredWidth(badgeWidth)
                 .background(KeyboardPalette.Delete, RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                 .padding(horizontal = 8.dp, vertical = 1.dp),
             color = KeyboardPalette.Page,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
 
 private fun stripViewportX(
     contentX: Float,
-    viewport: LayoutCoordinates?,
-    row: LayoutCoordinates?,
     scrollValue: Int,
-): Float = if (viewport != null && row != null && viewport.isAttached && row.isAttached) {
-    viewport.localPositionOf(row, Offset(contentX, 0f)).x
-} else {
-    contentX - scrollValue
-}
+    maxScrollValue: Int,
+    isRtl: Boolean,
+): Float = SentenceStripScrollMath.viewportXFromContent(
+    contentX = contentX,
+    scrollValuePx = scrollValue.toFloat(),
+    maxScrollPx = maxScrollValue.toFloat(),
+    isRtl = isRtl,
+)
 
 @Composable
 private fun SentenceWordLane(
@@ -679,8 +860,6 @@ private fun Modifier.sentenceStripInput(
     geometry: State<SentenceStripGeometry>,
     actions: State<SentenceStripActions?>,
     preview: MutableState<SentenceStripPreview?>,
-    viewport: State<LayoutCoordinates?>,
-    row: State<LayoutCoordinates?>,
     layouts: Map<String, TextLayoutResult>,
     alternativeOverrides: MutableMap<String, SentenceWordAlternativeOverride>,
     scrollState: ScrollState,
@@ -697,17 +876,17 @@ private fun Modifier.sentenceStripInput(
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         val frozenState = state.value
         val frozenGeometry = geometry.value
-        val viewportCoordinates = viewport.value
-        val rowCoordinates = row.value
 
         fun contentPosition(position: Offset): Offset {
-            return if (viewportCoordinates != null && rowCoordinates != null &&
-                viewportCoordinates.isAttached && rowCoordinates.isAttached
-            ) {
-                rowCoordinates.localPositionOf(viewportCoordinates, position)
-            } else {
-                Offset(position.x + scrollState.value, position.y)
-            }
+            return Offset(
+                SentenceStripScrollMath.contentXFromViewport(
+                    viewportX = position.x,
+                    scrollValuePx = scrollState.value.toFloat(),
+                    maxScrollPx = scrollState.maxValue.toFloat(),
+                    isRtl = rtl,
+                ),
+                position.y,
+            )
         }
 
         fun selectionAt(position: Offset): Int {
@@ -762,6 +941,8 @@ private fun Modifier.sentenceStripInput(
         var activePreview: SentenceStripPreview? = null
         var edgeFrameJob: Job? = null
 
+        fun heldForMs(): Long = (SystemClock.uptimeMillis() - down.uptimeMillis).coerceAtLeast(0L)
+
         fun setCursorAt(position: Offset) {
             val selection = selectionAt(position)
             if (selection != lastCursorSelection) {
@@ -771,30 +952,20 @@ private fun Modifier.sentenceStripInput(
         }
 
         fun updateAlternativeAt(position: Offset) {
-            val deletionRange = originIndex?.let { index ->
-                frozenGeometry.deletionWordRange(index, contentPosition(position).x)
-            }
-            activePreview = if (deletionRange != null) {
-                SentenceStripPreviewMath.deletion(frozenState, deletionRange)
-            } else {
-                originIndex?.let { index ->
-                    SentenceStripPreviewMath.alternative(
-                        frozenState,
-                        index,
-                        if (position.y < down.position.y) SentenceAlternativeSide.ABOVE
-                        else SentenceAlternativeSide.BELOW,
-                    )
-                }
+            activePreview = originIndex?.let { index ->
+                SentenceStripPreviewMath.gestureAt(
+                    state = frozenState,
+                    geometry = frozenGeometry,
+                    originWordIndex = index,
+                    contentX = contentPosition(position).x,
+                    side = if (position.y < down.position.y) SentenceAlternativeSide.ABOVE
+                    else SentenceAlternativeSide.BELOW,
+                )
             }
             preview.value = activePreview
         }
 
         fun updateEdgeFrame(frameNanos: Long) {
-            if (mode != SentencePointerMode.CURSOR && mode != SentencePointerMode.ALTERNATIVE) {
-                edgeScrollTarget.value = null
-                lastEdgeFrameNanos = 0L
-                return
-            }
             val viewportWidth = viewportWidthPx.value.toFloat()
             val target = SentenceStripEdgeScrollMath.targetAt(
                 x = latestPosition.x,
@@ -802,6 +973,22 @@ private fun Modifier.sentenceStripInput(
                 zoneWidth = with(density) { EDGE_SCROLL_ZONE_WIDTH_DP.dp.toPx() },
             )
             edgeScrollTarget.value = target
+
+            if (mode == SentencePointerMode.SCROLL &&
+                SentenceStripGestureMath.shouldPromoteEdgeScrollToCursor(
+                    heldForMs = heldForMs(),
+                    hasWordOrigin = originIndex != null,
+                    isInEdgeZone = target != null,
+                )
+            ) {
+                mode = SentencePointerMode.CURSOR
+                gestureActive.value = true
+                setCursorAt(latestPosition)
+            }
+            if (mode != SentencePointerMode.CURSOR && mode != SentencePointerMode.ALTERNATIVE) {
+                lastEdgeFrameNanos = 0L
+                return
+            }
             if (target == null) {
                 lastEdgeFrameNanos = 0L
                 return
@@ -846,33 +1033,48 @@ private fun Modifier.sentenceStripInput(
                 if (abs(dy) > dragSlop) {
                     if (originIndex != null) {
                         mode = SentencePointerMode.ALTERNATIVE
-                        activePreview = SentenceStripPreviewMath.alternative(
-                            frozenState,
-                            originIndex,
-                            if (change.position.y < down.position.y) SentenceAlternativeSide.ABOVE
-                            else SentenceAlternativeSide.BELOW,
-                        )
-                        preview.value = activePreview
+                        updateAlternativeAt(change.position)
                         gestureActive.value = true
                         change.consume()
                     } else if (abs(dx) > dragSlop) {
                         mode = SentencePointerMode.SCROLL
+                        startEdgeFrames()
                     }
-                } else if (abs(dx) > dragSlop) {
-                    mode = SentencePointerMode.SCROLL
+                } else if (SentenceStripGestureMath.hasStartedHorizontalScroll(
+                        dx,
+                        density.density,
+                        hasWordOrigin = originIndex != null,
+                    )
+                ) {
+                    if (SentenceStripGestureMath.shouldStartCursorScrub(
+                            heldForMs = change.uptimeMillis - down.uptimeMillis,
+                            hasWordOrigin = originIndex != null,
+                        )
+                    ) {
+                        mode = SentencePointerMode.CURSOR
+                        gestureActive.value = true
+                        setCursorAt(change.position)
+                        startEdgeFrames()
+                        change.consume()
+                    } else {
+                        mode = SentencePointerMode.SCROLL
+                        startEdgeFrames()
+                    }
                 }
             }
         }
 
-            if (!released && mode == SentencePointerMode.PENDING && originIndex != null) {
+        if (!released && mode == SentencePointerMode.PENDING && originIndex != null) {
             mode = SentencePointerMode.CURSOR
             gestureActive.value = true
-            setCursorAt(down.position)
+            setCursorAt(latestPosition)
         } else if (released && mode == SentencePointerMode.PENDING) {
             setCursorAt(down.position)
         }
 
-        if (mode == SentencePointerMode.CURSOR || mode == SentencePointerMode.ALTERNATIVE) {
+        if (mode == SentencePointerMode.CURSOR || mode == SentencePointerMode.ALTERNATIVE ||
+            mode == SentencePointerMode.SCROLL
+        ) {
             startEdgeFrames()
         }
         while (!released) {
@@ -916,21 +1118,50 @@ private fun Modifier.sentenceStripInput(
                     val dy = change.position.y - down.position.y
                     if (abs(dy) > dragSlop && originIndex != null) {
                         mode = SentencePointerMode.ALTERNATIVE
-                        activePreview = SentenceStripPreviewMath.alternative(
-                            frozenState,
-                            originIndex,
-                            if (change.position.y < down.position.y) SentenceAlternativeSide.ABOVE
-                            else SentenceAlternativeSide.BELOW,
-                        )
-                        preview.value = activePreview
+                        updateAlternativeAt(change.position)
                         gestureActive.value = true
                         startEdgeFrames()
                         change.consume()
-                    } else if (abs(dx) > dragSlop) {
-                        mode = SentencePointerMode.SCROLL
+                    } else if (SentenceStripGestureMath.hasStartedHorizontalScroll(
+                            dx,
+                            density.density,
+                            hasWordOrigin = originIndex != null,
+                        )
+                    ) {
+                        if (SentenceStripGestureMath.shouldStartCursorScrub(
+                                heldForMs = change.uptimeMillis - down.uptimeMillis,
+                                hasWordOrigin = originIndex != null,
+                            )
+                        ) {
+                            mode = SentencePointerMode.CURSOR
+                            gestureActive.value = true
+                            setCursorAt(change.position)
+                            startEdgeFrames()
+                            change.consume()
+                        } else {
+                            mode = SentencePointerMode.SCROLL
+                            startEdgeFrames()
+                        }
                     }
                 }
-                SentencePointerMode.SCROLL -> Unit
+                SentencePointerMode.SCROLL -> {
+                    if (SentenceStripGestureMath.shouldPromoteEdgeScrollToCursor(
+                            heldForMs = heldForMs(),
+                            hasWordOrigin = originIndex != null,
+                            isInEdgeZone = SentenceStripEdgeScrollMath.targetAt(
+                                x = change.position.x,
+                                viewportWidth = viewportWidthPx.value.toFloat(),
+                                zoneWidth = with(density) { EDGE_SCROLL_ZONE_WIDTH_DP.dp.toPx() },
+                            ) != null,
+                        )
+                    ) {
+                        mode = SentencePointerMode.CURSOR
+                        gestureActive.value = true
+                        setCursorAt(change.position)
+                        startEdgeFrames()
+                        change.consume()
+                    }
+                }
                 SentencePointerMode.CURSOR -> {
                     setCursorAt(change.position)
                     change.consume()

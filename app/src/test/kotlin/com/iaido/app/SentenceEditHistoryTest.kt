@@ -1,5 +1,7 @@
 package com.iaido.app
 
+import com.iaido.core.language.Language
+import com.iaido.core.recognition.SessionCorrectionHistory
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -110,6 +112,52 @@ class SentenceEditHistoryTest {
         assertEquals(1, history.undoCount)
         assertEquals(0, history.redoCount)
         assertEquals(candidate, history.undoCandidate())
+    }
+
+    @Test
+    fun undoingSentenceDeletionRestoresTheDeletedWordsCorrectionAlternatives() {
+        val correctionHistory = SessionCorrectionHistory()
+        correctionHistory.record(0, 2, "we", listOf("well"))
+        correctionHistory.record(3, 6, "put", listOf("set", "out"))
+        correctionHistory.record(7, 9, "it", emptyList())
+        val correctionHistoryBeforeDeletion = correctionHistory.snapshot()
+        val history = SentenceEditHistory()
+        history.recordAppliedEdit(
+            edit(3, "put ", "", SentenceEditKind.DELETION, before = 6, after = 3),
+        )
+        correctionHistory.deleteRange(3, 7)
+        val correctionHistoryAfterDeletion = correctionHistory.snapshot()
+        assertTrue(
+            history.attachCorrectionHistorySnapshots(
+                before = correctionHistoryBeforeDeletion,
+                after = correctionHistoryAfterDeletion,
+            ),
+        )
+
+        assertTrue(
+            history.undo { edit ->
+                edit.correctionHistoryBefore?.let(correctionHistory::restore)
+                HistoryApplyResult.APPLIED
+            },
+        )
+        val restoredStrip = SentenceTextModel.update(
+            previous = null,
+            snapshot = EditorSnapshot("we put it", selectionStart = 6, selectionEnd = 6),
+            language = Language.ENGLISH,
+            history = correctionHistory.words(),
+            replacementOptions = emptyList(),
+        )
+
+        assertEquals("set", restoredStrip.words[1].above)
+        assertEquals("out", restoredStrip.words[1].below)
+
+        assertTrue(
+            history.redo { edit ->
+                edit.correctionHistoryAfter?.let(correctionHistory::restore)
+                HistoryApplyResult.APPLIED
+            },
+        )
+        assertEquals(null, correctionHistory.words().firstOrNull { it.current == "put" })
     }
 
     @Test

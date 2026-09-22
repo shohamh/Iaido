@@ -1,7 +1,10 @@
 package com.iaido.app
 
+import androidx.datastore.preferences.core.emptyPreferences
 import com.iaido.core.typing.SpacingMode
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SpacingModeSettingsTest {
@@ -41,5 +44,16 @@ class SpacingModeSettingsTest {
                 spacingModeOptions(selectedMode).filter(SpacingModeOption::selected).map(SpacingModeOption::mode),
             )
         }
+    }
+
+    @Test
+    fun `number row defaults on and follows the saved setting`() {
+        assertTrue(keyboardSettingsFromPreferences(emptyPreferences()).showNumberRow)
+
+        val hidden = emptyPreferences().toMutablePreferences().apply {
+            this[showNumberRowKey] = false
+        }
+
+        assertFalse(keyboardSettingsFromPreferences(hidden).showNumberRow)
     }
 }

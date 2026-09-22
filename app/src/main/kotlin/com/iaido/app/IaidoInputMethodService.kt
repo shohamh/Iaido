@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.os.LocaleList
+import android.view.KeyEvent
 import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.ExtractedTextRequest
@@ -98,12 +99,14 @@ class IaidoInputMethodService : InputMethodService() {
     private val sessionChips = mutableStateOf<List<SuggestionChip>>(emptyList())
     private val replacementOptions = mutableStateOf<List<ReplacementOption>>(emptyList())
     private val sentenceStripState = mutableStateOf(SentenceTextModel.emptyState(Language.ENGLISH))
+    private val showNumberRow = mutableStateOf(SettingsDefaults.SHOW_NUMBER_ROW)
     private val sentenceStripActions = object : SentenceStripActions {
         override fun setSelection(start: Int, endExclusive: Int): Boolean {
             val connection = currentInputConnection ?: return false
             if (start < 0 || endExclusive < start || !connection.setSelection(start, endExclusive)) return false
             cursorPosition = start
             selectionEndPosition = endExclusive
+            typingController.markCursorMoved()
             sentenceEditHistory.closeGroup()
             latestEditorSnapshot?.let { snapshot ->
                 latestEditorSnapshot = snapshot.copy(selectionStart = start, selectionEnd = endExclusive)
@@ -149,6 +152,7 @@ class IaidoInputMethodService : InputMethodService() {
                 current.deletedText != preview.deletedText ||
                 current.sourceWordIds != preview.sourceWordIds
             ) return false
+            val correctionHistoryBefore = correctionHistory.snapshot()
             val changed = applyEditorReplacement(
                 start = current.sourceStart,
                 endExclusive = current.sourceEndExclusive,
@@ -159,6 +163,10 @@ class IaidoInputMethodService : InputMethodService() {
             )
             if (changed) {
                 correctionHistory.deleteRange(current.sourceStart, current.sourceEndExclusive)
+                sentenceEditHistory.attachCorrectionHistorySnapshots(
+                    before = correctionHistoryBefore,
+                    after = correctionHistory.snapshot(),
+                )
                 typedWords.reset()
                 refreshSuggestionChips()
             }
@@ -432,7 +440,9 @@ class IaidoInputMethodService : InputMethodService() {
             newSelEnd,
             timeoutMs = INFERENCE_SELECTION_GUARD_TIMEOUT_MS,
         )
-        if (!suppressedAsInferenceReplacement && (newSelStart != cursorPosition || newSelEnd != newSelStart)) {
+        val selectionChanged = newSelStart != cursorPosition || newSelEnd != selectionEndPosition
+        if (!suppressedAsInferenceReplacement && selectionChanged) {
+            typingController.markCursorMoved()
             swipeTypingCoordinator.onCursorMoved()
             sentenceEditHistory.closeGroup()
         }
@@ -495,6 +505,7 @@ class IaidoInputMethodService : InputMethodService() {
                             swipeTypingCoordinator.onNonSwipeInput()
                             when (value) {
                                 "⌫" -> typingController.backspace()
+                                ENTER_KEY -> performEnterAction()
                                 SETTINGS_KEY -> openSettings()
                                 "🌐" -> switchLanguage()
                             else -> typingController.tap(value)
@@ -510,6 +521,7 @@ class IaidoInputMethodService : InputMethodService() {
                         typingController.punctuationToSpace(punctuation)
                     },
                     language = activeLanguage,
+                    showNumberRow = showNumberRow.value,
                     onLanguageSwitch = ::switchLanguage,
                     onCommand = { trigger ->
                         swipeTypingCoordinator.onNonSwipeInput()
@@ -754,6 +766,7 @@ class IaidoInputMethodService : InputMethodService() {
                 .collectLatest { resolvedMode ->
                     mainHandler.post {
                         spacingModeForTypingCoordinator = resolvedMode.spacingMode
+                        showNumberRow.value = resolvedMode.showNumberRow
                         showCandidateScores.value = resolvedMode.showCandidateScores && isDebugBuild()
                         flowCorrectionEngine.setMaxCascadeDepth(resolvedMode.flowCorrectionDepth)
                         splitGraceWindowMs = resolvedMode.splitGraceWindowMs
@@ -980,7 +993,7 @@ class IaidoInputMethodService : InputMethodService() {
 
         val selectionStart = if (undo) edit.selectionBeforeStart else edit.selectionAfterStart
         val selectionEnd = if (undo) edit.selectionBeforeEnd else edit.selectionAfterEnd
-        return if (applyEditorReplacement(
+        val applied = applyEditorReplacement(
                 start = start,
                 endExclusive = end,
                 replacement = replacement,
@@ -991,7 +1004,14 @@ class IaidoInputMethodService : InputMethodService() {
                 recordHistory = false,
                 refresh = false,
             )
-        ) HistoryApplyResult.APPLIED else HistoryApplyResult.FAILED
+        if (!applied) return HistoryApplyResult.FAILED
+        val correctionHistorySnapshot = if (undo) {
+            edit.correctionHistoryBefore
+        } else {
+            edit.correctionHistoryAfter
+        }
+        correctionHistorySnapshot?.let(correctionHistory::restore)
+        return HistoryApplyResult.APPLIED
     }
 
     private fun recordSuccessfulEditorEdit(
@@ -1609,6 +1629,18 @@ class IaidoInputMethodService : InputMethodService() {
         startActivity(
             Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
+    }
+
+    private fun performEnterAction() {
+        val connection = currentInputConnection ?: return
+        val editorInfo = currentInputEditorInfo
+        val action = editorInfo?.imeOptions?.and(android.view.inputmethod.EditorInfo.IME_MASK_ACTION)
+        val isMultiline = editorInfo?.let {
+            it.inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
+        } ?: false
+        val handled = action != null && EnterActionPolicy.shouldPerformEditorAction(action, isMultiline) &&
+            connection.performEditorAction(action)
+        if (!handled) sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
     }
 
     private fun handleCommand(trigger: GestureTrigger) {

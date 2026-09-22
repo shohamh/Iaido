@@ -142,4 +142,17 @@ class TypingControllerTest {
 
         assertEquals(listOf(1), deleted)
     }
+
+    @Test
+    fun `backspace after moving the caret into a swiped word deletes one character`() {
+        val committed = mutableListOf<String>()
+        val deleted = mutableListOf<Int>()
+        val typing = controller(committed, deleted) { "middle" }
+
+        typing.commitWord("middle")
+        typing.markCursorMoved()
+        typing.backspace()
+
+        assertEquals(listOf(1), deleted)
+    }
 }

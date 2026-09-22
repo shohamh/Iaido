@@ -1,6 +1,7 @@
 package com.iaido.app
 
 import kotlin.math.abs
+import kotlin.math.roundToInt
 internal enum class BackspaceGestureAction {
     TAP,
     DELETE,
@@ -8,15 +9,27 @@ internal enum class BackspaceGestureAction {
     REDO,
 }
 
-internal fun classifyBackspaceGesture(dx: Float, dy: Float, threshold: Float): BackspaceGestureAction {
+internal fun classifyBackspaceGesture(
+    dx: Float,
+    dy: Float,
+    threshold: Float,
+    isRtl: Boolean = false,
+): BackspaceGestureAction {
     if (maxOf(abs(dx), abs(dy)) < threshold) return BackspaceGestureAction.TAP
     return if (abs(dx) >= abs(dy)) {
-        if (dx < 0f) BackspaceGestureAction.DELETE else BackspaceGestureAction.TAP
+        val deleteDirection = if (isRtl) dx > 0f else dx < 0f
+        if (deleteDirection) BackspaceGestureAction.DELETE else BackspaceGestureAction.TAP
     } else if (dy < 0f) {
         BackspaceGestureAction.UNDO
     } else {
         BackspaceGestureAction.REDO
     }
+}
+
+internal fun backspaceSwipeRequestedCharacters(dx: Float, stepPx: Float, isRtl: Boolean): Int {
+    if (stepPx <= 0f) return 0
+    val logicalDeleteDistance = if (isRtl) dx else -dx
+    return (logicalDeleteDistance / stepPx).roundToInt()
 }
 
 internal fun backspaceRepeatIntervalMs(repeatCount: Int): Long =

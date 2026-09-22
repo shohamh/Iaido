@@ -53,6 +53,17 @@ class ShapePathScorerTest {
     }
 
     @Test
+    fun `scorer ignores blank and unkeyed candidate words`() {
+        val results = scorer.score(
+            pathThrough('h', 'i'),
+            listOf(WordEntry("", 1.0), WordEntry("h.i", 1.0)),
+            layout,
+        )
+
+        assertEquals(emptyList<ScoredCandidate>(), results)
+    }
+
+    @Test
     fun `equivalent gestures on differently scaled layouts receive the same score`() {
         val scaledLayout = KeyboardLayout(
             layout.keys.map { key ->

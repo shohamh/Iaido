@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 internal object SettingsDefaults {
     const val CASCADE_DEPTH = 2
     const val GRACE_WINDOW_MS = 350
+    const val SHOW_NUMBER_ROW = true
     val CASCADE_DEPTH_RANGE = 0..4
     val GRACE_WINDOW_RANGE = 300..400
 }
@@ -28,6 +29,7 @@ internal val cascadeDepthKey = intPreferencesKey("flow_correction_depth")
 internal val graceWindowKey = intPreferencesKey("split_grace_window_ms")
 internal val spacingModeKey = stringPreferencesKey("spacing_mode")
 internal val preferredLanguageKey = stringPreferencesKey("preferred_language")
+internal val showNumberRowKey = booleanPreferencesKey("show_number_row")
 internal val showCandidateScoresKey = booleanPreferencesKey("show_candidate_scores")
 internal val diagnosticsConsentKey = booleanPreferencesKey("diagnostics_enabled")
 internal val diagnosticsConsentVersionKey = intPreferencesKey("diagnostics_consent_version")
@@ -48,6 +50,7 @@ internal data class KeyboardSettings(
     val splitGraceWindowMs: Long = SettingsDefaults.GRACE_WINDOW_MS.toLong(),
     val commandBindings: List<CommandBinding> = CommandBindingSet().bindings,
     val preferredLanguage: Language = Language.ENGLISH,
+    val showNumberRow: Boolean = SettingsDefaults.SHOW_NUMBER_ROW,
     val showCandidateScores: Boolean = false,
 ) {
     init {
@@ -78,6 +81,7 @@ internal class DataStoreKeyboardSettingsDataSource(
                 preferences[graceWindowKey] = settings.splitGraceWindowMs.toInt()
                 preferences[commandBindingKey] = languageBinding(settings.commandBindings).trigger
                 preferences[preferredLanguageKey] = settings.preferredLanguage.name
+                preferences[showNumberRowKey] = settings.showNumberRow
             }
         }
     }
@@ -98,6 +102,7 @@ internal fun keyboardSettingsFromPreferences(preferences: Preferences): Keyboard
     splitGraceWindowMs = (preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS).toLong(),
     commandBindings = commandBindingsFromStoredValue(preferences[commandBindingKey]),
     preferredLanguage = languageFromStoredValue(preferences[preferredLanguageKey]),
+    showNumberRow = preferences[showNumberRowKey] ?: SettingsDefaults.SHOW_NUMBER_ROW,
     showCandidateScores = preferences[showCandidateScoresKey] ?: false,
 )
 

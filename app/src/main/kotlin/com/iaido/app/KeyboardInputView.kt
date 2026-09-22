@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -38,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -45,10 +48,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
 import com.iaido.core.commands.GestureTrigger
 import com.iaido.core.commands.MultiFingerGestureDetector
 import com.iaido.core.gesture.GesturePath
@@ -59,15 +65,35 @@ import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.SuggestionChip
 import com.iaido.core.recognition.ReplacementOption
 import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 
 private const val GLOBE_KEY = "\uD83C\uDF10"
 internal const val SETTINGS_KEY = "\u2699"
-private const val BACKSPACE_KEY = "\u232B"
+internal const val BACKSPACE_KEY = "\u232B"
+internal const val SHIFT_KEY = "shift"
+internal const val ENTER_KEY = "enter"
 private const val MAX_TRAIL_POINTS = 80
 private const val KEYBOARD_ROOT_DESCRIPTION = "Iaido keyboard root"
 private const val SWIPE_SURFACE_DESCRIPTION = "Iaido swipe surface"
-private val punctuationKeys = setOf("'", "?", ",", ".", "\u00B3", "\u00B4")
+private val punctuationKeys = setOf(",", ".")
+
+private enum class KeyboardShiftState {
+    LOWERCASE,
+    ONE_SHOT,
+    CAPS_LOCK;
+
+    fun next(): KeyboardShiftState = when (this) {
+        LOWERCASE -> ONE_SHOT
+        ONE_SHOT -> CAPS_LOCK
+        CAPS_LOCK -> LOWERCASE
+    }
+}
+
+private enum class KeyboardKeyIcon {
+    BACKSPACE,
+    ENTER,
+    GLOBE,
+    SHIFT,
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -78,6 +104,7 @@ internal fun KeyboardInputView(
     onFlick: (String, FlickDirection) -> Unit = { _, _ -> },
     onPunctuationToSpace: (String) -> Unit = {},
     language: Language = Language.ENGLISH,
+    showNumberRow: Boolean = SettingsDefaults.SHOW_NUMBER_ROW,
     onLanguageSwitch: () -> Unit = {},
     onCommand: (GestureTrigger) -> Unit = {},
     suggestionChips: List<SuggestionChip> = emptyList(),
@@ -116,21 +143,26 @@ internal fun KeyboardInputView(
     BoxWithConstraints {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
+        val keyboardSideInsetPx = with(density) { KEYBOARD_SIDE_INSET_DP.dp.toPx() }
+        val keyboardWidthPx = (widthPx - keyboardSideInsetPx * 2f).coerceAtLeast(0f)
         val columnCount = KEYBOARD_LETTER_ROW_COLUMN_COUNT
-        val keySizePx = widthPx / columnCount
+        val rowCount = keyboardRowCount(showNumberRow)
+        val keySizePx = keyboardWidthPx / columnCount
         val keySize = with(density) { keySizePx.toDp() }
         val keyHeightPx = keyboardKeyHeightPx(keySizePx)
         val keyHeight = with(density) { keyHeightPx.toDp() }
         val bottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
-        val surfaceHeightPx = keyboardSurfaceHeightPx(keySizePx)
-        val contentHeightPx = imeContentHeightPx(keySizePx, bottomInsetPx)
+        val surfaceHeightPx = keyboardSurfaceHeightPx(keySizePx, rowCount)
+        val contentHeightPx = imeContentHeightPx(keySizePx, bottomInsetPx, rowCount)
         val keyboardSurfaceHeight = with(density) { surfaceHeightPx.toDp() }
         val bottomInset = with(density) {
             (contentHeightPx - surfaceHeightPx).toDp() + BOTTOM_KEYBOARD_CLEARANCE_DP
         }
         val backspaceSwipeStepPx = with(density) { BACKSPACE_SWIPE_STEP_DP.dp.toPx() }
         val backspaceGestureThresholdPx = with(density) { BACKSPACE_GESTURE_THRESHOLD_DP.dp.toPx() }
-        val layout = remember(widthPx, language) { keyboardLayoutFor(keySizePx, language) }
+        val layout = remember(keyboardWidthPx, language, showNumberRow) {
+            keyboardLayoutFor(keySizePx, language, showNumberRow)
+        }
         val researchLayoutId = if (language == Language.HEBREW) "hebrew" else "qwerty"
         fun finishResearchTrace(classification: String) {
             researchTraceRecorder
@@ -142,6 +174,7 @@ internal fun KeyboardInputView(
         var trailFading by remember(sessionId) { mutableStateOf(false) }
         var pointerId by remember(sessionId) { mutableStateOf(MotionEvent.INVALID_POINTER_ID) }
         var startKey by remember(sessionId) { mutableStateOf<String?>(null) }
+        var shiftState by remember(sessionId) { mutableStateOf(KeyboardShiftState.LOWERCASE) }
         var multiFingerHandled by remember(sessionId) { mutableStateOf(false) }
         var multiStartX by remember(sessionId) { mutableStateOf(0f) }
         var multiStartY by remember(sessionId) { mutableStateOf(0f) }
@@ -155,6 +188,23 @@ internal fun KeyboardInputView(
         val splitPoints = remember(sessionId) { mutableMapOf<Int, MutableList<GesturePoint>>() }
         val splitEnded = remember(sessionId) { mutableSetOf<Int>() }
         val multiFingerDetector = remember { MultiFingerGestureDetector(keySizePx / 2f) }
+        val visibleShiftState = if (language == Language.ENGLISH) shiftState else KeyboardShiftState.LOWERCASE
+
+        LaunchedEffect(language) {
+            if (language != Language.ENGLISH) shiftState = KeyboardShiftState.LOWERCASE
+        }
+
+        fun dispatchTap(key: String) {
+            if (key == SHIFT_KEY) {
+                if (language == Language.ENGLISH) shiftState = shiftState.next()
+                return
+            }
+            val isEnglishLetter = language == Language.ENGLISH && key.singleOrNull()?.isLetter() == true
+            onTap(if (isEnglishLetter && shiftState != KeyboardShiftState.LOWERCASE) key.uppercase() else key)
+            if (isEnglishLetter && shiftState == KeyboardShiftState.ONE_SHOT) {
+                shiftState = KeyboardShiftState.LOWERCASE
+            }
+        }
 
         val trailOpacity by animateFloatAsState(
             targetValue = if (trailFading) 0f else 1f,
@@ -195,11 +245,12 @@ internal fun KeyboardInputView(
             resetBackspaceGestureState()
         }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = KeyboardPalette.Page,
-            contentColor = MaterialTheme.colorScheme.onBackground,
-        ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = KeyboardPalette.Page,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -249,8 +300,9 @@ internal fun KeyboardInputView(
             }
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                .fillMaxWidth()
                         .height(keyboardSurfaceHeight)
+                    .padding(horizontal = KEYBOARD_SIDE_INSET_DP.dp)
                     .background(KeyboardPalette.Deck)
                     .semantics { contentDescription = SWIPE_SURFACE_DESCRIPTION }
                     .pointerInteropFilter { event ->
@@ -259,7 +311,7 @@ internal fun KeyboardInputView(
                         // capture is off by default, so the default path must not allocate at all.
                         val traceRecorder = researchTraceRecorder
                         if (traceRecorder != null && traceRecorder.isEnabled) {
-                            traceRecorder.consume(event.toTouchFrame(widthPx, surfaceHeightPx))
+                            traceRecorder.consume(event.toTouchFrame(keyboardWidthPx, surfaceHeightPx))
                         }
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
@@ -269,7 +321,7 @@ internal fun KeyboardInputView(
                                 val point = event.toGesturePoint(0)
                                 points = listOf(point)
                                 trailPoints = listOf(point)
-                                startKey = keyAt(event.x, event.y, keySizePx, layout, language)
+                                startKey = keyAt(event.x, event.y, keySizePx, layout, language, showNumberRow)
                                 multiFingerHandled = false
                                 splitMode = false
                                 splitPoints.clear()
@@ -316,6 +368,7 @@ internal fun KeyboardInputView(
                                         backspaceDx,
                                         backspaceDy,
                                         backspaceGestureThresholdPx,
+                                        isRtl = language == Language.HEBREW,
                                     )
                                     when (backspaceMode) {
                                         BackspaceMode.PRESS,
@@ -324,7 +377,11 @@ internal fun KeyboardInputView(
                                                 backspaceMode = BackspaceMode.DELETE
                                                 onBackspaceSwipeStart()
                                                 onBackspaceSwipeDistance(
-                                                    (-backspaceDx / backspaceSwipeStepPx).roundToInt(),
+                                                    backspaceSwipeRequestedCharacters(
+                                                        backspaceDx,
+                                                        backspaceSwipeStepPx,
+                                                        isRtl = language == Language.HEBREW,
+                                                    ),
                                                 )
                                             }
                                             BackspaceGestureAction.UNDO -> {
@@ -338,7 +395,11 @@ internal fun KeyboardInputView(
                                             else -> Unit
                                         }
                                         BackspaceMode.DELETE -> onBackspaceSwipeDistance(
-                                            (-backspaceDx / backspaceSwipeStepPx).roundToInt(),
+                                            backspaceSwipeRequestedCharacters(
+                                                backspaceDx,
+                                                backspaceSwipeStepPx,
+                                                isRtl = language == Language.HEBREW,
+                                            ),
                                         )
                                         else -> Unit
                                     }
@@ -397,7 +458,7 @@ internal fun KeyboardInputView(
                                 } else if (startKey == BACKSPACE_KEY) {
                                     when (backspaceMode) {
                                         BackspaceMode.PRESS -> {
-                                            onTap(BACKSPACE_KEY)
+                                            dispatchTap(BACKSPACE_KEY)
                                             cancelBackspaceGesture()
                                         }
                                         BackspaceMode.DELETE -> {
@@ -405,7 +466,11 @@ internal fun KeyboardInputView(
                                             if (releaseIndex >= 0) {
                                                 val releaseDx = event.getX(releaseIndex) - backspaceStartX
                                                 onBackspaceSwipeDistance(
-                                                    (-releaseDx / backspaceSwipeStepPx).roundToInt(),
+                                                    backspaceSwipeRequestedCharacters(
+                                                        releaseDx,
+                                                        backspaceSwipeStepPx,
+                                                        isRtl = language == Language.HEBREW,
+                                                    ),
                                                 )
                                             }
                                             onBackspaceSwipeEnd()
@@ -427,14 +492,22 @@ internal fun KeyboardInputView(
                                     } else if (startKey == " " && event.eventTime - startTime >= 500L) {
                                         onCommand(GestureTrigger.LONG_PRESS_SPACE)
                                         finishResearchTrace(ResearchTraceClassification.COMMAND)
+                                    } else if (startKey?.singleOrNull()?.isDigit() == true) {
+                                        if (isTapGesture(completed, keySizePx)) {
+                                            dispatchTap(startKey!!)
+                                            finishResearchTrace(ResearchTraceClassification.TAP)
+                                        } else {
+                                            finishResearchTrace(ResearchTraceClassification.FAILED)
+                                        }
                                     } else if (startKey != null) {
                                         val end = completed.lastOrNull()
                                         when {
                                             isTapGesture(completed, keySizePx) -> {
-                                                onTap(startKey!!)
+                                                dispatchTap(startKey!!)
                                                 finishResearchTrace(ResearchTraceClassification.TAP)
                                             }
-                                            startKey in punctuationKeys && end != null && end.y >= keySizePx * 3 -> {
+                                            startKey in punctuationKeys && end != null &&
+                                                end.y >= keyboardBottomRowTopPx(keySizePx, rowCount) -> {
                                                 onPunctuationToSpace(startKey!!)
                                                 finishResearchTrace(ResearchTraceClassification.PUNCTUATION)
                                             }
@@ -474,22 +547,51 @@ internal fun KeyboardInputView(
                     },
             ) {
                 val rows = keyboardLetterRowsFor(language)
-                rows.forEachIndexed { index, row ->
+                if (showNumberRow) KeyboardNumberRow(keyHeight, pressedKey = startKey)
+                rows.take(2).forEachIndexed { index, row ->
                     KeyboardRow(
                         letters = row,
                         offset = keySize * keyboardRowOffsetUnits(row.length, columnCount),
-                        y = keyHeight * index,
+                        y = keyHeight * (index + if (showNumberRow) 1 else 0),
                         keySize = keyHeight,
                         pressedKey = startKey,
+                        shiftState = visibleShiftState,
                     )
                 }
-                KeyboardBottomRow(keyHeight, language, pressedKey = startKey)
+                KeyboardModifierRow(
+                    letters = rows[2],
+                    y = keyHeight * (rowCount - 2),
+                    keySize = keyHeight,
+                    pressedKey = startKey,
+                    shiftState = visibleShiftState,
+                    showShift = language == Language.ENGLISH,
+                )
+                KeyboardBottomRow(keyHeight, rowCount, language, pressedKey = startKey)
                 Canvas(modifier = Modifier.fillMaxWidth().height(keyboardSurfaceHeight)) {
                     drawSwipeTrail(trailPoints, KeyboardPalette.Accent, trailOpacity)
                 }
             }
             Spacer(Modifier.height(bottomInset))
             }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyboardNumberRow(keyHeight: Dp, pressedKey: String?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        "1234567890".forEach { digit ->
+            KeyboardKey(
+                label = digit.toString(),
+                modifier = Modifier.weight(1f),
+                height = keyHeight,
+                pressed = pressedKey == digit.toString(),
+                testKey = "digit-$digit",
+            )
         }
     }
 }
@@ -501,6 +603,7 @@ private fun KeyboardRow(
     y: Dp,
     keySize: Dp,
     pressedKey: String?,
+    shiftState: KeyboardShiftState,
 ) {
     val gap = 3.dp
     Row(
@@ -509,11 +612,12 @@ private fun KeyboardRow(
     ) {
         letters.forEach { letter ->
             KeyboardKey(
-                label = letter.toString().uppercase(),
+                label = letter.toString().let { key ->
+                    if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
+                },
                 width = keySize - gap,
                 height = keySize,
                 pressed = pressedKey == letter.toString(),
-                number = numberFor(letter),
                 testKey = letter.toString(),
             )
         }
@@ -521,16 +625,71 @@ private fun KeyboardRow(
 }
 
 @Composable
-private fun KeyboardBottomRow(rowHeight: Dp, language: Language, pressedKey: String?) {
+private fun KeyboardModifierRow(
+    letters: String,
+    y: Dp,
+    keySize: Dp,
+    pressedKey: String?,
+    shiftState: KeyboardShiftState,
+    showShift: Boolean,
+) {
+    val gap = 3.dp
+    val modifierWeight = modifierKeyWeight(letters.length)
+    val letterWeight = modifierLetterKeyWeight(letters.length)
+    Row(
+        modifier = Modifier.offset(y = y),
+        horizontalArrangement = Arrangement.spacedBy(gap),
+    ) {
+        if (showShift) {
+            KeyboardKey(
+                label = "",
+                modifier = Modifier.weight(modifierWeight),
+                height = keySize,
+                pressed = shiftState != KeyboardShiftState.LOWERCASE || pressedKey == SHIFT_KEY,
+                testKey = SHIFT_KEY,
+                icon = KeyboardKeyIcon.SHIFT,
+                shiftState = shiftState,
+            )
+        } else {
+            Spacer(Modifier.weight(modifierWeight).height(keySize))
+        }
+        letters.forEach { letter ->
+            KeyboardKey(
+                label = letter.toString().let { key ->
+                    if (shiftState == KeyboardShiftState.LOWERCASE) key.lowercase() else key.uppercase()
+                },
+                modifier = Modifier.weight(letterWeight),
+                height = keySize,
+                pressed = pressedKey == letter.toString(),
+                testKey = letter.toString(),
+            )
+        }
+        KeyboardKey(
+            label = "",
+            modifier = Modifier.weight(modifierWeight),
+            height = keySize,
+            pressed = pressedKey == BACKSPACE_KEY,
+            testKey = "backspace",
+            icon = KeyboardKeyIcon.BACKSPACE,
+        )
+    }
+}
+
+@Composable
+private fun KeyboardBottomRow(rowHeight: Dp, rowCount: Int, language: Language, pressedKey: String?) {
     val gap = 3.dp
     val keys = bottomRowKeyWeights(spaceLabel = "space")
     Row(
-        modifier = Modifier.offset(y = rowHeight * (KEYBOARD_ROW_COUNT - 1)),
+        modifier = Modifier.offset(y = rowHeight * (rowCount - 1)),
         horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         keys.forEach { (label, widthWeight) ->
             KeyboardKey(
-                label = if (label == "space") language.localeTag.replace('-', ' ').uppercase() else label,
+                label = when (label) {
+                    "space" -> language.localeTag.replace('-', ' ').uppercase()
+                    ENTER_KEY -> "↵"
+                    else -> label
+                },
                 modifier = Modifier.weight(widthWeight),
                 height = rowHeight,
                 pressed = pressedKey == label || (label == "space" && pressedKey == " "),
@@ -538,7 +697,13 @@ private fun KeyboardBottomRow(rowHeight: Dp, language: Language, pressedKey: Str
                     GLOBE_KEY -> "globe"
                     SETTINGS_KEY -> "settings"
                     BACKSPACE_KEY -> "backspace"
+                    ENTER_KEY -> "enter"
                     else -> label
+                },
+                icon = when (label) {
+                    GLOBE_KEY -> KeyboardKeyIcon.GLOBE
+                    ENTER_KEY -> KeyboardKeyIcon.ENTER
+                    else -> null
                 },
             )
         }
@@ -552,8 +717,9 @@ private fun KeyboardKey(
     width: Dp? = null,
     height: Dp,
     pressed: Boolean,
-    number: String? = null,
     testKey: String? = null,
+    icon: KeyboardKeyIcon? = null,
+    shiftState: KeyboardShiftState = KeyboardShiftState.LOWERCASE,
 ) {
     val keyModifier = modifier
         .then(width?.let { Modifier.width(it) } ?: Modifier)
@@ -578,17 +744,109 @@ private fun KeyboardKey(
             .border(width = 1.dp, color = borderColor, shape = shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label,
-            color = KeyboardPalette.PrimaryInk,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        number?.let {
+        if (icon == null) {
             Text(
-                it,
-                modifier = Modifier.align(Alignment.TopEnd),
-                color = KeyboardPalette.MutedInk,
-                style = MaterialTheme.typography.labelSmall,
+                label,
+                color = KeyboardPalette.PrimaryInk,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        } else {
+            val iconColor = if (icon == KeyboardKeyIcon.SHIFT && shiftState != KeyboardShiftState.LOWERCASE) {
+                KeyboardPalette.Accent
+            } else {
+                KeyboardPalette.PrimaryInk
+            }
+            Canvas(
+                Modifier
+                    .sizeIn(maxWidth = 24.dp, maxHeight = 24.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
+            ) {
+                drawKeyboardKeyIcon(icon, iconColor, shiftState)
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawKeyboardKeyIcon(
+    icon: KeyboardKeyIcon,
+    color: Color,
+    shiftState: KeyboardShiftState,
+) {
+    val scale = size.minDimension / 24f
+    if (scale <= 0f) return
+    val left = (size.width - 24f * scale) / 2f
+    val top = (size.height - 24f * scale) / 2f
+    fun x(value: Float) = left + value * scale
+    fun y(value: Float) = top + value * scale
+    fun point(xValue: Float, yValue: Float) = Offset(x(xValue), y(yValue))
+    val outline = Stroke(width = 1.8f * scale, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+    when (icon) {
+        KeyboardKeyIcon.BACKSPACE -> {
+            val body = Path().apply {
+                moveTo(x(8f), y(4.5f))
+                lineTo(x(20f), y(4.5f))
+                lineTo(x(20f), y(19.5f))
+                lineTo(x(8f), y(19.5f))
+                lineTo(x(2.5f), y(12f))
+                close()
+            }
+            drawPath(body, color, style = outline)
+            val cross = Path().apply {
+                moveTo(x(11f), y(9f))
+                lineTo(x(17f), y(15f))
+                moveTo(x(17f), y(9f))
+                lineTo(x(11f), y(15f))
+            }
+            drawPath(cross, color, style = outline)
+        }
+        KeyboardKeyIcon.ENTER -> {
+            val returnStem = Path().apply {
+                moveTo(x(18.5f), y(4.5f))
+                lineTo(x(18.5f), y(10.5f))
+                cubicTo(x(18.5f), y(12.5f), x(17f), y(14f), x(15f), y(14f))
+                lineTo(x(6.5f), y(14f))
+            }
+            val arrowHead = Path().apply {
+                moveTo(x(10.5f), y(9.5f))
+                lineTo(x(5.5f), y(14f))
+                lineTo(x(10.5f), y(18.5f))
+            }
+            drawPath(returnStem, color, style = outline)
+            drawPath(arrowHead, color, style = outline)
+        }
+        KeyboardKeyIcon.GLOBE -> {
+            drawCircle(color, radius = 8.5f * scale, center = point(12f, 12f), style = outline)
+            drawLine(color, point(4f, 12f), point(20f, 12f), strokeWidth = outline.width, cap = StrokeCap.Round)
+            val meridian = Path().apply {
+                moveTo(x(12f), y(3.5f))
+                cubicTo(x(8.5f), y(6f), x(7f), y(9f), x(7f), y(12f))
+                cubicTo(x(7f), y(15f), x(8.5f), y(18f), x(12f), y(20.5f))
+                cubicTo(x(15.5f), y(18f), x(17f), y(15f), x(17f), y(12f))
+                cubicTo(x(17f), y(9f), x(15.5f), y(6f), x(12f), y(3.5f))
+            }
+            drawPath(meridian, color, style = outline)
+        }
+        KeyboardKeyIcon.SHIFT -> {
+            val arrow = Path().apply {
+                moveTo(x(12f), y(3f))
+                lineTo(x(3.5f), y(11f))
+                lineTo(x(8f), y(11f))
+                lineTo(x(8f), y(19.5f))
+                lineTo(x(16f), y(19.5f))
+                lineTo(x(16f), y(11f))
+                lineTo(x(20.5f), y(11f))
+                close()
+            }
+            drawPath(
+                path = arrow,
+                color = color,
+                style = if (shiftState == KeyboardShiftState.CAPS_LOCK) {
+                    androidx.compose.ui.graphics.drawscope.Fill
+                } else {
+                    outline
+                },
             )
         }
     }
@@ -614,13 +872,35 @@ private fun DrawScope.drawSwipeTrail(
     }
 }
 
-private fun numberFor(letter: Char): String? = "qwertyuiop".indexOf(letter).takeIf { it >= 0 }?.let { if (it == 9) "0" else (it + 1).toString() }
-
-internal fun keyAt(x: Float, y: Float, size: Float, layout: KeyboardLayout, language: Language): String? {
-    if (y >= size * 3) {
+internal fun keyAt(
+    x: Float,
+    y: Float,
+    size: Float,
+    layout: KeyboardLayout,
+    language: Language,
+    showNumberRow: Boolean = false,
+): String? {
+    if (x < 0f || y < 0f || size <= 0f) return null
+    if (showNumberRow && y < size) return numberRowKeyAt(x, size)
+    if (y >= keyboardBottomRowTopPx(size, keyboardRowCount(showNumberRow))) {
         return bottomRowKeyAt(x, size, language)
     }
+    val modifierRowTop = keyboardBottomRowTopPx(size, keyboardRowCount(showNumberRow)) - size
+    if (y >= modifierRowTop) {
+        val modifierWeight = modifierKeyWeight(keyboardLetterRowsFor(language).last().length)
+        if (x < modifierWeight * size) {
+            return if (language == Language.ENGLISH) SHIFT_KEY else null
+        }
+        if (x >= (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierWeight) * size) return BACKSPACE_KEY
+    }
     return layout.keys.minByOrNull { (x - it.x) * (x - it.x) + (y - it.y) * (y - it.y) }?.letter?.toString()
+}
+
+internal fun numberRowKeyAt(x: Float, size: Float): String? {
+    if (x < 0f || size <= 0f) return null
+    val slotWidth = KEYBOARD_LETTER_ROW_COLUMN_COUNT * size / 10f
+    val digitIndex = (x / slotWidth).toInt().takeIf { it in 0..9 } ?: return null
+    return "1234567890"[digitIndex].toString()
 }
 
 internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? {
@@ -635,11 +915,10 @@ internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? 
 }
 
 /**
- * Row/weight pairs for the space-bar row: globe and settings evenly balanced on the left, space
- * dominant and centered, backspace on the right -- left weight (1 + 1 = 2) equals right weight
- * (2), so space sits visually centered while owning the majority of the row's width.
+ * Row/weight pairs for the space-bar row. The comma and period balance around the centered space
+ * bar, with language switching on the left and Enter on the right.
  *
- * These weights MUST sum to exactly [KEYBOARD_LETTER_ROW_COLUMN_COUNT]. [bottomRowKeyAt] treats
+ * These weights MUST sum to exactly [KEYBOARD_COLUMN_COUNT]. [bottomRowKeyAt] treats
  * `size` (== keySizePx == widthPx / KEYBOARD_LETTER_ROW_COLUMN_COUNT) as one weight unit and walks
  * cumulative weights to hit-test a touch x-coordinate; that only covers the full screen width when
  * the weights sum to the same column count used to derive `size`. A mismatch here silently breaks
@@ -647,30 +926,52 @@ internal fun bottomRowKeyAt(x: Float, size: Float, language: Language): String? 
  */
 internal fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> = listOf(
     GLOBE_KEY to 1f,
-    SETTINGS_KEY to 1f,
-    spaceLabel to 7f,
-    BACKSPACE_KEY to 2f,
+    "," to 1f,
+    spaceLabel to 6f,
+    "." to 1f,
+    ENTER_KEY to 1f,
 )
 
-/** Letter rows for [language], with punctuation split across the left/right ends of the bottom letter row. */
+internal fun modifierKeyWeight(letterCount: Int): Float =
+    if (letterCount <= 0) 0f else maxOf(
+        1f,
+        ((KEYBOARD_LETTER_ROW_COLUMN_COUNT - letterCount).coerceAtLeast(0)) / 2f,
+    )
+
+internal fun modifierLetterKeyWeight(letterCount: Int): Float =
+    if (letterCount <= 0) 0f else {
+        (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierKeyWeight(letterCount) * 2f) / letterCount
+    }
+
+internal fun modifierRowLetterCenterPx(index: Int, letterCount: Int, keySizePx: Float): Float {
+    require(index in 0 until letterCount)
+    return (modifierKeyWeight(letterCount) + (index + 0.5f) * modifierLetterKeyWeight(letterCount)) * keySizePx
+}
+
+/** Letter rows retain the existing QWERTY and Hebrew ordering. */
 private fun keyboardLetterRowsFor(language: Language): List<String> = if (language == Language.ENGLISH) {
-    listOf("qwertyuiop", "asdfghjkl", "'?zxcvbnm,.")
+    listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
 } else {
     listOf(
         "\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4",
         "\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3",
-        "\u00B3\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5\u00B4",
+        "\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u05e5",
     )
 }
 
-internal const val KEYBOARD_LETTER_ROW_COLUMN_COUNT = 11
+internal const val KEYBOARD_LETTER_ROW_COLUMN_COUNT = KEYBOARD_COLUMN_COUNT
 
-private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {
+internal fun keyboardLayoutFor(size: Float, language: Language, showNumberRow: Boolean): KeyboardLayout {
     val rows = keyboardLetterRowsFor(language)
     val columnCount = KEYBOARD_LETTER_ROW_COLUMN_COUNT
     val keys = buildList {
         rows.forEachIndexed { row, letters ->
-            addRow(letters, keyboardRowOffsetUnits(letters.length, columnCount), row, size)
+            val layoutRow = row + if (showNumberRow) 1 else 0
+            if (row == rows.lastIndex) {
+                addModifierRow(letters, layoutRow, size)
+            } else {
+                addRow(letters, keyboardRowOffsetUnits(letters.length, columnCount), layoutRow, size)
+            }
         }
     }
     return KeyboardLayout(keys)
@@ -678,6 +979,18 @@ private fun keyboardLayoutFor(size: Float, language: Language): KeyboardLayout {
 
 private fun MutableList<KeyPosition>.addRow(letters: String, offset: Float, row: Int, size: Float) {
     letters.forEachIndexed { index, letter -> add(KeyPosition(letter, (index + 0.5f + offset) * size, (row + 0.5f) * size)) }
+}
+
+private fun MutableList<KeyPosition>.addModifierRow(letters: String, row: Int, size: Float) {
+    letters.forEachIndexed { index, letter ->
+        add(
+            KeyPosition(
+                letter,
+                modifierRowLetterCenterPx(index, letters.length, size),
+                (row + 0.5f) * size,
+            ),
+        )
+    }
 }
 
 private fun MotionEvent.toGesturePoint(index: Int) = GesturePoint(getX(index), getY(index), eventTime)
@@ -709,4 +1022,5 @@ private enum class BackspaceMode {
 private const val BACKSPACE_HOLD_DELAY_MS = 350L
 private const val BACKSPACE_SWIPE_STEP_DP = 14f
 private const val BACKSPACE_GESTURE_THRESHOLD_DP = 18f
+private const val KEYBOARD_SIDE_INSET_DP = 4f
 private val BOTTOM_KEYBOARD_CLEARANCE_DP = 24.dp

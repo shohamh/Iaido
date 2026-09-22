@@ -1,5 +1,7 @@
 package com.iaido.app
 
+import com.iaido.core.recognition.SessionCorrectionHistorySnapshot
+
 internal enum class SentenceEditKind {
     TYPING,
     BACKSPACE,
@@ -20,6 +22,8 @@ internal data class SentenceEdit(
     val selectionAfterEnd: Int,
     val kind: SentenceEditKind,
     val coalescingKey: String? = null,
+    val correctionHistoryBefore: SessionCorrectionHistorySnapshot? = null,
+    val correctionHistoryAfter: SessionCorrectionHistorySnapshot? = null,
 ) {
     init {
         require(sourceStart >= 0) { "Edit start must not be negative" }
@@ -83,6 +87,19 @@ internal class SentenceEditHistory {
         undoStack += edit
         if (undoStack.size > MAX_TRANSACTIONS) undoStack.removeAt(0)
         redoStack.clear()
+    }
+
+    /** Attach service-owned word metadata after a text edit updates correction history. */
+    fun attachCorrectionHistorySnapshots(
+        before: SessionCorrectionHistorySnapshot,
+        after: SessionCorrectionHistorySnapshot,
+    ): Boolean {
+        val edit = undoStack.lastOrNull()?.takeIf { it.kind == SentenceEditKind.DELETION } ?: return false
+        undoStack[undoStack.lastIndex] = edit.copy(
+            correctionHistoryBefore = before,
+            correctionHistoryAfter = after,
+        )
+        return true
     }
 
     /** Apply and move the current undo entry only when [apply] reports success. */

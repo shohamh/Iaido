@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -73,6 +74,7 @@ class SettingsActivity : ComponentActivity() {
         var cascadeDepth by remember { mutableStateOf(SettingsDefaults.CASCADE_DEPTH) }
         var graceWindowMs by remember { mutableStateOf(SettingsDefaults.GRACE_WINDOW_MS) }
         var spacingMode by remember { mutableStateOf(SpacingMode.INFER_SPACES) }
+        var showNumberRow by remember { mutableStateOf(SettingsDefaults.SHOW_NUMBER_ROW) }
         var showCandidateScores by remember { mutableStateOf(false) }
         val installedVersionName = remember { appVersion() }
         var updateChannel by remember { mutableStateOf(updateChannelFromStoredValue(null, installedVersionName)) }
@@ -119,6 +121,7 @@ class SettingsActivity : ComponentActivity() {
             cascadeDepth = preferences[cascadeDepthKey] ?: SettingsDefaults.CASCADE_DEPTH
             graceWindowMs = preferences[graceWindowKey] ?: SettingsDefaults.GRACE_WINDOW_MS
             spacingMode = spacingModeFromStoredValue(preferences[spacingModeKey])
+            showNumberRow = preferences[showNumberRowKey] ?: SettingsDefaults.SHOW_NUMBER_ROW
             showCandidateScores = preferences[showCandidateScoresKey] ?: false
             updateChannel = updateChannelFromStoredValue(preferences[updateChannelKey], installedVersionName)
             settingsLoaded = true
@@ -291,6 +294,25 @@ class SettingsActivity : ComponentActivity() {
                     saveString(spacingModeKey, spacingModeStoredValue(mode))
                 },
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Show number row")
+                    Text("Keep a dedicated row of digits above the letters.")
+                }
+                Switch(
+                    checked = showNumberRow,
+                    onCheckedChange = { enabled ->
+                        showNumberRow = enabled
+                        lifecycleScope.launch {
+                            settingsStore.edit { it[showNumberRowKey] = enabled }
+                        }
+                    },
+                )
+            }
             Text("Flow correction depth: $cascadeDepth")
             Slider(
                 value = cascadeDepth.toFloat(),

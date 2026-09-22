@@ -50,6 +50,21 @@ internal data class SentenceWordAlternativeOverride(
 
 /** Pure preview projection; no editor action is reachable from this code. */
 internal object SentenceStripPreviewMath {
+    fun gestureAt(
+        state: SentenceStripState,
+        geometry: SentenceStripGeometry,
+        originWordIndex: Int,
+        contentX: Float,
+        side: SentenceAlternativeSide,
+    ): SentenceStripPreview? {
+        val deletionRange = geometry.deletionWordRange(originWordIndex, contentX)
+        return if (deletionRange != null) {
+            deletion(state, deletionRange)
+        } else {
+            alternative(state, originWordIndex, side)
+        }
+    }
+
     fun alternative(
         state: SentenceStripState,
         wordIndex: Int,

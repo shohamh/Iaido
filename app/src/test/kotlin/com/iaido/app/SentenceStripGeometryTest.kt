@@ -36,6 +36,45 @@ class SentenceStripGeometryTest {
     }
 
     @Test
+    fun `focus and manual scrolling reach words beyond the first fifteen`() {
+        val words = (0 until 24).map { index -> word("word$index", index * 6, index * 6 + 4, 60f) }
+        val geometry = SentenceStripGeometry.create(
+            words = words,
+            gapWidthsPx = List(words.lastIndex) { 10f },
+            viewportWidthPx = 180f,
+        )
+
+        val focusedIndex = 20
+        val focusOffset = geometry.focusScrollOffset(focusedIndex)
+        assertEquals(20, geometry.wordAt(focusOffset + geometry.viewportWidthPx / 2f))
+        val lastWordOffset = geometry.focusScrollOffset(23)
+        assertEquals(geometry.words[23].glyphBounds.centerX - geometry.viewportWidthPx / 2f, lastWordOffset)
+        assertEquals(23, geometry.wordAt(lastWordOffset + geometry.viewportWidthPx / 2f))
+    }
+
+    @Test
+    fun `cursor content position follows measured caret anchors within the same word`() {
+        val measured = SentenceStripMeasuredWord(
+            id = "cursor-word",
+            start = 10,
+            endExclusive = 13,
+            laneWidthPx = 40f,
+            glyphWidthPx = 30f,
+            baselinePx = 10f,
+            cursorAnchorsPx = listOf(0f, 9f, 19f, 30f),
+        )
+        val geometry = SentenceStripGeometry.create(
+            words = listOf(measured),
+            gapWidthsPx = emptyList(),
+            viewportWidthPx = 100f,
+        )
+
+        assertEquals(5f, geometry.cursorContentX(0, 10))
+        assertEquals(24f, geometry.cursorContentX(0, 12))
+        assertEquals(35f, geometry.cursorContentX(0, 99))
+    }
+
+    @Test
     fun `word order and hit testing support left to right and right to left`() {
         val words = listOf(word("one", 0, 3, 20f), word("two", 4, 7, 30f))
         val ltr = SentenceStripGeometry.create(words, listOf(8f), 100f, isRtl = false)
@@ -45,6 +84,37 @@ class SentenceStripGeometryTest {
         assertTrue(rtl.words[0].laneBounds.left > rtl.words[1].laneBounds.left)
         assertEquals(0, rtl.wordAt(rtl.words[0].glyphBounds.centerX))
         assertEquals(1, rtl.wordAt(rtl.words[1].glyphBounds.centerX))
+    }
+
+    @Test
+    fun `RTL deletion follows the physical side into the corresponding logical neighbor`() {
+        val geometry = SentenceStripGeometry.create(
+            words = listOf(word("שלום", 0, 4, 28f), word("עולם", 5, 9, 32f), word("היי", 10, 13, 20f)),
+            gapWidthsPx = listOf(4f, 4f),
+            viewportWidthPx = 160f,
+            isRtl = true,
+        )
+        val origin = geometry.words[1]
+
+        assertEquals(0..1, geometry.deletionWordRange(1, geometry.words[0].glyphBounds.centerX))
+        assertEquals(1..2, geometry.deletionWordRange(1, geometry.words[2].glyphBounds.centerX))
+        assertEquals(1, geometry.wordAt(origin.glyphBounds.centerX))
+    }
+
+    @Test
+    fun `trailing sentence text participates in RTL row geometry`() {
+        val geometry = SentenceStripGeometry.create(
+            words = listOf(word("one", 0, 3, 20f), word("two", 4, 7, 30f)),
+            gapWidthsPx = listOf(8f),
+            viewportWidthPx = 100f,
+            isRtl = true,
+            trailingContentWidthPx = 6f,
+        )
+
+        assertEquals(68f, geometry.contentWidthPx)
+        assertEquals(68f, geometry.words.first().laneBounds.right)
+        assertEquals(6f, geometry.words.last().laneBounds.left)
+        assertEquals(0f, geometry.focusRunwayWidthPx)
     }
 
     @Test
@@ -119,7 +189,9 @@ class SentenceStripGeometryTest {
 
         assertEquals(0f, geometry.focusScrollOffset(0))
         assertEquals(29f, geometry.focusScrollOffset(1))
-        assertEquals(58f, geometry.focusScrollOffset(2))
+        assertEquals(68f, geometry.focusScrollOffset(2))
+        assertEquals(20f, geometry.focusRunwayWidthPx)
+        assertEquals(118f, geometry.contentWidthPx)
     }
 
     private fun word(id: String, start: Int, end: Int, width: Float) =

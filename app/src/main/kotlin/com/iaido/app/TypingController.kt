@@ -46,6 +46,10 @@ class TypingController(
         lastTextAction = LastTextAction.NONE
     }
 
+    fun markCursorMoved() {
+        markNonSwipeInput()
+    }
+
     fun flick(letter: String, direction: FlickDirection) {
         lastTextAction = LastTextAction.TAP
         if (direction == FlickDirection.UP) {

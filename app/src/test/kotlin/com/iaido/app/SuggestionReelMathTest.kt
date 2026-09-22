@@ -37,6 +37,16 @@ class SuggestionReelMathTest {
     }
 
     @Test
+    fun `cursor in a whitespace gap focuses the nearest word`() {
+        val words = listOf(
+            SessionWord(1, 0, 3, "one", "one", listOf("one"), false),
+            SessionWord(2, 8, 11, "two", "two", listOf("two"), false),
+        )
+
+        assertEquals(2, suggestionStripSelection(words, cursorPosition = 7).focusedWordId)
+    }
+
+    @Test
     fun `inline reels are not rendered a second time for sentence words already in the strip`() {
         val chip = SuggestionChip(word = "what", alternatives = listOf("what", "whatever"), id = 7)
         val reels = inlineReplacementReels(

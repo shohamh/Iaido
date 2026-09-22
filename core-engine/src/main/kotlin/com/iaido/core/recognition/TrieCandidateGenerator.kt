@@ -31,6 +31,7 @@ class TrieCandidateGenerator(
         if (dictionary === indexedDictionary) return dictionaryIndex
         val root = Node()
         dictionary.forEach { entry ->
+            if (entry.word.isBlank()) return@forEach
             var node = root
             entry.word.lowercase().forEach { letter ->
                 node = node.children.getOrPut(letter) { Node() }
@@ -51,7 +52,7 @@ class TrieCandidateGenerator(
     ) {
         node.words.forEach(matches::add)
         node.children.forEach { (letter, child) ->
-            val key = centers[letter] ?: throw NoSuchElementException("No key for letter '$letter'")
+            val key = centers[letter] ?: return@forEach
             val matchIndex = findNearestPointFrom(startIndex, key, path)
             if (matchIndex != -1) {
                 collectMatches(child, path, centers, matchIndex, matches)

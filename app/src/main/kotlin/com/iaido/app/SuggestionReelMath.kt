@@ -13,10 +13,18 @@ internal data class SuggestionStripSelection(
 internal fun suggestionStripSelection(
     words: List<SessionWord>,
     cursorPosition: Int,
+    previousFocusedWordId: Int? = null,
 ): SuggestionStripSelection {
-    val focused = words.firstOrNull { cursorPosition in it.start until it.end }
-        ?: words.lastOrNull { it.end <= cursorPosition }
-        ?: words.firstOrNull { it.start >= cursorPosition }
+    val previousIndex = previousFocusedWordId?.let { id -> words.indexOfFirst { it.id == id } }
+        ?.takeIf { it >= 0 }
+    val focusedIndex = cursorFocusedWordIndex(
+        words = words,
+        cursorPosition = cursorPosition,
+        start = SessionWord::start,
+        endExclusive = SessionWord::end,
+        previousFocusedIndex = previousIndex,
+    )
+    val focused = words.getOrNull(focusedIndex ?: -1)
     return SuggestionStripSelection(words = words, focusedWordId = focused?.id)
 }
 

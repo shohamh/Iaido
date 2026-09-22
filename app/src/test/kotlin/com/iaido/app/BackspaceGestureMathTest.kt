@@ -12,6 +12,14 @@ class BackspaceGestureMathTest {
     }
 
     @Test
+    fun `RTL backspace swipe deletes to the right while LTR deletes to the left`() {
+        assertEquals(BackspaceGestureAction.DELETE, classifyBackspaceGesture(80f, 8f, 24f, isRtl = true))
+        assertEquals(BackspaceGestureAction.TAP, classifyBackspaceGesture(-80f, 8f, 24f, isRtl = true))
+        assertEquals(4, backspaceSwipeRequestedCharacters(80f, 20f, isRtl = true))
+        assertEquals(4, backspaceSwipeRequestedCharacters(-80f, 20f, isRtl = false))
+    }
+
+    @Test
     fun `short backspace movement stays a tap`() {
         assertEquals(BackspaceGestureAction.TAP, classifyBackspaceGesture(8f, 8f, 24f))
     }

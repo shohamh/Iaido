@@ -16,11 +16,15 @@ class ShapePathScorer(
         candidates: List<WordEntry>,
         layout: KeyboardLayout,
     ): List<ScoredCandidate> {
-        if (candidates.isEmpty()) return emptyList()
+        val keyLetters = layout.keys.map { it.letter.lowercaseChar() }.toSet()
+        val scoreableCandidates = candidates.filter { entry ->
+            entry.word.isNotBlank() && entry.word.lowercase().all { it in keyLetters }
+        }
+        if (scoreableCandidates.isEmpty()) return emptyList()
 
         val userPath = layout.normalize(path).resample(resamplePointCount)
 
-        return candidates
+        return scoreableCandidates
             .map { entry -> ScoredCandidate(entry, scoreOne(userPath, entry, layout)) }
             .sortedByDescending { it.score }
     }

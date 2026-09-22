@@ -56,6 +56,29 @@ class GestureRecognizerTest {
     }
 
     @Test
+    fun `a blank dictionary word cannot crash recognition of every swipe`() {
+        val results = recognizer.recognize(
+            pathThrough('h', 'i'),
+            layout,
+            listOf(WordEntry("", 1.0), WordEntry("hi", 1.0)),
+        )
+
+        assertEquals("hi", results.first().word.word)
+    }
+
+    @Test
+    fun `dictionary punctuation unsupported by the layout is ignored`() {
+        val results = recognizer.recognize(
+            pathThrough('h', 'i'),
+            layout,
+            listOf(WordEntry("hi", 1.0), WordEntry("h.i", 1.0)),
+        )
+
+        assertEquals("hi", results.first().word.word)
+        assertTrue(results.none { it.word.word == "h.i" })
+    }
+
+    @Test
     fun `context evidence can reorder otherwise shape-ranked candidates`() {
         val recognizer = GestureRecognizer(
             TrieCandidateGenerator(),
