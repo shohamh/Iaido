@@ -29,9 +29,11 @@ internal data class StripRect(
 internal fun unionRenderedWordBounds(
     ids: List<String>,
     boundsById: Map<String, StripRect>,
-): StripRect? = ids.asSequence()
-    .mapNotNull(boundsById::get)
-    .reduceOrNull(StripRect::union)
+): StripRect? {
+    if (ids.isEmpty()) return null
+    val bounds = ids.mapNotNull(boundsById::get)
+    return if (bounds.size == ids.distinct().size) bounds.reduce(StripRect::union) else null
+}
 
 internal data class SentenceStripMeasuredWord(
     val id: String,

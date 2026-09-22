@@ -144,16 +144,26 @@ class SentenceStripGeometryTest {
     }
 
     @Test
-    fun `deletion overlay unions stable source ids even when an old id is absent`() {
-        val union = unionRenderedWordBounds(
+    fun `deletion overlay waits for every stable source id before unioning bounds`() {
+        val incomplete = unionRenderedWordBounds(
             ids = listOf("new-left", "old-missing", "new-right"),
             boundsById = mapOf(
                 "new-left" to StripRect(12f, 0f, 38f, 26f),
                 "new-right" to StripRect(64f, 0f, 92f, 26f),
             ),
         )
+        assertEquals(null, incomplete)
 
-        assertEquals(StripRect(12f, 0f, 92f, 26f), union)
+        assertEquals(
+            StripRect(12f, 0f, 92f, 26f),
+            unionRenderedWordBounds(
+                ids = listOf("new-left", "new-right"),
+                boundsById = mapOf(
+                    "new-left" to StripRect(12f, 0f, 38f, 26f),
+                    "new-right" to StripRect(64f, 0f, 92f, 26f),
+                ),
+            ),
+        )
     }
 
     @Test

@@ -390,20 +390,19 @@ internal fun SentenceStrip(
                     letterSpacing = 0.5.sp,
                 )
                 Spacer(Modifier.width(4.dp))
-                HistoryIcon(
-                    description = "Iaido undo",
-                    enabled = state.canUndo,
-                    isUndo = true,
-                    preview = state.undoPreview,
-                    onClick = { actions?.undo() },
-                )
-                HistoryIcon(
-                    description = "Iaido redo",
-                    enabled = state.canRedo,
-                    isUndo = false,
-                    preview = state.redoPreview,
-                    onClick = { actions?.redo() },
-                )
+                androidx.compose.runtime.CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row {
+                        SentenceStripLayoutMath.historyIsUndoOrder(rtl).forEach { isUndo ->
+                            HistoryIcon(
+                                description = if (isUndo) "Iaido undo" else "Iaido redo",
+                                enabled = if (isUndo) state.canUndo else state.canRedo,
+                                isUndo = isUndo,
+                                preview = if (isUndo) state.undoPreview else state.redoPreview,
+                                onClick = { if (isUndo) actions?.undo() else actions?.redo() },
+                            )
+                        }
+                    }
+                }
             }
 
             Box(
@@ -450,7 +449,7 @@ internal fun SentenceStrip(
                             val split = replacementPreview?.takeIf {
                                 it.isSplit && it.sourceWordIndices.singleOrNull() == index
                             }
-                            val deleting = deletionPreview?.wordRange?.contains(index) == true
+                            val deleting = deletionPreview?.sourceWordIds?.contains(word.id) == true
                             val renderWord = selected?.let {
                                 word.copy(
                                     text = it.replacement,
@@ -694,6 +693,7 @@ private fun DeletionPreviewOverlay(
         viewportCoordinates = viewportCoordinates,
         wordCoordinates = wordCoordinates,
     )
+    if (viewportCoordinates?.isAttached == true && viewportBounds == null) return
     if (viewportBounds == null && bounds == null) return
     // The rendered lanes are laid out by Compose's bidi-aware Row. Use their
     // measured viewport bounds whenever available; transforming model-space
