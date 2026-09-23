@@ -1188,7 +1188,10 @@ private fun Modifier.sentenceStripInput(
                 gestureActive.value = true
                 setCursorAt(latestPosition)
             }
-            if (mode != SentencePointerMode.CURSOR && mode != SentencePointerMode.ALTERNATIVE) {
+            if (mode != SentencePointerMode.CURSOR &&
+                mode != SentencePointerMode.ALTERNATIVE &&
+                mode != SentencePointerMode.SCROLL
+            ) {
                 lastEdgeFrameNanos = 0L
                 return
             }
@@ -1208,7 +1211,8 @@ private fun Modifier.sentenceStripInput(
             when (mode) {
                 SentencePointerMode.CURSOR -> setCursorAt(latestPosition)
                 SentencePointerMode.ALTERNATIVE -> updateAlternativeAt(latestPosition)
-                else -> Unit
+                SentencePointerMode.SCROLL -> Unit
+                SentencePointerMode.PENDING -> Unit
             }
         }
 
@@ -1241,6 +1245,7 @@ private fun Modifier.sentenceStripInput(
                         change.consume()
                     } else if (abs(dx) > dragSlop) {
                         mode = SentencePointerMode.SCROLL
+                        gestureActive.value = true
                         startEdgeFrames()
                     }
                 } else if (SentenceStripGestureMath.hasStartedHorizontalScroll(
@@ -1261,6 +1266,7 @@ private fun Modifier.sentenceStripInput(
                         change.consume()
                     } else {
                         mode = SentencePointerMode.SCROLL
+                        gestureActive.value = true
                         startEdgeFrames()
                     }
                 }
@@ -1343,6 +1349,7 @@ private fun Modifier.sentenceStripInput(
                             change.consume()
                         } else {
                             mode = SentencePointerMode.SCROLL
+                            gestureActive.value = true
                             startEdgeFrames()
                         }
                     }
