@@ -592,9 +592,10 @@ private fun JoinPreviewOverlay(
         viewportCoordinates = viewportCoordinates,
         wordCoordinates = wordCoordinates,
     )
-    // Measured bounds are already in the viewport's coordinate space. Only
-    // use the model-space transform as a fallback before the first layout pass.
-    val renderedBounds = viewportBounds?.takeUnless { isRtl }
+    // Measured bounds are already in the viewport's physical coordinate space.
+    // Keep them for RTL too: the model range is logical order, while the
+    // rendered lane may be mirrored and scrolled independently.
+    val renderedBounds = viewportBounds
     val leftPx = renderedBounds?.left ?: stripViewportX(
         bounds.left,
         geometry.contentWidthPx,
@@ -705,10 +706,10 @@ private fun DeletionPreviewOverlay(
         wordCoordinates = wordCoordinates,
     )
     if (viewportBounds == null && bounds == null) return
-    // Compose's RTL Row reports child coordinates in a different logical order
-    // while the geometry model already places words physically. Use model-space
-    // bounds for RTL and measured bounds for LTR.
-    val renderedBounds = viewportBounds?.takeUnless { isRtl }
+    // Measured bounds are the source of truth for both directions. In RTL the
+    // logical word range and the physical row order differ, so transforming the
+    // model union can put the delete frame on the opposite side of the strip.
+    val renderedBounds = viewportBounds
     val leftPx = renderedBounds?.left ?: bounds?.let {
         stripViewportX(
             it.left,

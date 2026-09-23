@@ -45,11 +45,11 @@ internal object SentenceStripEdgeScrollMath {
         ((frameNanos - previousFrameNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
 
     fun scrollSign(direction: EdgeScrollDirection, isRtl: Boolean): Float {
-        // ScrollState's value axis is mirrored by Compose's RTL horizontal row.
-        // The affordance direction remains physical, so invert the delta in
-        // RTL to keep the content moving toward the finger's edge.
-        val ltrSign = if (direction == EdgeScrollDirection.LEFT) -1f else 1f
-        return if (isRtl) -ltrSign else ltrSign
+        // dispatchRawDelta is consumed by horizontalScroll before its
+        // placeRelative RTL transform. A physical edge must therefore use the
+        // same delta in both directions; mirroring the sign here double-flips
+        // Hebrew and sends the strip away from the finger.
+        return if (direction == EdgeScrollDirection.LEFT) -1f else 1f
     }
 
     fun affordanceAlpha(penetration: Float): Float =
