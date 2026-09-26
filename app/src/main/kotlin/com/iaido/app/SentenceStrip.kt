@@ -131,6 +131,7 @@ internal fun SentenceStrip(
     var lastEdgeDirection by remember { mutableStateOf(EdgeScrollDirection.RIGHT) }
     var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var rowCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var deletionOutlineCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val separators = remember(state.words, state.sentenceText, currentStyle, textMeasurer) {
         state.words.zipWithNext().map { (word, next) ->
             val start = (word.endExclusive - state.sentenceStart).coerceIn(0, state.sentenceText.length)
@@ -370,7 +371,19 @@ internal fun SentenceStrip(
                 .fillMaxWidth()
                 .background(KeyboardPalette.Screen)
                 .semantics {
-                    contentDescription = "Iaido sentence strip"
+                    val debugBounds = if (BuildConfig.DEBUG) {
+                        sentenceStripDebugBoundsDescription(
+                            words = displayWords,
+                            deletionPreview = deletionPreview,
+                            viewportCoordinates = liveViewportCoordinates.value,
+                            outlineCoordinates = deletionOutlineCoordinates,
+                            wordCoordinates = wordCoordinates,
+                        )
+                    } else {
+                        null
+                    }
+                    contentDescription = debugBounds?.let { "Iaido sentence strip $it" }
+                        ?: "Iaido sentence strip"
                     isTraversalGroup = true
                 },
         ) {
@@ -564,6 +577,7 @@ internal fun SentenceStrip(
                         viewportCoordinates = viewportCoordinates,
                         rowCoordinates = rowCoordinates,
                         wordCoordinates = wordCoordinates,
+                        onOutlinePositioned = { deletionOutlineCoordinates = it },
                     )
                 }
             }
@@ -696,6 +710,7 @@ private fun DeletionPreviewOverlay(
     viewportCoordinates: LayoutCoordinates?,
     rowCoordinates: LayoutCoordinates?,
     wordCoordinates: Map<String, LayoutCoordinates>,
+    onOutlinePositioned: (LayoutCoordinates) -> Unit,
 ) {
     val bounds = preview.wordRange.first
         .takeIf { it >= 0 && preview.wordRange.last < geometry.words.size }
@@ -734,6 +749,10 @@ private fun DeletionPreviewOverlay(
     } ?: return
     val left = with(density) { minOf(leftPx, rightPx).toDp() }
     val width = with(density) { abs(rightPx - leftPx).toDp() }
+    val topPx = renderedBounds?.top ?: with(density) { 6.dp.toPx() }
+    val heightPx = renderedBounds?.height ?: with(density) { 66.dp.toPx() }
+    val top = with(density) { topPx.toDp() }
+    val height = with(density) { heightPx.toDp() }
     val badgeWidth = 64.dp
     val badgeWidthPx = with(density) { badgeWidth.toPx() }
     val badgeLeft = with(density) {
@@ -747,25 +766,26 @@ private fun DeletionPreviewOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .zIndex(2f)
-                .semantics {
-                    contentDescription = "Iaido deletion preview startWord=${preview.wordRange.first} " +
-                        "endWord=${preview.wordRange.last} start=${preview.sourceStart} " +
-                        "end=${preview.sourceEndExclusive}"
-                },
+                .zIndex(2f),
         ) {
             Box(
                 modifier = Modifier
-                    .absoluteOffset(x = left, y = 6.dp)
+                    .absoluteOffset(x = left, y = top)
                     .width(width)
-                    .height(66.dp)
+                    .height(height)
+                    .onGloballyPositioned(onOutlinePositioned)
                     .background(KeyboardPalette.Delete.copy(alpha = 0.12f), shape)
-                    .border(1.5.dp, KeyboardPalette.Delete, shape),
+                    .border(1.5.dp, KeyboardPalette.Delete, shape)
+                    .semantics {
+                        contentDescription = "Iaido deletion preview startWord=${preview.wordRange.first} " +
+                            "endWord=${preview.wordRange.last} start=${preview.sourceStart} " +
+                            "end=${preview.sourceEndExclusive}"
+                    },
             )
             Text(
                 text = "DELETE",
                 modifier = Modifier
-                    .absoluteOffset(x = badgeLeft, y = 6.dp)
+                    .absoluteOffset(x = badgeLeft, y = top)
                     .requiredWidth(badgeWidth)
                     .background(KeyboardPalette.Delete, RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     .padding(horizontal = 8.dp, vertical = 1.dp),
@@ -797,6 +817,39 @@ private fun viewportWordUnion(
         id to StripRect(bounds.left, bounds.top, bounds.right, bounds.bottom)
     }
     return unionRenderedWordBounds(ids, boundsById.toMap())
+}
+
+private fun sentenceStripDebugBoundsDescription(
+    words: List<SentenceStripWord>,
+    deletionPreview: SentenceDeletionPreview?,
+    viewportCoordinates: LayoutCoordinates?,
+    outlineCoordinates: LayoutCoordinates?,
+    wordCoordinates: Map<String, LayoutCoordinates>,
+): String? {
+    val viewport = viewportCoordinates?.takeIf(LayoutCoordinates::isAttached) ?: return null
+    fun screenBounds(localBounds: StripRect): String {
+        val topLeft = viewport.localToScreen(Offset(localBounds.left, localBounds.top))
+        val bottomRight = viewport.localToScreen(Offset(localBounds.right, localBounds.bottom))
+        return "${topLeft.x.toInt()},${topLeft.y.toInt()}," +
+            "${bottomRight.x.toInt()},${bottomRight.y.toInt()}"
+    }
+    val renderedWords = words.mapIndexedNotNull { index, word ->
+        val bounds = viewportWordUnion(
+            ids = listOf(word.id),
+            viewportCoordinates = viewport,
+            wordCoordinates = wordCoordinates,
+        ) ?: return@mapIndexedNotNull null
+        "$index:${screenBounds(bounds)}"
+    }.joinToString(";")
+    val renderedDeletion = deletionPreview?.let { deletion ->
+        val outline = outlineCoordinates?.takeIf(LayoutCoordinates::isAttached)?.let { coordinates ->
+            val bounds = viewport.localBoundingBoxOf(coordinates, clipBounds = false)
+            screenBounds(StripRect(bounds.left, bounds.top, bounds.right, bounds.bottom))
+        } ?: "pending"
+        " preview=${deletion.wordRange.first},${deletion.wordRange.last}," +
+            "${deletion.sourceStart},${deletion.sourceEndExclusive}:$outline"
+    }.orEmpty()
+    return "layout bounds=$renderedWords$renderedDeletion"
 }
 
 private fun stripViewportX(

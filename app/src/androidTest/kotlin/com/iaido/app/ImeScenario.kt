@@ -123,6 +123,7 @@ class ImeScenario(
 
     fun focusEditor() {
         editor.focus()
+        expectedSelection = editor.selection().last
         checkpoint("focusEditor")
     }
 

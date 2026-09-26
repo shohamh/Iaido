@@ -1,5 +1,6 @@
 package com.iaido.app
 
+import android.graphics.Rect
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
@@ -149,10 +150,19 @@ class ImeReelE2eTest {
         ImeScenario().also(artifacts::track).run {
             typeText("one two three")
             val strip = SentenceStripImeDriver()
+            val wordBounds = strip.waitForRenderedWordBounds(minimumCount = 3)
             val before = strip.editorSnapshot().text
 
             strip.dragAcrossWords(startIndex = 1, endIndex = 2) {
-                check(strip.deletionPreviewOrNull() != null) { "Crossing the neighboring word did not show deletion" }
+                val deletion = strip.waitForRenderedDeletionBounds(timeoutMs = 2_000L)
+                val expectedBounds = Rect(wordBounds.getValue(deletion.startWord))
+                (deletion.startWord + 1..deletion.endWord).forEach { index ->
+                    expectedBounds.union(wordBounds.getValue(index))
+                }
+                check(deletion.visibleBounds == expectedBounds) {
+                    "Delete outline ${deletion.visibleBounds} did not match the rendered deleted words " +
+                        expectedBounds
+                }
                 check(strip.editorSnapshot().text == before) { "Deletion preview changed text before release" }
                 check(strip.alternativesForWord(1).isEmpty()) {
                     "Alternatives should be hidden for a word previewed for deletion"
@@ -179,24 +189,82 @@ class ImeReelE2eTest {
     fun hebrewDeletionPreviewBoundsCoverTheRenderedWords() {
         ImeScenario().also(artifacts::track).run {
             switchLanguageForScreenshotTest()
-            replaceEditorTextForTest(
+            val fixture =
                 "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd \u05d7\u05dc\u05e7\u05d9\u05dd " +
-                    "\u05d9\u05d7\u05d9\u05d3\u05d4 \u05de\u05e6\u05d0\u05d4 \u05de\u05e6\u05d0\u05d4",
-            )
+                    "\u05d9\u05d7\u05d9\u05d3\u05d4 \u05de\u05e6\u05d0\u05d4 \u05de\u05e6\u05d0\u05d4"
             val strip = SentenceStripImeDriver()
 
-            strip.swipeApproximateHebrewDeletion {
-                SystemClock.sleep(350L)
-                captureScreenshot("hebrew-deletion-preview-bounds")
-                val deletion = strip.deletionPreviewOrNull()
-                if (deletion != null) {
-                    check(strip.strip().visibleBounds.contains(deletion.visibleBounds)) {
-                        "Hebrew delete outline ${deletion.visibleBounds} escaped the strip " +
-                        "${strip.strip().visibleBounds}"
+            listOf(
+                SentenceStripImeDriver.Direction.LEFT,
+                SentenceStripImeDriver.Direction.RIGHT,
+            ).forEach { direction ->
+                replaceEditorTextForTest(fixture)
+                val wordBounds = strip.waitForRenderedWordBounds(minimumCount = 2, timeoutMs = 5_000L)
+                val stripBounds = strip.strip().visibleBounds
+                val visiblePair = wordBounds.keys.sorted().zipWithNext()
+                    .firstOrNull { (first, second) ->
+                        second == first + 1 &&
+                            wordBounds.getValue(first).let(stripBounds::contains) &&
+                            wordBounds.getValue(second).let(stripBounds::contains)
+                    }
+                    ?: error("Hebrew sentence strip did not expose two adjacent visible measured lanes")
+                val firstBounds = wordBounds.getValue(visiblePair.first)
+                val secondBounds = wordBounds.getValue(visiblePair.second)
+                val (startIndex, endIndex) = when (direction) {
+                    SentenceStripImeDriver.Direction.LEFT -> if (firstBounds.centerX() > secondBounds.centerX()) {
+                        visiblePair.first to visiblePair.second
+                    } else {
+                        visiblePair.second to visiblePair.first
+                    }
+                    SentenceStripImeDriver.Direction.RIGHT -> if (firstBounds.centerX() < secondBounds.centerX()) {
+                        visiblePair.first to visiblePair.second
+                    } else {
+                        visiblePair.second to visiblePair.first
                     }
                 }
+                check(
+                    if (direction == SentenceStripImeDriver.Direction.LEFT) {
+                        wordBounds.getValue(startIndex).centerX() > wordBounds.getValue(endIndex).centerX()
+                    } else {
+                        wordBounds.getValue(startIndex).centerX() < wordBounds.getValue(endIndex).centerX()
+                    },
+                ) { "Selected Hebrew lanes do not form a physical ${direction.label} gesture" }
+                val before = strip.editorSnapshot().text
+                var sourceRange: IntRange? = null
+
+                strip.dragAcrossRenderedWords(startIndex, endIndex, wordBounds) {
+                    SystemClock.sleep(350L)
+                    val deletion = strip.waitForRenderedDeletionBounds(timeoutMs = 2_000L)
+                    SystemClock.sleep(120L)
+                    val screenshot = captureScreenshot("hebrew-deletion-${direction.label}-preview")
+                    check(screenshot.isFile) { "${direction.label} deletion preview screenshot was not saved" }
+                    androidx.test.InstrumentationRegistry.getInstrumentation().uiAutomation
+                        .executeShellCommand(
+                            "cp ${screenshot.absolutePath} /sdcard/Download/hebrew-delete-${direction.label}-preview.png",
+                        )
+                        .close()
+                    val expectedBounds = Rect(wordBounds.getValue(deletion.startWord))
+                    (deletion.startWord + 1..deletion.endWord).forEach { index ->
+                        expectedBounds.union(wordBounds.getValue(index))
+                    }
+                    check(deletion.visibleBounds == expectedBounds) {
+                        "Hebrew ${direction.label} delete outline ${deletion.visibleBounds} did not match " +
+                            "the rendered deleted words $expectedBounds"
+                    }
+                    check(strip.editorSnapshot().text == before) {
+                        "Hebrew ${direction.label} deletion changed editor text before release"
+                    }
+                    sourceRange = deletion.sourceStart until deletion.sourceEndExclusive
+                }
+
+                val removedRange = sourceRange ?: error("Deletion preview did not record its text range")
+                val expectedText = before.removeRange(removedRange)
+                check(strip.editorSnapshot().text == expectedText) {
+                    "Hebrew ${direction.label} gesture did not commit its previewed deletion: " +
+                        "expected '$expectedText', observed '${strip.editorSnapshot().text}'"
+                }
+                assertText(expectedText)
             }
-            assertText(strip.editorSnapshot().text)
         }
     }
 

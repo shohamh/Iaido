@@ -45,6 +45,77 @@ internal class SentenceStripImeDriver(
 
     fun deletionPreviewOrNull(): UiObject2? = device.findObject(By.descStartsWith("Iaido deletion preview "))
 
+    fun renderedWordBounds(): Map<Int, Rect> {
+        val description = layoutDescription() ?: return emptyMap()
+        return Regex("(\\d+):(-?\\d+),(-?\\d+),(-?\\d+),(-?\\d+)")
+            .findAll(description)
+            .mapNotNull { match ->
+                val (index, left, top, right, bottom) = match.groupValues.drop(1).map(String::toInt)
+                if (right <= left || bottom <= top) null else index to Rect(left, top, right, bottom)
+            }
+            .toMap()
+    }
+
+    fun renderedDeletionBoundsOrNull(): RenderedDeletionBounds? {
+        val description = layoutDescription() ?: return null
+        val match = Regex(
+            " preview=(\\d+),(\\d+),(\\d+),(\\d+):(-?\\d+),(-?\\d+),(-?\\d+),(-?\\d+)",
+        ).find(description) ?: return null
+        val values = match.groupValues.drop(1).map(String::toInt)
+        val bounds = Rect(values[4], values[5], values[6], values[7])
+        if (bounds.isEmpty) return null
+        return RenderedDeletionBounds(
+            startWord = values[0],
+            endWord = values[1],
+            sourceStart = values[2],
+            sourceEndExclusive = values[3],
+            visibleBounds = bounds,
+        )
+    }
+
+    private fun layoutDescription(): String? = runCatching {
+        device.findObject(By.descStartsWith("Iaido sentence strip"))
+            ?.contentDescription
+            ?.toString()
+            ?.substringAfter("layout bounds=", "")
+            ?.takeIf(String::isNotEmpty)
+    }.getOrNull()
+
+    fun waitForRenderedDeletionBounds(
+        timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ): RenderedDeletionBounds {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        do {
+            renderedDeletionBoundsOrNull()?.let { return it }
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        val visibleSentenceNodes = runCatching {
+            device.findObjects(By.descStartsWith("Iaido sentence"))
+                .mapNotNull { node -> runCatching { node.contentDescription?.toString() }.getOrNull() }
+        }.getOrDefault(emptyList())
+        error("Deletion outline geometry did not settle; visible sentence semantics=$visibleSentenceNodes")
+    }
+
+    fun waitForRenderedWordBounds(
+        minimumCount: Int,
+        timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ): Map<Int, Rect> {
+        require(minimumCount > 0)
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var lastBounds = emptyMap<Int, Rect>()
+        do {
+            lastBounds = renderedWordBounds()
+            if (lastBounds.size >= minimumCount) return lastBounds
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        val visibleSentenceNodes = device.findObjects(By.descStartsWith("Iaido sentence"))
+            .mapNotNull { node -> runCatching { node.contentDescription?.toString() }.getOrNull() }
+        error(
+            "Expected at least $minimumCount measured sentence words, found ${lastBounds.keys}; " +
+                "visible sentence semantics=$visibleSentenceNodes",
+        )
+    }
+
     fun alternativesForWord(index: Int): List<UiObject2> = device.findObjects(
         By.descStartsWith("Iaido sentence alternative word=$index "),
     )
@@ -127,8 +198,32 @@ internal class SentenceStripImeDriver(
         side: Side = Side.ABOVE,
         whilePreviewing: () -> Unit,
     ) {
-        val start = word(startIndex).visibleBounds
-        val target = word(endIndex).visibleBounds
+        val bounds = renderedWordBounds()
+        val start = bounds[startIndex] ?: word(startIndex).visibleBounds
+        val target = bounds[endIndex] ?: word(endIndex).visibleBounds
+        dragAcrossBounds(start, target, side, whilePreviewing)
+    }
+
+    fun dragAcrossRenderedWords(
+        startIndex: Int,
+        endIndex: Int,
+        wordBounds: Map<Int, Rect>,
+        side: Side = Side.ABOVE,
+        whilePreviewing: () -> Unit,
+    ) {
+        val start = wordBounds[startIndex]
+            ?: error("Measured sentence lane $startIndex was not exposed")
+        val target = wordBounds[endIndex]
+            ?: error("Measured sentence lane $endIndex was not exposed")
+        dragAcrossBounds(start, target, side, whilePreviewing)
+    }
+
+    private fun dragAcrossBounds(
+        start: Rect,
+        target: Rect,
+        side: Side,
+        whilePreviewing: () -> Unit,
+    ) {
         val sign = if (side == Side.ABOVE) -1f else 1f
         val lifted = PointF(start.exactCenterX(), start.exactCenterY() + sign * 18f * instrumentationDensity())
         dragPathAndObserve(
@@ -312,3 +407,11 @@ internal class SentenceStripImeDriver(
         RIGHT("right"),
     }
 }
+
+internal data class RenderedDeletionBounds(
+    val startWord: Int,
+    val endWord: Int,
+    val sourceStart: Int,
+    val sourceEndExclusive: Int,
+    val visibleBounds: Rect,
+)
