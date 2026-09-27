@@ -35,7 +35,7 @@
             android:text="Cursor left" />
     </LinearLayout>
 
-    <EditText
+    <com.iaido.app.ImeTestEditText
         android:id="@+id/ime_test_editor"
         android:layout_width="match_parent"
         android:layout_height="0dp"

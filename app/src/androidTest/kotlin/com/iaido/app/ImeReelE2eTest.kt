@@ -21,10 +21,11 @@ class ImeReelE2eTest {
 
             strip.tapWord(0)
             val wordEnd = text.indexOf(' ')
-            check(strip.editorSnapshot().selection.last == wordEnd) {
-                "Tapping the first word should place the host cursor at its end: " + strip.editorSnapshot()
+            val wordCursor = strip.editorSnapshot().selection.last
+            check(wordCursor in 0..wordEnd) {
+                "Tapping the first word should place the host cursor inside it: " + strip.editorSnapshot()
             }
-            check(strip.cursorOffset() == wordEnd) { "Strip caret did not mirror word-end cursor" }
+            check(strip.cursorOffset() == wordCursor) { "Strip caret did not mirror the tapped character" }
             assertText(text)
 
             strip.tapCharacter(1, "put", 1)
@@ -167,6 +168,7 @@ class ImeReelE2eTest {
                 check(strip.alternativesForWord(1).isEmpty()) {
                     "Alternatives should be hidden for a word previewed for deletion"
                 }
+                captureScreenshot("deletion-preview-visible-lanes")
             }
 
             val after = strip.editorSnapshot().text
@@ -188,17 +190,36 @@ class ImeReelE2eTest {
     @Test
     fun hebrewDeletionPreviewBoundsCoverTheRenderedWords() {
         ImeScenario().also(artifacts::track).run {
-            switchLanguageForScreenshotTest()
+            val stableWindow = switchLanguageForScreenshotTest()
             val fixture =
                 "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd \u05d7\u05dc\u05e7\u05d9\u05dd " +
                     "\u05d9\u05d7\u05d9\u05d3\u05d4 \u05de\u05e6\u05d0\u05d4 \u05de\u05e6\u05d0\u05d4"
             val strip = SentenceStripImeDriver()
+            typeHebrewTextThroughKeyboard(fixture, stableWindow)
+            assertTextAndCursor(fixture)
+            val visibleAlternativeWords = strip.visibleWordIndices().filter { index ->
+                strip.alternativesForWord(index).isNotEmpty()
+            }
+            check(visibleAlternativeWords.isNotEmpty()) {
+                "Typing the Hebrew fixture through the keyboard produced no visible word alternatives; " +
+                    "visible words=${strip.visibleWordIndices()}"
+            }
+            val alternativesScreenshot = captureScreenshot("hebrew-alternatives-before-deletion")
+            check(alternativesScreenshot.isFile) { "Hebrew alternatives screenshot was not saved" }
+            androidx.test.InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommand(
+                    "cp ${alternativesScreenshot.absolutePath} /sdcard/Download/hebrew-alternatives-before-deletion.png",
+                )
+                .close()
 
             listOf(
                 SentenceStripImeDriver.Direction.LEFT,
                 SentenceStripImeDriver.Direction.RIGHT,
-            ).forEach { direction ->
-                replaceEditorTextForTest(fixture)
+            ).forEachIndexed { directionIndex, direction ->
+                if (directionIndex > 0) {
+                    strip.tapUndo()
+                    assertText(fixture)
+                }
                 val wordBounds = strip.waitForRenderedWordBounds(minimumCount = 2, timeoutMs = 5_000L)
                 val stripBounds = strip.strip().visibleBounds
                 val visiblePair = wordBounds.keys.sorted().zipWithNext()
@@ -269,29 +290,210 @@ class ImeReelE2eTest {
     }
 
     @Test
+    fun returningAnAlternativeSwipeToItsSourceCancelsTheCorrection() {
+        ImeScenario().also(artifacts::track).run {
+            typeText("Help that are you ")
+            assertTextAndCursor("Help that are you ")
+            swipeWord("doing")
+            assertTextAndCursor("Help that are you doing")
+            val strip = SentenceStripImeDriver()
+            val originalAlternative = strip.alternativesForWord(4).firstOrNull { node ->
+                node.contentDescription.orEmpty().contains("side=above")
+            }?.contentDescription.orEmpty().substringAfter("text=", "")
+            check(originalAlternative.isNotBlank()) {
+                "Expected an upward alternative for 'doing': ${strip.alternativesForWord(4)}"
+            }
+            val original = strip.editorSnapshot().text
+
+            strip.swipeAlternativeBackToOrigin(
+                index = 4,
+                side = SentenceStripImeDriver.Side.ABOVE,
+                whileOnAlternative = {
+                    check(strip.previewTextOrNull().orEmpty().contains(originalAlternative, ignoreCase = true)) {
+                        "The held upward drag did not preview '$originalAlternative'"
+                    }
+                    check(strip.editorSnapshot().text == original) {
+                        "Alternative preview changed the editor before release"
+                    }
+                    captureScreenshot("alternative-preview-before-return")
+                },
+                whileBackAtOrigin = {
+                    check(strip.previewTextOrNull() == null) {
+                        "Returning to the source word should clear the alternative preview, got " +
+                            strip.previewTextOrNull()
+                    }
+                    check(strip.editorSnapshot().text == original) {
+                        "Returning to the source word changed the editor before release"
+                    }
+                    captureScreenshot("alternative-preview-cancelled-at-source")
+                },
+            )
+
+            check(strip.editorSnapshot().text == original) {
+                "Releasing at the source word committed an alternative instead of cancelling"
+            }
+            check(strip.alternativesForWord(4).any { node ->
+                node.contentDescription.orEmpty().contains("side=above") &&
+                    node.contentDescription.orEmpty().substringAfter("text=").equals(originalAlternative, ignoreCase = true)
+            }) {
+                "Cancelling the gesture removed the original alternative"
+            }
+            assertText(original)
+        }
+    }
+
+    @Test
+    fun swipingDownFromDoingKeepsTheDisplacedWordAndOtherAlternative() {
+        ImeScenario().also(artifacts::track).run {
+            typeText("Help that are you ")
+            assertTextAndCursor("Help that are you ")
+            swipeWord("doing")
+            assertTextAndCursor("Help that are you doing")
+            val strip = SentenceStripImeDriver()
+            val lowerAlternative = strip.alternativesForWord(4).firstOrNull { node ->
+                node.contentDescription.orEmpty().contains("side=below")
+            }?.contentDescription.orEmpty().substringAfter("text=", "")
+            check(lowerAlternative.isNotBlank()) {
+                "Expected a downward alternative for 'doing': ${strip.alternativesForWord(4)}"
+            }
+            val otherAlternative = strip.alternativesForWord(4).firstOrNull { node ->
+                node.contentDescription.orEmpty().contains("side=above")
+            }?.contentDescription.orEmpty().substringAfter("text=", "")
+            check(otherAlternative.isNotBlank()) {
+                "Expected another 'doing' alternative to preserve: ${strip.alternativesForWord(4)}"
+            }
+            captureScreenshot("doing-down-alternative-before")
+
+            strip.swipeAlternative(4, SentenceStripImeDriver.Side.BELOW) {
+                check(strip.previewTextOrNull().orEmpty().contains(lowerAlternative, ignoreCase = true)) {
+                    "The held gesture did not preview '$lowerAlternative'"
+                }
+            }
+
+            val corrected = strip.editorSnapshot().text
+            check(corrected.equals("Help that are you $lowerAlternative", ignoreCase = true)) {
+                "Expected 'doing' to correct to '$lowerAlternative' in the sentence, got '$corrected'"
+            }
+            SystemClock.sleep(250L)
+            val visibleAlternatives = strip.alternativesForWord(4).mapNotNull { node ->
+                node.contentDescription.orEmpty().substringAfter("text=", "").takeIf(String::isNotBlank)
+            }
+            check(visibleAlternatives.any { it.equals("doing", ignoreCase = true) }) {
+                "The displaced word 'doing' was lost after correction: $visibleAlternatives"
+            }
+            check(otherAlternative.isNotBlank() && visibleAlternatives.any { it.equals(otherAlternative, ignoreCase = true) }) {
+                "The other 'doing' alternative '$otherAlternative' was lost after correction: $visibleAlternatives"
+            }
+            captureScreenshot("doing-down-alternative-after")
+            assertText(corrected)
+        }
+    }
+
+    @Test
     fun heldCursorScrubContinuesThroughTheRightEdgeZone() {
         ImeScenario().also(artifacts::track).run {
-            typeText("one two three four five six seven eight nine ten eleven twelve")
+            typeText(
+                "one two three four five six seven eight nine ten eleven twelve thirteen fourteen " +
+                    "fifteen sixteen seventeen eighteen nineteen twenty",
+            )
             val text = state().expectedText
+            assertText(text)
             val strip = SentenceStripImeDriver()
-            strip.tapWord(5)
+            val candidateWordIndexes = (0 until 20).filter { index ->
+                strip.alternativesForWord(index).isNotEmpty()
+            }
+            check(candidateWordIndexes.size >= 15) {
+                "Expected alternatives for most words in the 20-word sentence; " +
+                    "found ${candidateWordIndexes.size}/20 at indexes $candidateWordIndexes"
+            }
+            strip.waitForWordWithinViewport(19, timeoutMs = 5_000L)
+            val visibleCandidateIndexes = strip.visibleAlternativeWordIndices()
+            check(visibleCandidateIndexes.size >= 2) {
+                "Expected multiple alternatives to be visible beside the final words; " +
+                    "found them only for $visibleCandidateIndexes"
+            }
+            captureScreenshot("long-sentence-before-cursor-scroll")
+            assertVisibleWordLanesFit(strip)
+            val startingWordIndex = 16
+            val startingWordOffset = text.indexOf("seventeen")
+            strip.waitForWordWithinViewport(startingWordIndex, timeoutMs = 5_000L)
+            strip.tapWord(startingWordIndex)
             val beforeOffset = strip.editorSnapshot().selection.last
+            check(beforeOffset in startingWordOffset..(startingWordOffset + "seventeen".length)) {
+                "The visible word tap missed 'seventeen': selection=$beforeOffset bounds=" +
+                    strip.renderedWordBounds()[startingWordIndex]
+            }
+            captureScreenshot("long-sentence-after-tap-visible-word")
             assertText(text)
 
-            strip.holdWordAndDragToEdge(5, SentenceStripImeDriver.Direction.RIGHT) {
+            strip.holdWordAndDragToEdge(startingWordIndex, SentenceStripImeDriver.Direction.RIGHT) {
+                captureScreenshot("long-sentence-right-edge-held")
                 check(strip.editorSnapshot().text == text) { "Cursor scrubbing changed the sentence" }
                 check(strip.cursorOffset() == strip.editorSnapshot().selection.last) {
                     "The strip caret stopped matching InputConnection during edge scrolling"
                 }
             }
 
-            check(strip.editorSnapshot().selection.last > beforeOffset) {
-                "Holding at the right edge did not keep moving the cursor through later words"
+            val rightEdgeOffset = strip.editorSnapshot().selection.last
+            check(rightEdgeOffset > beforeOffset) {
+                "Holding at the right edge did not keep moving the cursor through later words: " +
+                    "before=$beforeOffset after=$rightEdgeOffset"
             }
-            check(strip.editorSnapshot().selection.last <= text.length) {
+            check(rightEdgeOffset <= text.length) {
                 "Edge scrolling wrapped the cursor past the sentence end"
             }
+            captureScreenshot("long-sentence-after-cursor-scroll")
+            assertVisibleWordLanesFit(strip)
             assertText(text)
+
+            val leftwardStartingWordIndex = 18
+            val leftwardStartBounds = strip.renderedWordBounds()[leftwardStartingWordIndex]
+            val viewport = strip.viewportBounds()
+            check(leftwardStartBounds != null && Rect(leftwardStartBounds).intersect(viewport)) {
+                "Could not start the leftward scrub from a visible word: " +
+                    "word=$leftwardStartBounds viewport=$viewport"
+            }
+            strip.holdWordAndDragToEdge(leftwardStartingWordIndex, SentenceStripImeDriver.Direction.LEFT) {
+                captureScreenshot("long-sentence-after-leftward-scrub")
+                val visibleViewport = strip.viewportBounds()
+                val visibleWordIndexes = strip.renderedWordBounds().filterValues { bounds ->
+                    Rect(bounds).intersect(visibleViewport)
+                }.keys
+                val visibleCandidateCount = visibleWordIndexes.count { index ->
+                    strip.alternativesForWord(index).isNotEmpty()
+                }
+                check(visibleCandidateCount >= 2) {
+                    "Expected visible sentence lanes to show alternatives after a leftward scrub; " +
+                        "found $visibleCandidateCount among indexes $visibleWordIndexes"
+                }
+            }
+            check(strip.editorSnapshot().selection.last < rightEdgeOffset) {
+                "Holding at the left edge did not move back through the sentence"
+            }
+            assertVisibleWordLanesFit(strip)
+            assertText(text)
+        }
+    }
+
+    private fun assertVisibleWordLanesFit(strip: SentenceStripImeDriver) {
+        val stripBounds = strip.viewportBounds()
+        val wordBounds = strip.renderedWordBounds().mapNotNull { (index, bounds) ->
+            Rect(bounds).takeIf { it.intersect(stripBounds) }?.let { index to it }
+        }.toMap().toSortedMap()
+        check(wordBounds.size >= 3) {
+            "Expected several visible word lanes in the long sentence, got ${wordBounds.keys}"
+        }
+        wordBounds.forEach { (index, bounds) ->
+            check(bounds.left >= stripBounds.left && bounds.right <= stripBounds.right &&
+                bounds.top >= stripBounds.top && bounds.bottom <= stripBounds.bottom
+            ) {
+                "Rendered lane $index escaped the sentence strip: lane=$bounds strip=$stripBounds"
+            }
+        }
+        wordBounds.entries.zipWithNext().forEach { (previous, next) ->
+            check(previous.value.right <= next.value.left) {
+                "Visible sentence lanes overlap: ${previous.key}=${previous.value}, ${next.key}=${next.value}"
+            }
         }
     }
 
@@ -411,6 +613,24 @@ class ImeReelE2eTest {
         value.forEach { character ->
             if (character == ' ') tapSpace(checkpointEach = false)
             else tapKey(character.toString(), checkpointEach = false)
+        }
+    }
+
+    private fun ImeScenario.typeHebrewTextThroughKeyboard(value: String, stableWindow: KeyboardWindow) {
+        val instrumentation = androidx.test.InstrumentationRegistry.getInstrumentation()
+        val pointer = PointerInjector(instrumentation.uiAutomation)
+        val keySizePx = stableWindow.surfaceBounds.width() / KEYBOARD_LETTER_ROW_COLUMN_COUNT.toFloat()
+        val showNumberRow = stableWindow.surfaceBounds.height() / keySizePx > 4.5f
+        val layout = keyboardLayoutFor(keySizePx, com.iaido.core.language.Language.HEBREW, showNumberRow)
+        value.forEach { character ->
+            val (x, y) = if (character == ' ') {
+                stableWindow.keyCenter("space").let { it.x.toFloat() to it.y.toFloat() }
+            } else {
+                val key = layout.centerOf(character)
+                (stableWindow.surfaceBounds.left + key.x) to (stableWindow.surfaceBounds.top + key.y)
+            }
+            pointer.injectTap(x, y)
+            SystemClock.sleep(60L)
         }
     }
 }

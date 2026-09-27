@@ -7,12 +7,11 @@ import android.text.TextWatcher
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.TextView
 
 /** Debug-only host editor used to verify real InputConnection commits. */
 class ImeTestHostActivity : Activity() {
-    private lateinit var editor: EditText
+    private lateinit var editor: ImeTestEditText
     private lateinit var status: TextView
     private var hostGeneration: Long = 0L
     private var resetRequestId: Long? = null
@@ -26,6 +25,7 @@ class ImeTestHostActivity : Activity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         editor = findViewById(R.id.ime_test_editor)
         status = findViewById(R.id.ime_test_status)
+        editor.onSelectionChanged = ::updateStatus
         findViewById<Button>(R.id.ime_test_clear).setOnClickListener {
             editor.setText("")
             editor.setSelection(0)

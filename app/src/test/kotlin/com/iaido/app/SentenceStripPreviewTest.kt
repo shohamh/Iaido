@@ -59,6 +59,27 @@ class SentenceStripPreviewTest {
     }
 
     @Test
+    fun `committed below choice keeps the displaced word and the other alternative`() {
+        val corrected = SentenceStripWord(
+            id = "doing",
+            text = "doubt",
+            start = 0,
+            endExclusive = 5,
+            above = "doing",
+            below = "dont",
+        )
+
+        val overridden = SentenceWordAlternativeOverride(
+            selectedText = "doubt",
+            displacedText = "doing",
+            side = SentenceAlternativeSide.BELOW,
+        ).apply(corrected)
+
+        assertEquals("dont", overridden.above)
+        assertEquals("doing", overridden.below)
+    }
+
+    @Test
     fun `join preview can be selected from either source word`() {
         val state = joinedState()
         val option = state.replacementOptions.single()

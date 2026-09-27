@@ -179,11 +179,9 @@ class ImeScenario(
             "Scenario language drifted before '$word': expected=$expectedLanguage observed=${window.language}"
         }
         val keySizePx = window.surfaceBounds.width().toFloat() / KEYBOARD_LETTER_ROW_COLUMN_COUNT
-        val path = if (expectedLanguage == Language.ENGLISH) {
-            SwipeFixtures.pathThroughQwerty(word, keySizePx)
-        } else {
-            SwipeFixtures.pathThroughHebrew(word, keySizePx)
-        }
+        val showNumberRow = window.surfaceBounds.height() / keySizePx > 4.5f
+        val layout = keyboardLayoutFor(keySizePx, expectedLanguage, showNumberRow)
+        val path = SwipeFixtures.pathThrough(layout, word.lowercase())
         val transformedPoints = path.points.toMutableList().apply {
             val start = transform.reverseStart
             val end = transform.reverseEndExclusive
@@ -258,12 +256,15 @@ class ImeScenario(
 
     fun switchLanguage() = tapKey("globe")
 
-    /** Switches the visual IME language without trusting a stale accessibility snapshot. */
-    fun switchLanguageForScreenshotTest() {
+    /** Switches layouts using the last stable key bounds because UiAutomator markers lag the redraw. */
+    fun switchLanguageForScreenshotTest(): KeyboardWindow {
+        val windowBeforeSwitch = KeyboardWindowLocator.locate(device)
         val before = expectedLanguage
-        pendingPointerEvents = editor.tapMarkedKey(keyDescription("globe"))
+        val globe = windowBeforeSwitch.keyCenter("globe")
+        pendingPointerEvents = pointer.injectTap(globe.x.toFloat(), globe.y.toFloat())
         expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
         SystemClock.sleep(750L)
+        return windowBeforeSwitch
     }
 
     fun twoFingerLanguageSwitch() {

@@ -24,11 +24,20 @@ internal class SentenceStripImeDriver(
 
     fun strip(): UiObject2 = requiredNode("Iaido sentence strip")
 
-    fun word(index: Int): UiObject2 = requiredNode("Iaido sentence word index=$index")
+    fun word(index: Int): SentenceWordNode {
+        val directNode = device.findObject(By.descStartsWith("Iaido sentence word index=$index "))
+            ?: device.findObject(By.descStartsWith("Iaido sentence glyph word index=$index "))
+        val description = debugWordCandidateDescription(index)
+            ?: directNode?.contentDescription?.toString()
+            ?: error("Missing measured sentence word $index")
+        val bounds = renderedWordBounds()[index] ?: directNode?.visibleBounds
+            ?: error("Missing rendered bounds for sentence word $index")
+        return SentenceWordNode(description, bounds)
+    }
 
-    fun alternative(index: Int, side: Side): UiObject2 = requiredNode(
-        "Iaido sentence alternative word=$index side=${side.label}",
-    )
+    fun alternative(index: Int, side: Side): SentenceAlternativeNode = alternativesForWord(index)
+        .firstOrNull { it.contentDescription.contains("side=${side.label}") }
+        ?: error("Missing ${side.label} alternative for sentence word $index")
 
     fun cursorOffset(): Int = requiredNode("Iaido sentence cursor offset=")
         .contentDescription
@@ -36,10 +45,11 @@ internal class SentenceStripImeDriver(
         .substringAfter("offset=")
         .toInt()
 
-    fun previewTextOrNull(): String? = device.findObject(By.descStartsWith("Iaido sentence preview text="))
+    fun previewTextOrNull(): String? = device.findObject(By.descStartsWith("Iaido sentence strip"))
         ?.contentDescription
         ?.toString()
-        ?.substringAfter("text=")
+        ?.substringAfter(" preview text=", "")
+        ?.takeIf(String::isNotBlank)
 
     fun joinPreviewOrNull(): UiObject2? = device.findObject(By.descStartsWith("Iaido join preview text="))
 
@@ -54,6 +64,38 @@ internal class SentenceStripImeDriver(
                 if (right <= left || bottom <= top) null else index to Rect(left, top, right, bottom)
             }
             .toMap()
+    }
+
+    fun viewportBounds(): Rect {
+        val description = layoutDescription() ?: error("Missing sentence strip layout diagnostics")
+        val match = Regex(" viewport=(-?\\d+),(-?\\d+),(-?\\d+),(-?\\d+)").find(description)
+            ?: error("Missing sentence strip viewport bounds: $description")
+        val values = match.groupValues.drop(1).map(String::toInt)
+        return Rect(values[0], values[1], values[2], values[3])
+    }
+
+    fun waitForWordWithinViewport(
+        index: Int,
+        timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ): Rect {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var lastBounds: Rect? = null
+        var viewport = Rect()
+        do {
+            lastBounds = renderedWordBounds()[index]
+            viewport = viewportBounds()
+            if (lastBounds != null && viewport.contains(lastBounds)) return lastBounds
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        error("Sentence word $index did not settle fully inside viewport: word=$lastBounds viewport=$viewport")
+    }
+
+    fun visibleAlternativeWordIndices(): List<Int> {
+        val viewport = viewportBounds()
+        return renderedWordBounds().filterValues { bounds ->
+            val visible = Rect(bounds)
+            visible.intersect(viewport)
+        }.keys.filter { index -> alternativesForWord(index).isNotEmpty() }.sorted()
     }
 
     fun renderedDeletionBoundsOrNull(): RenderedDeletionBounds? {
@@ -80,6 +122,15 @@ internal class SentenceStripImeDriver(
             ?.substringAfter("layout bounds=", "")
             ?.takeIf(String::isNotEmpty)
     }.getOrNull()
+
+    private fun debugWordCandidateDescription(index: Int): String? {
+        val layout = layoutDescription() ?: return null
+        val match = Regex(
+            "(?:^|;)$index:-?\\d+,-?\\d+,-?\\d+,-?\\d+:above=([^;]*):below=(.*?)(?=;\\d+:| viewport=| preview=|$)",
+        ).find(layout) ?: return null
+        return "Iaido sentence word index=$index above=${match.groupValues[1]} " +
+            "below=${match.groupValues[2]}"
+    }
 
     fun waitForRenderedDeletionBounds(
         timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
@@ -116,9 +167,53 @@ internal class SentenceStripImeDriver(
         )
     }
 
-    fun alternativesForWord(index: Int): List<UiObject2> = device.findObjects(
-        By.descStartsWith("Iaido sentence alternative word=$index "),
-    )
+    fun alternativesForWord(index: Int): List<SentenceAlternativeNode> {
+        val directNodes = runCatching {
+            device.findObjects(By.descStartsWith("Iaido sentence alternative word=$index "))
+                .mapNotNull { node ->
+                    runCatching {
+                        SentenceAlternativeNode(
+                            node.contentDescription?.toString().orEmpty(),
+                            node.visibleBounds,
+                        )
+                    }.getOrNull()
+                }
+        }.getOrDefault(emptyList())
+        if (directNodes.isNotEmpty()) {
+            return directNodes
+        }
+
+        // The IME's horizontal scroll container merges lane descendants in the
+        // platform accessibility tree. Candidate names are on the merged lane;
+        // reconstruct their hit rows from that lane's measured bounds.
+        val lane = word(index)
+        val description = lane.contentDescription
+        val above = description.substringAfter(" above=", "").substringBefore(" below=")
+        val below = description.substringAfter(" below=", "")
+        val density = instrumentationDensity()
+        val rowHeight = (20f * density).toInt().coerceAtLeast(1)
+        val bounds = lane.visibleBounds
+        val aboveTop = bounds.top
+        val belowTop = bounds.bottom - rowHeight
+        return buildList {
+            if (above.isNotBlank()) {
+                add(
+                    SentenceAlternativeNode(
+                        "Iaido sentence alternative word=$index side=above text=$above",
+                        Rect(bounds.left, aboveTop, bounds.right, aboveTop + rowHeight),
+                    ),
+                )
+            }
+            if (below.isNotBlank()) {
+                add(
+                    SentenceAlternativeNode(
+                        "Iaido sentence alternative word=$index side=below text=$below",
+                        Rect(bounds.left, belowTop, bounds.right, belowTop + rowHeight),
+                    ),
+                )
+            }
+        }
+    }
 
     fun sideForAlternative(index: Int, text: String): Side? = alternativesForWord(index)
         .firstOrNull { node ->
@@ -129,10 +224,15 @@ internal class SentenceStripImeDriver(
             if (description.contains("side=above")) Side.ABOVE else Side.BELOW
         }
 
-    fun visibleWordIndices(): List<Int> = device.findObjects(By.descStartsWith("Iaido sentence word index="))
-        .mapNotNull { node ->
-            Regex("index=(\\d+)").find(node.contentDescription.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
-        }
+    fun visibleWordIndices(): List<Int> = runCatching {
+        device.findObjects(By.descStartsWith("Iaido sentence word index="))
+            .mapNotNull { node ->
+                runCatching {
+                    Regex("index=(\\d+)").find(node.contentDescription.orEmpty())
+                        ?.groupValues?.get(1)?.toIntOrNull()
+                }.getOrNull()
+            }
+    }.getOrDefault(emptyList()).ifEmpty { renderedWordBounds().keys.sorted() }
 
     fun undoEnabled(): Boolean = requiredNode("Iaido undo").isEnabled
 
@@ -140,7 +240,11 @@ internal class SentenceStripImeDriver(
 
     fun editorSnapshot(): ImeEditorSnapshot = editor.snapshot()
 
-    fun tapWord(index: Int) = tapCenter(word(index).visibleBounds)
+    fun tapWord(index: Int) {
+        tapCenter(word(index).visibleBounds)
+        device.waitForIdle()
+        SystemClock.sleep(120L)
+    }
 
     fun tapCharacter(index: Int, renderedText: String, characterIndex: Int) {
         require(characterIndex in renderedText.indices)
@@ -175,6 +279,42 @@ internal class SentenceStripImeDriver(
             PointF(target.exactCenterX(), target.exactCenterY()),
             whilePreviewing,
         )
+    }
+
+    fun swipeAlternativeBackToOrigin(
+        index: Int,
+        side: Side,
+        whileOnAlternative: () -> Unit,
+        whileBackAtOrigin: () -> Unit,
+    ) {
+        val start = word(index).visibleBounds.let { PointF(it.exactCenterX(), it.exactCenterY()) }
+        val target = alternative(index, side).visibleBounds.let { PointF(it.exactCenterX(), it.exactCenterY()) }
+        var reachedAlternative = false
+        var returnedToOrigin = false
+        pointer.injectScreenSwipe(
+            points = listOf(start, target, target, start, start),
+            stepMs = 64L,
+            onEvent = { event ->
+                if (event.action != MotionEvent.ACTION_MOVE) return@injectScreenSwipe
+                val position = event.pointers.single()
+                fun isNear(point: PointF) =
+                    kotlin.math.abs(position.x - point.x) <= 4f &&
+                        kotlin.math.abs(position.y - point.y) <= 4f
+
+                if (!reachedAlternative && isNear(target)) {
+                    reachedAlternative = true
+                    SystemClock.sleep(160L)
+                    whileOnAlternative()
+                } else if (reachedAlternative && !returnedToOrigin && isNear(start)) {
+                    returnedToOrigin = true
+                    SystemClock.sleep(160L)
+                    whileBackAtOrigin()
+                }
+            },
+        )
+        check(reachedAlternative) { "The injected path did not reach the alternative lane" }
+        check(returnedToOrigin) { "The injected path did not return to the source word" }
+        device.waitForIdle()
     }
 
     fun swipeAlternativeThenCancel(index: Int, side: Side, whilePreviewing: () -> Unit) {
@@ -261,10 +401,10 @@ internal class SentenceStripImeDriver(
     }
 
     fun dragToEdgeZone(direction: Direction, from: Rect, whilePreviewing: () -> Unit) {
-        val edge = requiredNode("Iaido edge zone direction=${direction.label}").visibleBounds
+        val edge = edgeZonePoint(direction, from.exactCenterY())
         dragAndObserve(
             PointF(from.exactCenterX(), from.exactCenterY()),
-            PointF(edge.exactCenterX(), edge.exactCenterY()),
+            edge,
             whilePreviewing,
             holdBeforeMoveMs = 480L,
         )
@@ -272,9 +412,8 @@ internal class SentenceStripImeDriver(
 
     fun holdWordAndDragToEdge(index: Int, direction: Direction, whilePreviewing: () -> Unit) {
         val start = word(index).visibleBounds
-        val edge = requiredNode("Iaido edge zone direction=${direction.label}").visibleBounds
         val startPoint = PointF(start.exactCenterX(), start.exactCenterY())
-        val endPoint = PointF(edge.exactCenterX(), edge.exactCenterY())
+        val endPoint = edgeZonePoint(direction, start.exactCenterY())
         dragPathAndObserve(
             listOf(startPoint, startPoint, endPoint, endPoint),
             endPoint,
@@ -383,6 +522,16 @@ internal class SentenceStripImeDriver(
         pointer.injectTap(bounds.exactCenterX(), bounds.exactCenterY())
     }
 
+    private fun edgeZonePoint(direction: Direction, y: Float): PointF {
+        val viewport = strip().visibleBounds
+        val inset = (36f * instrumentationDensity()).toInt()
+        val x = when (direction) {
+            Direction.LEFT -> viewport.left + inset
+            Direction.RIGHT -> viewport.right - inset
+        }
+        return PointF(x.toFloat(), y)
+    }
+
     private fun requiredNode(prefix: String): UiObject2 {
         val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
@@ -413,5 +562,15 @@ internal data class RenderedDeletionBounds(
     val endWord: Int,
     val sourceStart: Int,
     val sourceEndExclusive: Int,
+    val visibleBounds: Rect,
+)
+
+internal data class SentenceAlternativeNode(
+    val contentDescription: String,
+    val visibleBounds: Rect,
+)
+
+internal data class SentenceWordNode(
+    val contentDescription: String,
     val visibleBounds: Rect,
 )

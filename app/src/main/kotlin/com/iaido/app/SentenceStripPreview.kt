@@ -44,13 +44,36 @@ internal data class SentenceWordAlternativeOverride(
 ) {
     fun apply(word: SentenceStripWord): SentenceStripWord {
         val candidate = displacedText.takeIf(String::isNotBlank)
+        if (candidate == null || candidate.equals(word.text, ignoreCase = true)) return word
+
+        val selected = when (side) {
+            SentenceAlternativeSide.ABOVE -> word.above
+            SentenceAlternativeSide.BELOW -> word.below
+        }
+        val opposite = when (side) {
+            SentenceAlternativeSide.ABOVE -> word.below
+            SentenceAlternativeSide.BELOW -> word.above
+        }
+
+        val (nextSelected, nextOpposite) = when {
+            candidate.equals(selected, ignoreCase = true) ->
+                candidate to opposite.uniqueAgainst(word.text, candidate)
+            candidate.equals(opposite, ignoreCase = true) -> {
+                if (selected.equals(word.text, ignoreCase = true)) {
+                    null to candidate
+                } else {
+                    candidate to selected.uniqueAgainst(word.text, candidate)
+                }
+            }
+            else -> candidate to (
+                opposite.uniqueAgainst(word.text, candidate)
+                    ?: selected.uniqueAgainst(word.text, candidate)
+                )
+        }
+
         return when (side) {
-            SentenceAlternativeSide.ABOVE -> word.copy(
-                above = candidate.uniqueAgainst(word.text, word.below),
-            )
-            SentenceAlternativeSide.BELOW -> word.copy(
-                below = candidate.uniqueAgainst(word.text, word.above),
-            )
+            SentenceAlternativeSide.ABOVE -> word.copy(above = nextSelected, below = nextOpposite)
+            SentenceAlternativeSide.BELOW -> word.copy(below = nextSelected, above = nextOpposite)
         }
     }
 

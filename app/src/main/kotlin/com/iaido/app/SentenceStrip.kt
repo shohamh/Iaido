@@ -246,6 +246,18 @@ internal fun SentenceStrip(
     val liveMetrics = rememberUpdatedState(metrics)
     val liveViewportCoordinates = rememberUpdatedState(viewportCoordinates)
     val liveRowCoordinates = rememberUpdatedState(rowCoordinates)
+    val wordPreview = preview as? SentenceWordPreview
+    val replacementPreview = preview as? SentenceReplacementPreview
+    val deletionPreview = preview as? SentenceDeletionPreview
+    val renderedLaneWords = displayWords.mapIndexed { index, word ->
+        sentenceStripRenderedWord(
+            word = word,
+            wordIndex = index,
+            wordPreview = wordPreview,
+            replacementPreview = replacementPreview,
+            deletionPreview = deletionPreview,
+        )
+    }
     LaunchedEffect(gestureActiveState.value, rtl) {
         if (gestureActiveState.value) return@LaunchedEffect
         var lastSentenceStart: Int? = null
@@ -358,9 +370,6 @@ internal fun SentenceStrip(
     }
 
     val liveActions = rememberUpdatedState(actions)
-    val wordPreview = preview as? SentenceWordPreview
-    val replacementPreview = preview as? SentenceReplacementPreview
-    val deletionPreview = preview as? SentenceDeletionPreview
     LaunchedEffect(edgeScrollTargetState.value?.direction) {
         edgeScrollTargetState.value?.direction?.let { lastEdgeDirection = it }
     }
@@ -373,8 +382,9 @@ internal fun SentenceStrip(
                 .semantics {
                     val debugBounds = if (BuildConfig.DEBUG) {
                         sentenceStripDebugBoundsDescription(
-                            words = displayWords,
+                            words = renderedLaneWords,
                             deletionPreview = deletionPreview,
+                            previewText = preview?.sentenceText,
                             viewportCoordinates = liveViewportCoordinates.value,
                             outlineCoordinates = deletionOutlineCoordinates,
                             wordCoordinates = wordCoordinates,
@@ -467,20 +477,8 @@ internal fun SentenceStrip(
                                 it.isSplit && it.sourceWordIndices.singleOrNull() == index
                             }
                             val deleting = deletionPreview?.sourceWordIds?.contains(word.id) == true
-                            val renderWord = selected?.let {
-                                word.copy(
-                                    text = it.replacement,
-                                    above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
-                                    below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
-                                )
-                            } ?: split?.let {
-                                word.copy(
-                                    above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
-                                    below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
-                                )
-                            } ?: if (deleting) word.copy(above = null, below = null) else word
                             SentenceWordLane(
-                                word = renderWord,
+                                word = renderedLaneWords[index],
                                 wordIndex = index,
                                 laneWidth = laneWidth,
                                 currentStyle = currentStyle,
@@ -822,6 +820,7 @@ private fun viewportWordUnion(
 private fun sentenceStripDebugBoundsDescription(
     words: List<SentenceStripWord>,
     deletionPreview: SentenceDeletionPreview?,
+    previewText: String?,
     viewportCoordinates: LayoutCoordinates?,
     outlineCoordinates: LayoutCoordinates?,
     wordCoordinates: Map<String, LayoutCoordinates>,
@@ -839,7 +838,7 @@ private fun sentenceStripDebugBoundsDescription(
             viewportCoordinates = viewport,
             wordCoordinates = wordCoordinates,
         ) ?: return@mapIndexedNotNull null
-        "$index:${screenBounds(bounds)}"
+        "$index:${screenBounds(bounds)}:above=${word.above.orEmpty()}:below=${word.below.orEmpty()}"
     }.joinToString(";")
     val renderedDeletion = deletionPreview?.let { deletion ->
         val outline = outlineCoordinates?.takeIf(LayoutCoordinates::isAttached)?.let { coordinates ->
@@ -849,7 +848,37 @@ private fun sentenceStripDebugBoundsDescription(
         " preview=${deletion.wordRange.first},${deletion.wordRange.last}," +
             "${deletion.sourceStart},${deletion.sourceEndExclusive}:$outline"
     }.orEmpty()
-    return "layout bounds=$renderedWords$renderedDeletion"
+    val viewportBounds = screenBounds(
+        StripRect(0f, 0f, viewport.size.width.toFloat(), viewport.size.height.toFloat()),
+    )
+    val renderedPreview = previewText?.let { " preview text=$it" }.orEmpty()
+    return "layout bounds=$renderedWords viewport=$viewportBounds$renderedDeletion$renderedPreview"
+}
+
+private fun sentenceStripRenderedWord(
+    word: SentenceStripWord,
+    wordIndex: Int,
+    wordPreview: SentenceWordPreview?,
+    replacementPreview: SentenceReplacementPreview?,
+    deletionPreview: SentenceDeletionPreview?,
+): SentenceStripWord {
+    val selected = wordPreview?.takeIf { it.wordIndex == wordIndex }
+    val split = replacementPreview?.takeIf {
+        it.isSplit && it.sourceWordIndices.singleOrNull() == wordIndex
+    }
+    val deleting = deletionPreview?.sourceWordIds?.contains(word.id) == true
+    return selected?.let {
+        word.copy(
+            text = it.replacement,
+            above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
+            below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+        )
+    } ?: split?.let {
+        word.copy(
+            above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
+            below = if (it.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+        )
+    } ?: if (deleting) word.copy(above = null, below = null) else word
 }
 
 private fun stripViewportX(
@@ -1209,15 +1238,21 @@ private fun Modifier.sentenceStripInput(
         fun updateAlternativeAt(position: Offset) {
             val visualGeometry = renderedGeometry()
             val content = contentPosition(position)
-            activePreview = originIndex?.let { index ->
-                SentenceStripPreviewMath.gestureAt(
-                    state = frozenState,
-                    geometry = visualGeometry ?: frozenGeometry,
-                    originWordIndex = index,
-                    contentX = if (visualGeometry != null) position.x else content.x,
-                    side = if (position.y < down.position.y) SentenceAlternativeSide.ABOVE
-                    else SentenceAlternativeSide.BELOW,
-                )
+            val dx = position.x - down.position.x
+            val dy = position.y - down.position.y
+            activePreview = if (dx * dx + dy * dy <= dragSlop * dragSlop) {
+                null
+            } else {
+                originIndex?.let { index ->
+                    SentenceStripPreviewMath.gestureAt(
+                        state = frozenState,
+                        geometry = visualGeometry ?: frozenGeometry,
+                        originWordIndex = index,
+                        contentX = if (visualGeometry != null) position.x else content.x,
+                        side = if (position.y < down.position.y) SentenceAlternativeSide.ABOVE
+                        else SentenceAlternativeSide.BELOW,
+                    )
+                }
             }
             preview.value = activePreview
         }
