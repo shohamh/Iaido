@@ -255,9 +255,10 @@ internal fun KeyboardInputView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .semantics { contentDescription = KEYBOARD_ROOT_DESCRIPTION },
+                    .semantics {
+                        contentDescription = KEYBOARD_ROOT_DESCRIPTION
+                    },
             ) {
-            key(language) {
                 Text(
                     text = language.name,
                     modifier = Modifier
@@ -265,7 +266,6 @@ internal fun KeyboardInputView(
                         .semantics { contentDescription = "Iaido language ${language.name}" },
                     color = androidx.compose.ui.graphics.Color.Transparent,
                 )
-            }
             SentenceStrip(
                 state = sentenceStripState,
                 rtl = language == Language.HEBREW,

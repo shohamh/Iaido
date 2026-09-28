@@ -114,6 +114,24 @@ class SwipeInferenceTransactionTest {
         )
     }
 
+    @Test
+    fun `finalization supplements swipe alternatives with nearby dictionary words`() {
+        val alternatives = listOf(option(listOf("in")))
+
+        assertEquals(
+            listOf(listOf("in", "inside", "into")),
+            inferenceWordCandidates(
+                words = listOf("in"),
+                alternatives = alternatives,
+                dictionary = listOf(
+                    WordEntry("in", 100.0),
+                    WordEntry("inside", 10.0),
+                    WordEntry("into", 1.0),
+                ),
+            ),
+        )
+    }
+
     private fun unit(id: String, word: String): GestureUnit = GestureUnit(
         id = id,
         paths = listOf(GesturePath(listOf(GesturePoint(0f, 0f, 0L)))),

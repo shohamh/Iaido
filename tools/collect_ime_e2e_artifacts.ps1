@@ -32,9 +32,31 @@ if (-not $remoteExists) {
     exit 0
 }
 
-& adb -s $DeviceSerial pull $remotePath $destinationPath
-if ($LASTEXITCODE -ne 0 -and $ExpectArtifacts) {
-    Write-Warning "No IME artifact directory was available at $remotePath"
+$adbPath = (Get-Command adb -ErrorAction Stop).Source
+$stdoutPath = [System.IO.Path]::GetTempFileName()
+$stderrPath = [System.IO.Path]::GetTempFileName()
+try {
+    $pullProcess = Start-Process `
+        -FilePath $adbPath `
+        -ArgumentList @("-s", $DeviceSerial, "pull", $remotePath, $destinationPath) `
+        -NoNewWindow `
+        -PassThru `
+        -Wait `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
+    $pullExitCode = $pullProcess.ExitCode
+} finally {
+    if (Test-Path -LiteralPath $stdoutPath) { Remove-Item -LiteralPath $stdoutPath -Force }
+    if (Test-Path -LiteralPath $stderrPath) { Remove-Item -LiteralPath $stderrPath -Force }
+}
+
+if ($pullExitCode -ne 0) {
+    if ($ExpectArtifacts) {
+        throw "Could not collect IME artifacts from $remotePath (adb exit code $pullExitCode)"
+    }
+    Write-Warning "Could not collect IME artifacts from $remotePath (adb exit code $pullExitCode)"
+} else {
+    Write-Host "Collected IME artifacts from $remotePath."
 }
 
 exit 0

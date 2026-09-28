@@ -43,11 +43,22 @@ class ImeEditorDriver(
     private val packageName: String,
 ) {
     fun focus() {
-        val bounds = editor().visibleBounds
-        pointerInjector.injectTap(
-            centerX = (bounds.left + bounds.right) / 2f,
-            centerY = (bounds.top + bounds.bottom) / 2f,
-        )
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        var lastFailure: Throwable? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            try {
+                val bounds = editor().visibleBounds
+                pointerInjector.injectTap(
+                    centerX = (bounds.left + bounds.right) / 2f,
+                    centerY = (bounds.top + bounds.bottom) / 2f,
+                )
+                return
+            } catch (failure: StaleObjectException) {
+                lastFailure = failure
+                SystemClock.sleep(50L)
+            }
+        }
+        throw IllegalStateException("Could not focus host editor", lastFailure)
     }
 
     fun clear() {

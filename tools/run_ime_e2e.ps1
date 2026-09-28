@@ -116,16 +116,22 @@ $deviceTuningApplied = $false
 function Set-TestDeviceSettings {
     foreach ($settingName in $animationSettingNames) {
         $value = (& adb -s $DeviceSerial shell settings get global $settingName 2>$null | Out-String).Trim()
-        if ($value -notmatch '^[0-9]+(?:\.[0-9]+)?$') {
+        if ($value -ne "null" -and $value -notmatch '^[0-9]+(?:\.[0-9]+)?$') {
             throw "Could not read Android animation setting '$settingName' (value '$value')"
         }
         $previousAnimationSettings[$settingName] = $value
+    }
+
+    # Capture every original value before changing any setting. Android reports an unset
+    # global setting as "null"; restoring that state requires deleting the override.
+    $script:deviceTuningApplied = $true
+    foreach ($settingName in $animationSettingNames) {
+        $value = $previousAnimationSettings[$settingName]
         if ($value -ne "0") {
             & adb -s $DeviceSerial shell settings put global $settingName 0 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Could not disable Android animation setting '$settingName'" }
         }
     }
-    $script:deviceTuningApplied = $true
     Write-Host "E2E device tuning: Android animations disabled for this run."
 }
 
@@ -133,7 +139,9 @@ function Restore-TestDeviceSettings {
     if (-not $deviceTuningApplied) { return }
     foreach ($settingName in $animationSettingNames) {
         $value = $previousAnimationSettings[$settingName]
-        if ($value) {
+        if ($value -eq "null") {
+            & adb -s $DeviceSerial shell settings delete global $settingName | Out-Null
+        } elseif ($null -ne $value) {
             & adb -s $DeviceSerial shell settings put global $settingName $value | Out-Null
         }
     }
@@ -204,7 +212,7 @@ try {
         }
         $instrumentationArguments += "com.iaido.app.test/androidx.test.runner.AndroidJUnitRunner"
         $instrumentationOutput = @(& adb -s $DeviceSerial shell am instrument @instrumentationArguments 2>&1)
-        $instrumentationOutput | Out-Host
+        Write-Output $instrumentationOutput
         $instrumentationCodeLine = $instrumentationOutput | Where-Object { $_ -match 'INSTRUMENTATION_CODE:\s*(-?\d+)' } | Select-Object -Last 1
         if ($null -eq $instrumentationCodeLine -or $instrumentationCodeLine -notmatch 'INSTRUMENTATION_CODE:\s*(-?\d+)') {
             throw "Instrumentation did not report a completion code"
@@ -228,20 +236,26 @@ try {
     $gradleExitCode = 1
 } finally {
     New-Item -ItemType Directory -Force -Path $artifactDestination | Out-Null
-    if ($gradleExitCode -ne 0) {
-        & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
-            -DeviceSerial $DeviceSerial `
-            -Destination $artifactDestination `
-            -ExpectArtifacts
-    } else {
-        & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
-            -DeviceSerial $DeviceSerial `
-            -Destination $artifactDestination
-    }
-    try { Restore-TestDeviceSettings } catch { Write-Warning "Could not restore Android animation settings: $_" }
-    if ($previousAndroidSerial) { $env:ANDROID_SERIAL = $previousAndroidSerial } else { Remove-Item Env:ANDROID_SERIAL -ErrorAction SilentlyContinue }
-    if ($startedProcess -and -not $KeepArtifacts) {
-        Write-Host "Leaving emulator process $($startedProcess.Id) running; use emulator controls to stop it."
+    try {
+        if ($gradleExitCode -ne 0) {
+            & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
+                -DeviceSerial $DeviceSerial `
+                -Destination $artifactDestination `
+                -ExpectArtifacts
+        } else {
+            & (Join-Path $PSScriptRoot "collect_ime_e2e_artifacts.ps1") `
+                -DeviceSerial $DeviceSerial `
+                -Destination $artifactDestination
+        }
+    } catch {
+        Write-Warning "Could not collect IME test artifacts: $_"
+        if ($gradleExitCode -eq 0) { $gradleExitCode = 1 }
+    } finally {
+        try { Restore-TestDeviceSettings } catch { Write-Warning "Could not restore Android animation setting: $_" }
+        if ($previousAndroidSerial) { $env:ANDROID_SERIAL = $previousAndroidSerial } else { Remove-Item Env:ANDROID_SERIAL -ErrorAction SilentlyContinue }
+        if ($startedProcess -and -not $KeepArtifacts) {
+            Write-Host "Leaving emulator process $($startedProcess.Id) running; use emulator controls to stop it."
+        }
     }
 }
 

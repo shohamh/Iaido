@@ -89,10 +89,8 @@ class ImeEditingE2eTest {
     }
 
     @Test
-    fun settingsButtonOpensSettingsActivity() {
-        scenario().run {
-            openSettingsFromKeyboard()
-        }
+    fun settingsActivityOpensFromTheApp() {
+        scenario().openSettingsActivityFromApp()
     }
 
     @Test

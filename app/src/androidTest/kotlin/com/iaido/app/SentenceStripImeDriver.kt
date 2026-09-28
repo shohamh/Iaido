@@ -8,6 +8,7 @@ import android.text.TextPaint
 import android.view.MotionEvent
 import androidx.test.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 
@@ -16,7 +17,7 @@ import androidx.test.uiautomator.UiObject2
  * The semantic descriptions are intentionally independent of Compose implementation details.
  */
 internal class SentenceStripImeDriver(
-    instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
+    private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation(),
 ) {
     private val device = UiDevice.getInstance(instrumentation)
     private val pointer = PointerInjector(instrumentation.uiAutomation)
@@ -35,9 +36,29 @@ internal class SentenceStripImeDriver(
         return SentenceWordNode(description, bounds)
     }
 
-    fun alternative(index: Int, side: Side): SentenceAlternativeNode = alternativesForWord(index)
-        .firstOrNull { it.contentDescription.contains("side=${side.label}") }
-        ?: error("Missing ${side.label} alternative for sentence word $index")
+    fun alternative(
+        index: Int,
+        side: Side,
+        expectedText: String? = null,
+        timeoutMs: Long = 2_000L,
+    ): SentenceAlternativeNode {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var candidates = emptyList<SentenceAlternativeNode>()
+        do {
+            candidates = alternativesForWord(index)
+            candidates.firstOrNull { candidate ->
+                candidate.contentDescription.contains("side=${side.label}") &&
+                    (expectedText == null || candidate.contentDescription
+                        .substringAfter(" text=")
+                        .equals(expectedText, ignoreCase = true))
+            }?.let { return it }
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        error(
+            "Missing ${side.label} alternative${expectedText?.let { " '$it'" }.orEmpty()} " +
+                "for sentence word $index; found ${candidates.map { it.contentDescription }}",
+        )
+    }
 
     fun cursorOffset(): Int = requiredNode("Iaido sentence cursor offset=")
         .contentDescription
@@ -52,6 +73,62 @@ internal class SentenceStripImeDriver(
         ?.takeIf(String::isNotBlank)
 
     fun joinPreviewOrNull(): UiObject2? = device.findObject(By.descStartsWith("Iaido join preview text="))
+
+    fun captureScreenshot(name: String) = ArtifactWriter.captureScreenshot(name, device)
+
+    fun screenshotShowsJoinOutlineAcross(sourceBounds: Rect): Boolean {
+        val bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: return false
+        return try {
+            val viewport = viewportBounds()
+            val density = instrumentationDensity()
+            val xTolerance = (density * 6f).toInt().coerceAtLeast(4)
+            val minimumRun = (density * 24f).toInt().coerceAtLeast(48)
+            val searchTop = (minOf(viewport.top, sourceBounds.top) - density.toInt() * 8).coerceAtLeast(0)
+            val searchBottom = (maxOf(viewport.bottom, sourceBounds.bottom) + density.toInt() * 8)
+                .coerceAtMost(bitmap.height)
+
+            data class VerticalEdge(val x: Int, val top: Int, val bottom: Int, val run: Int)
+
+            fun edgeNear(targetX: Int): VerticalEdge? {
+                val firstX = (targetX - xTolerance).coerceAtLeast(0)
+                val lastX = (targetX + xTolerance).coerceAtMost(bitmap.width - 1)
+                val edges = (firstX..lastX).mapNotNull { x ->
+                    var bestRun = 0
+                    var bestTop = 0
+                    var currentRun = 0
+                    var currentTop = 0
+                    for (y in searchTop until searchBottom) {
+                        if (isJoinAccent(bitmap.getPixel(x, y))) {
+                            if (currentRun == 0) currentTop = y
+                            currentRun += 1
+                            if (currentRun > bestRun) {
+                                bestRun = currentRun
+                                bestTop = currentTop
+                            }
+                        } else {
+                            currentRun = 0
+                        }
+                    }
+                    if (bestRun >= minimumRun) VerticalEdge(x, bestTop, bestTop + bestRun, bestRun) else null
+                }
+                val sourceCenterX = (sourceBounds.left + sourceBounds.right) / 2
+                return if (targetX < sourceCenterX) {
+                    edges.minByOrNull(VerticalEdge::x)
+                } else {
+                    edges.maxByOrNull(VerticalEdge::x)
+                }
+            }
+
+            val left = edgeNear(sourceBounds.left) ?: return false
+            val right = edgeNear(sourceBounds.right - 1) ?: return false
+            val sourceCenterY = (sourceBounds.top + sourceBounds.bottom) / 2
+            left.x <= sourceBounds.left + 1 && right.x + 1 >= sourceBounds.right - 1 &&
+                left.top <= sourceCenterY && left.bottom > sourceCenterY &&
+                right.top <= sourceCenterY && right.bottom > sourceCenterY
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     fun deletionPreviewOrNull(): UiObject2? = device.findObject(By.descStartsWith("Iaido deletion preview "))
 
@@ -81,21 +158,74 @@ internal class SentenceStripImeDriver(
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         var lastBounds: Rect? = null
         var viewport = Rect()
+        var stableBounds: Rect? = null
         do {
             lastBounds = renderedWordBounds()[index]
             viewport = viewportBounds()
-            if (lastBounds != null && viewport.contains(lastBounds)) return lastBounds
+            if (lastBounds != null && viewport.contains(lastBounds)) {
+                if (stableBounds == lastBounds) return Rect(lastBounds)
+                stableBounds = Rect(lastBounds)
+            } else {
+                stableBounds = null
+            }
             SystemClock.sleep(50L)
         } while (SystemClock.elapsedRealtime() < deadline)
-        error("Sentence word $index did not settle fully inside viewport: word=$lastBounds viewport=$viewport")
+        error(
+            "Sentence word $index did not settle fully inside viewport: " +
+                "word=$lastBounds viewport=$viewport layout=${layoutDescription()}",
+        )
     }
 
     fun visibleAlternativeWordIndices(): List<Int> {
-        val viewport = viewportBounds()
-        return renderedWordBounds().filterValues { bounds ->
-            val visible = Rect(bounds)
-            visible.intersect(viewport)
-        }.keys.filter { index -> alternativesForWord(index).isNotEmpty() }.sorted()
+        val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return emptyList()
+        return try {
+            val viewport = viewportBounds()
+            renderedWordBounds().keys.filter { index ->
+                alternativesForWord(index).any { alternative ->
+                    val bounds = Rect(alternative.visibleBounds)
+                    if (!bounds.intersect(viewport) || !bounds.intersect(0, 0, bitmap.width, bitmap.height)) {
+                        false
+                    } else {
+                        screenshotContainsAlternativeInk(bitmap, bounds)
+                    }
+                }
+            }.sorted()
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    fun waitForVisibleAlternativeWordIndices(
+        minimumCount: Int,
+        timeoutMs: Long = 2_000L,
+    ): List<Int> {
+        require(minimumCount > 0)
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var visible = emptyList<Int>()
+        do {
+            visible = visibleAlternativeWordIndices()
+            if (visible.size >= minimumCount) return visible
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        return visible
+    }
+
+    private fun screenshotContainsAlternativeInk(bitmap: android.graphics.Bitmap, bounds: Rect): Boolean {
+        if (bounds.width() < 5 || bounds.height() < 5) return false
+        val sampleX = bounds.left + 2
+        val sampleY = bounds.top + 2
+        val background = bitmap.getPixel(sampleX, sampleY)
+        var contrastingPixels = 0
+        for (y in (bounds.top + 2) until (bounds.bottom - 2)) {
+            for (x in (bounds.left + 2) until (bounds.right - 2)) {
+                val pixel = bitmap.getPixel(x, y)
+                val difference = kotlin.math.abs(android.graphics.Color.red(pixel) - android.graphics.Color.red(background)) +
+                    kotlin.math.abs(android.graphics.Color.green(pixel) - android.graphics.Color.green(background)) +
+                    kotlin.math.abs(android.graphics.Color.blue(pixel) - android.graphics.Color.blue(background))
+                if (difference >= 48 && ++contrastingPixels >= 12) return true
+            }
+        }
+        return false
     }
 
     fun renderedDeletionBoundsOrNull(): RenderedDeletionBounds? {
@@ -240,10 +370,30 @@ internal class SentenceStripImeDriver(
 
     fun editorSnapshot(): ImeEditorSnapshot = editor.snapshot()
 
+    fun waitForEditorTextChange(
+        previous: String,
+        timeoutMs: Long = ImeSystemController.DEFAULT_TIMEOUT_MS,
+    ): String = editor.waitForTextChange(previous, timeoutMs)
+
     fun tapWord(index: Int) {
-        tapCenter(word(index).visibleBounds)
+        val bounds = waitForWordWithinViewport(index)
+        tapCenter(bounds)
         device.waitForIdle()
-        SystemClock.sleep(120L)
+        val deadline = SystemClock.elapsedRealtime() + ImeSystemController.DEFAULT_TIMEOUT_MS
+        var lastSnapshot: ImeEditorSnapshot? = null
+        var lastCursor: Int? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            lastSnapshot = editorSnapshot()
+            lastCursor = cursorOffset()
+            if (lastSnapshot.selection.first == lastSnapshot.selection.last &&
+                lastCursor == lastSnapshot.selection.last
+            ) return
+            SystemClock.sleep(50L)
+        }
+        error(
+            "Word tap did not settle the host and strip caret together: " +
+                "word=$index bounds=$bounds editor=$lastSnapshot stripCursor=$lastCursor",
+        )
     }
 
     fun tapCharacter(index: Int, renderedText: String, characterIndex: Int) {
@@ -271,9 +421,14 @@ internal class SentenceStripImeDriver(
         pointer.injectTap(x, first.exactCenterY())
     }
 
-    fun swipeAlternative(index: Int, side: Side, whilePreviewing: () -> Unit) {
+    fun swipeAlternative(
+        index: Int,
+        side: Side,
+        expectedAlternativeText: String? = null,
+        whilePreviewing: () -> Unit,
+    ) {
         val start = word(index).visibleBounds
-        val target = alternative(index, side).visibleBounds
+        val target = alternative(index, side, expectedAlternativeText).visibleBounds
         dragAndObserve(
             PointF(start.exactCenterX(), start.exactCenterY()),
             PointF(target.exactCenterX(), target.exactCenterY()),
@@ -453,6 +608,9 @@ internal class SentenceStripImeDriver(
 
     fun nodeOrNull(prefix: String): UiObject2? = device.findObject(By.descStartsWith(prefix))
 
+    fun waitForNodeOrNull(prefix: String, timeoutMs: Long = 1_000L): UiObject2? =
+        device.wait(Until.findObject(By.descStartsWith(prefix)), timeoutMs)
+
     fun requireNode(prefix: String): UiObject2 = requiredNode(prefix)
 
     private fun dragAndObserve(
@@ -545,6 +703,12 @@ internal class SentenceStripImeDriver(
 
     private fun instrumentationDensity(): Float =
         InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+
+    private fun isJoinAccent(pixel: Int): Boolean =
+        android.graphics.Color.alpha(pixel) >= 220 &&
+            kotlin.math.abs(android.graphics.Color.red(pixel) - 139) <= 32 &&
+            kotlin.math.abs(android.graphics.Color.green(pixel) - 203) <= 32 &&
+            kotlin.math.abs(android.graphics.Color.blue(pixel) - 208) <= 32
 
     enum class Side(val label: String) {
         ABOVE("above"),

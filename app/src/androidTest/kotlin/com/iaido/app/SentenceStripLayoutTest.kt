@@ -1,12 +1,14 @@
 package com.iaido.app
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.iaido.core.language.Language
@@ -44,7 +46,7 @@ class SentenceStripLayoutTest {
     }
 
     @Test
-    fun tappingCurrentWordPlacesSelectionAtItsEnd() {
+    fun tappingNearTheEndOfCurrentWordPlacesSelectionAtItsEnd() {
         var selection = -1
         val actions = object : SentenceStripActions {
             override fun setSelection(start: Int, endExclusive: Int): Boolean {
@@ -61,7 +63,11 @@ class SentenceStripLayoutTest {
             MaterialTheme { SentenceStrip(sampleState(), rtl = false, actions = actions) }
         }
 
-        composeRule.onNodeWithText("we").performClick()
+        val wordNode = composeRule.onNodeWithText("we")
+        val wordBounds = wordNode.fetchSemanticsNode().boundsInRoot
+        wordNode.performTouchInput {
+            click(Offset(wordBounds.width * 0.9f, wordBounds.height / 2f))
+        }
         composeRule.runOnIdle { assertEquals(2, selection) }
     }
 

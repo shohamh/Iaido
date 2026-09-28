@@ -148,7 +148,7 @@ class TelemetryConsentE2eTest {
                 var failureShown = false
                 repeat(5) {
                     if (failureShown) return@repeat
-                    awaitToggle(device, diagnosticsLabel)?.let { clickToggleCenter(device, it) }
+                    awaitToggle(device, diagnosticsLabel)?.let { clickToggleCenter(device, diagnosticsLabel) }
                     failureShown = waitUntil(3_000L) {
                         device.hasObject(By.textContains("Could not set up diagnostics telemetry"))
                     }
@@ -245,7 +245,7 @@ class TelemetryConsentE2eTest {
             val toggle = awaitToggle(device, label) ?: return@repeat
             if (toggle.isChecked == expected) return
             if (!toggle.isEnabled) waitUntil(5_000L) { awaitToggle(device, label)?.isEnabled == true }
-            clickToggleCenter(device, awaitToggle(device, label) ?: toggle)
+            clickToggleCenter(device, label)
             assertNoResearchDialog(device)
             // Enabling a plane can involve a provisioning round trip to the collector, so give the
             // expected state a long window before deciding the tap was swallowed - clicking again
@@ -254,9 +254,16 @@ class TelemetryConsentE2eTest {
             if (waitUntil(20_000L) { awaitToggle(device, label)?.isChecked == expected }) return
             waitUntil(15_000L) { awaitToggle(device, label)?.isEnabled == true }
         }
+        val finalToggle = awaitToggle(device, label)
+        if (finalToggle?.isChecked != expected) {
+            ArtifactWriter.captureScreenshot(
+                "telemetry-toggle-failure-expected-$expected",
+                device,
+            )
+        }
         assertTrue(
             "Toggle '$label' never reached checked=$expected (${stateDump(device, label)})",
-            awaitToggle(device, label)?.isChecked == expected,
+            finalToggle?.isChecked == expected,
         )
     }
 
@@ -287,15 +294,26 @@ class TelemetryConsentE2eTest {
     private fun findToggle(device: UiDevice, label: String): UiObject2? {
         val labelNode = device.wait(Until.findObject(By.text(label)), 2_000L) ?: return null
         val labelBounds = labelNode.visibleBounds
+        val viewport = scrollViewport(device) ?: return null
+        val safeTop = viewport.top + (viewport.height() * 0.18f).toInt()
+        val safeBottom = viewport.bottom - (viewport.height() * 0.18f).toInt()
+        if (labelBounds.isEmpty || labelBounds.centerY() !in safeTop..safeBottom) return null
         val labelCenterY = labelNode.visibleCenter.y
         return device.findObjects(By.checkable(true))
-            .filter { it.visibleBounds.top < labelBounds.bottom && it.visibleBounds.bottom > labelBounds.top }
+            .filter {
+                val bounds = it.visibleBounds
+                !bounds.isEmpty &&
+                    bounds.top >= viewport.top &&
+                    bounds.bottom <= viewport.bottom &&
+                    bounds.top < labelBounds.bottom &&
+                    bounds.bottom > labelBounds.top
+            }
             .minByOrNull { abs(it.visibleCenter.y - labelCenterY) }
     }
 
     /** Moves the list by a fraction of its height, to bring a row's toggle out of a clipped edge. */
     private fun nudgeList(device: UiDevice) {
-        val area = runCatching { device.findObject(By.scrollable(true))?.visibleBounds }.getOrNull() ?: return
+        val area = scrollViewport(device) ?: return
         val x = (area.left + area.right) / 2
         val start = area.top + (area.height() * 0.55f).toInt()
         device.swipe(x, start, x, start - (area.height() * 0.12f).toInt(), 20)
@@ -311,14 +329,17 @@ class TelemetryConsentE2eTest {
         return "label=$label/$labelBounds display=${device.displayWidth}x${device.displayHeight} toggles=$toggles"
     }
 
-    /**
-     * Taps the toggle at its own center coordinates. `UiObject2.click()` re-resolves the node and
-     * can land while the scrolling column is still settling, which swallows the tap; tapping the
-     * last observed bounds directly (after `waitForIdle`) is the reliable form for a Compose
-     * switch inside a scrollable column.
-     */
-    private fun clickToggleCenter(device: UiDevice, toggle: UiObject2) {
+    /** Taps fresh toggle bounds only after Compose and scroll motion have settled. */
+    private fun clickToggleCenter(device: UiDevice, label: String) {
+        device.waitForIdle()
+        val toggle = requireNotNull(awaitToggle(device, label)) { "Toggle '$label' disappeared before tap" }
+        check(toggle.isEnabled) { "Toggle '$label' stayed disabled before tap (${stateDump(device, label)})" }
         val bounds = toggle.visibleBounds
+        check(!bounds.isEmpty) { "Toggle '$label' has no visible tap bounds" }
+        val viewport = requireNotNull(scrollViewport(device)) { "Settings scroll viewport disappeared before tap" }
+        check(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom) {
+            "Toggle '$label' is clipped by the Settings scroll viewport: toggle=$bounds viewport=$viewport"
+        }
         device.click(bounds.centerX(), bounds.centerY())
         device.waitForIdle()
     }
@@ -335,23 +356,39 @@ class TelemetryConsentE2eTest {
     }
 
     /**
-     * Scrolls the Settings screen's scrollable container toward [label] with a few small, bounded
-     * swipes, checking for the label after each one, since a target roughly mid-list can be
-     * scrolled past in one large fling before UiAutomator observes it in the accessibility
-     * snapshot. Mirrors [SettingsUpdateE2eTest]'s helper of the same shape.
+     * Positions [label] inside the safe middle of the scroll viewport. The complete Compose
+     * Column remains in the accessibility tree while offscreen, so `hasObject(By.text(label))`
+     * alone cannot be used as evidence that the row is tappable.
      */
     private fun scrollToText(device: UiDevice, label: String) {
-        if (device.hasObject(By.text(label))) return
-        repeat(8) {
-            val scrollable = device.findObject(By.scrollable(true)) ?: return
-            val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
-            val x = (bounds.left + bounds.right) / 2
-            val startY = bounds.top + (bounds.height() * 0.8f).toInt()
-            val endY = bounds.top + (bounds.height() * 0.2f).toInt()
-            device.swipe(x, startY, x, endY, 20)
+        repeat(12) {
+            val viewport = scrollViewport(device) ?: return
+            val safeTop = viewport.top + (viewport.height() * 0.18f).toInt()
+            val safeBottom = viewport.bottom - (viewport.height() * 0.18f).toInt()
+            val labelBounds = device.findObject(By.text(label))?.visibleBounds
+            if (labelBounds != null && !labelBounds.isEmpty && labelBounds.centerY() in safeTop..safeBottom) return
+
+            val x = (viewport.left + viewport.right) / 2
+            val swipeDistance = (viewport.height() * 0.2f).toInt()
+            val targetIsAboveViewport =
+                labelBounds != null && !labelBounds.isEmpty && labelBounds.centerY() < safeTop
+            val startY: Int
+            val endY: Int
+            if (targetIsAboveViewport) {
+                // Move earlier content down into view.
+                startY = viewport.top + (viewport.height() * 0.38f).toInt()
+                endY = startY + swipeDistance
+            } else {
+                // Move later content up into view; an empty bounds result means the row is still below.
+                startY = viewport.bottom - (viewport.height() * 0.38f).toInt()
+                endY = startY - swipeDistance
+            }
+            device.swipe(x, startY, x, endY, 80)
             device.waitForIdle()
             SystemClock.sleep(150L)
-            if (device.hasObject(By.text(label))) return
         }
     }
+
+    private fun scrollViewport(device: UiDevice) =
+        runCatching { device.findObject(By.scrollable(true))?.visibleBounds }.getOrNull()
 }

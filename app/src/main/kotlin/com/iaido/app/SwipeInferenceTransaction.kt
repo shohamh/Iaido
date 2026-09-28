@@ -1,5 +1,6 @@
 package com.iaido.app
 
+import com.iaido.core.dictionary.WordEntry
 import com.iaido.core.recognition.GestureUnit
 import com.iaido.core.recognition.SegmentationOption
 
@@ -98,12 +99,14 @@ class SwipeInferenceTransaction(
 internal fun inferenceWordCandidates(
     words: List<String>,
     alternatives: List<SegmentationOption>,
+    dictionary: List<WordEntry> = emptyList(),
 ): List<List<String>> = words.indices.map { index ->
-    alternatives.asSequence()
+    val inferredCandidates = alternatives.asSequence()
         .filter { it.words.size == words.size }
         .map { it.words[index] }
         .distinct()
         .filterNot { candidate -> words[index].length > 1 && candidate.length == 1 }
         .toList()
         .ifEmpty { listOf(words[index]) }
+    (inferredCandidates + typedWordCandidates(words[index], dictionary)).distinct()
 }

@@ -35,16 +35,23 @@ class ImeSystemController(
         setAutoSpaceFixture(autoSpaceFixture)
         repeat(HOST_LAUNCH_ATTEMPTS) { attempt ->
             shell("am start -n $component -f 0x14000000$fixtureArgument")
+            val editorVisibleAfterImeCheck = tryExposeHostEditorForAccessibility(selectedInputMethodId())
+            if (editorVisibleAfterImeCheck != null) {
+                logPerf(
+                    "host_launch",
+                    startedAtMs,
+                    "fixture=${autoSpaceFixture ?: "none"} attempt=${attempt + 1} " +
+                        "keyboardHidden=$editorVisibleAfterImeCheck",
+                )
+                return
+            }
             if (device.wait(Until.hasObject(By.res("$packageName:id/ime_test_editor")), DEFAULT_TIMEOUT_MS)) {
                 logPerf(
                     "host_launch",
                     startedAtMs,
-                    "fixture=${autoSpaceFixture ?: "none"} attempt=${attempt + 1}",
+                    "fixture=${autoSpaceFixture ?: "none"} attempt=${attempt + 1} keyboardHidden=false",
                 )
                 return
-            }
-            if (attempt + 1 < HOST_LAUNCH_ATTEMPTS) {
-                shell("am force-stop $packageName")
             }
         }
         error("IME test host did not launch after $HOST_LAUNCH_ATTEMPTS attempts; focused=${device.currentPackageName}")
@@ -61,10 +68,14 @@ class ImeSystemController(
     }
 
     fun ensureHostVisible(autoSpaceFixture: String? = null) {
-        val editorSelector = By.res("$packageName:id/ime_test_editor")
         val startedAtMs = SystemClock.elapsedRealtime()
-        if (device.wait(Until.hasObject(editorSelector), HOST_REUSE_GRACE_MS)) {
-            logPerf("host_reuse", startedAtMs, "fixture=${autoSpaceFixture ?: "none"}")
+        val editorVisibleAfterImeCheck = tryExposeHostEditorForAccessibility(selectedInputMethodId())
+        if (editorVisibleAfterImeCheck != null) {
+            logPerf(
+                "host_reuse",
+                startedAtMs,
+                "fixture=${autoSpaceFixture ?: "none"} keyboardHidden=$editorVisibleAfterImeCheck",
+            )
             return
         }
         launchHost(autoSpaceFixture)
@@ -73,6 +84,8 @@ class ImeSystemController(
     fun resetEditor(editor: ImeEditorDriver) {
         val startedAtMs = SystemClock.elapsedRealtime()
         val requestId = ++nextEditorResetRequestId
+        val imeId = selectedInputMethodId()
+        val keyboardHiddenForReset = exposeHostEditorForAccessibility(imeId)
         instrumentation.targetContext.sendBroadcast(
             Intent(ImeHostResetProtocol.ACTION_RESET_EDITOR)
                 .setPackage(packageName)
@@ -89,7 +102,8 @@ class ImeSystemController(
                 )
             ) {
                     logPerf("editor_reset", startedAtMs, "fast=true")
-                    return
+                restoreKeyboardAfterReset(keyboardHiddenForReset, imeId, editor)
+                return
             }
             SystemClock.sleep(25L)
         }
@@ -98,6 +112,44 @@ class ImeSystemController(
             "Atomic editor reset was not acknowledged and fallback clear did not settle"
         }
         logPerf("editor_reset", startedAtMs, "fast=false fallback=true")
+        restoreKeyboardAfterReset(keyboardHiddenForReset, imeId, editor)
+    }
+
+    /**
+     * UiAutomator can expose only the IME window while the keyboard is shown, hiding the host
+     * EditText needed by the slow reset fallback. Hide the visible IME only in that case and
+     * restore it after the host editor has been cleared and verified.
+     */
+    private fun exposeHostEditorForAccessibility(imeId: String): Boolean {
+        return tryExposeHostEditorForAccessibility(imeId)
+            ?: error("Host editor is not accessible and selected IME '$imeId' is not visible")
+    }
+
+    /**
+     * Returns whether the host editor is accessible, hiding the selected IME when it is the
+     * reason UiAutomator cannot see the editor. `null` means there is no visible editor or known
+     * IME marker yet, so launch/reuse callers may continue waiting without killing the runner.
+     */
+    private fun tryExposeHostEditorForAccessibility(imeId: String): Boolean? {
+        val editorSelector = By.res("$packageName:id/ime_test_editor")
+        if (device.wait(Until.hasObject(editorSelector), HOST_EDITOR_ACCESSIBILITY_GRACE_MS)) return false
+        val imeVisible = device.wait(Until.hasObject(markerFor(imeId)), HOST_EDITOR_ACCESSIBILITY_GRACE_MS) ||
+            shell("dumpsys input_method").contains("mInputShown=true")
+        if (!imeVisible) return null
+        device.pressBack()
+        if (!device.wait(Until.hasObject(editorSelector), DEFAULT_TIMEOUT_MS)) return null
+        device.waitForIdle()
+        return true
+    }
+
+    private fun restoreKeyboardAfterReset(
+        hiddenForAccessibility: Boolean,
+        imeId: String,
+        editor: ImeEditorDriver,
+    ) {
+        if (!hiddenForAccessibility) return
+        editor.focus()
+        waitForImeVisible(imeId)
     }
 
     fun hostGenerationOrNull(): Long? {
@@ -190,6 +242,27 @@ class ImeSystemController(
         ?.trim()
         .orEmpty()
 
+    fun referenceKeyboardCommitRevision(): Long = referenceKeyboardTestState()
+        .getLong(ReferenceKeyboardTestState.COMMIT_REVISION, 0L)
+
+    fun waitForReferenceKeyboardCommitAfter(previousRevision: Long) {
+        val state = referenceKeyboardTestState()
+        val deadline = SystemClock.elapsedRealtime() + DEFAULT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val revision = state.getLong(ReferenceKeyboardTestState.COMMIT_REVISION, 0L)
+            if (revision > previousRevision) {
+                check(state.getBoolean(ReferenceKeyboardTestState.COMMIT_SUCCEEDED, false)) {
+                    "Reference keyboard did not commit text at revision $revision; " +
+                        "editor text before cursor='${state.getString(ReferenceKeyboardTestState.EDITOR_TEXT_BEFORE_CURSOR, "")}'"
+                }
+                logPerf("reference_commit", deadline - DEFAULT_TIMEOUT_MS, "revision=$revision")
+                return
+            }
+            SystemClock.sleep(25L)
+        }
+        error("Reference keyboard did not acknowledge commit after revision $previousRevision")
+    }
+
     fun hideKeyboard() {
         device.pressBack()
     }
@@ -205,6 +278,11 @@ class ImeSystemController(
     } else {
         By.desc(KeyboardWindowLocator.ROOT_DESCRIPTION)
     }
+
+    private fun referenceKeyboardTestState() = instrumentation.targetContext.getSharedPreferences(
+        ReferenceKeyboardTestState.PREFERENCES_NAME,
+        Context.MODE_PRIVATE,
+    )
 
     private fun shell(command: String): String {
         val descriptor = automation.executeShellCommand(command)
@@ -222,6 +300,7 @@ class ImeSystemController(
         private const val HOST_LAUNCH_ATTEMPTS = 2
         private const val HOST_REUSE_GRACE_MS = 300L
         private const val EDITOR_RESET_TIMEOUT_MS = 750L
+        private const val HOST_EDITOR_ACCESSIBILITY_GRACE_MS = 500L
         private val HOST_GENERATION_REGEX = Regex("generation=(\\d+)")
     }
 }

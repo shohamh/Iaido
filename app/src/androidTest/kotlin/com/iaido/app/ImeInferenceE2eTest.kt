@@ -27,10 +27,16 @@ class ImeInferenceE2eTest {
             swipeWordExpecting("in", "X in")
             swipeWordExpecting("to", "X in to")
             val strip = SentenceStripImeDriver()
+            val sourceBounds = android.graphics.Rect(strip.word(1).visibleBounds).apply {
+                union(strip.word(2).visibleBounds)
+            }
             val joinSide = strip.sideForAlternative(1, "into")
                 ?: error("Expected an inline join option on the inferred 'in' word")
             strip.swipeAlternativeThenCancel(1, joinSide) {
-                check(strip.joinPreviewOrNull() != null) { "Inferred join preview did not span its source words" }
+                strip.captureScreenshot("inferred-join-preview-held")
+                check(strip.screenshotShowsJoinOutlineAcross(sourceBounds)) {
+                    "Inferred join outline did not span its source words $sourceBounds"
+                }
                 check(strip.editorSnapshot().text.trim() == "X in to") {
                     "Join preview mutated editor text before release"
                 }

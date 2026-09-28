@@ -69,7 +69,7 @@ class ImeReelE2eTest {
             check(corrected != before) { "Releasing on an alternative did not commit the correction" }
             assertText(corrected)
 
-            strip.swipeAlternative(0, side) {
+            strip.swipeAlternative(0, side, expectedAlternativeText = before) {
                 check(strip.editorSnapshot().text == corrected) {
                     "The reverse preview mutated editor text before release"
                 }
@@ -129,13 +129,20 @@ class ImeReelE2eTest {
                 val strip = SentenceStripImeDriver()
                 val side = strip.sideForAlternative(0, "inside")
                     ?: error("Expected the normal 'inside' autocorrect for 'in'")
-                strip.swipeAlternative(0, side) {
+                val beforeCorrection = strip.editorSnapshot().text
+                strip.swipeAlternative(0, side, expectedAlternativeText = "inside") {
                     check(strip.joinPreviewOrNull() == null) {
                         "A normal one-word autocorrect was incorrectly shown as a join"
                     }
+                    check(strip.previewTextOrNull()?.trim().equals("inside to", ignoreCase = true)) {
+                        "Expected a whole-sentence 'Inside to' preview, got ${strip.previewTextOrNull()}"
+                    }
+                    check(strip.editorSnapshot().text == beforeCorrection) {
+                        "The correction preview changed editor text before release"
+                    }
                 }
 
-                val committed = strip.editorSnapshot().text.trim()
+                val committed = strip.waitForEditorTextChange(beforeCorrection).trim()
                 check(committed.equals("Inside to", ignoreCase = true)) {
                     "Correcting 'in' to 'inside' must preserve the following 'to', got '$committed'"
                 }
@@ -407,20 +414,28 @@ class ImeReelE2eTest {
                     "found ${candidateWordIndexes.size}/20 at indexes $candidateWordIndexes"
             }
             strip.waitForWordWithinViewport(19, timeoutMs = 5_000L)
-            val visibleCandidateIndexes = strip.visibleAlternativeWordIndices()
+            val visibleCandidateIndexes = strip.waitForVisibleAlternativeWordIndices(minimumCount = 2)
+            strip.captureScreenshot("long-sentence-alternatives-visible")
             check(visibleCandidateIndexes.size >= 2) {
-                "Expected multiple alternatives to be visible beside the final words; " +
-                    "found them only for $visibleCandidateIndexes"
+                val visibleWords = strip.renderedWordBounds().keys.filter { index ->
+                    Rect(strip.renderedWordBounds().getValue(index)).intersect(strip.viewportBounds())
+                }
+                val modelAlternatives = visibleWords.associateWith { index ->
+                    strip.alternativesForWord(index).map { "${it.contentDescription}@${it.visibleBounds}" }
+                }
+                "Expected painted alternatives beside the final words; " +
+                    "found them only for $visibleCandidateIndexes, model alternatives=$modelAlternatives"
             }
-            captureScreenshot("long-sentence-before-cursor-scroll")
             assertVisibleWordLanesFit(strip)
-            val startingWordIndex = 16
-            val startingWordOffset = text.indexOf("seventeen")
+            // Focusing the final word keeps the trailing lanes in view; start the held scrub at
+            // the first fully visible lane in that viewport.
+            val startingWordIndex = 17
+            val startingWordOffset = text.indexOf("eighteen")
             strip.waitForWordWithinViewport(startingWordIndex, timeoutMs = 5_000L)
             strip.tapWord(startingWordIndex)
             val beforeOffset = strip.editorSnapshot().selection.last
-            check(beforeOffset in startingWordOffset..(startingWordOffset + "seventeen".length)) {
-                "The visible word tap missed 'seventeen': selection=$beforeOffset bounds=" +
+            check(beforeOffset in startingWordOffset..(startingWordOffset + "eighteen".length)) {
+                "The visible word tap missed 'eighteen': selection=$beforeOffset bounds=" +
                     strip.renderedWordBounds()[startingWordIndex]
             }
             captureScreenshot("long-sentence-after-tap-visible-word")
@@ -552,12 +567,14 @@ class ImeReelE2eTest {
 
             val beforeHeldUndo = strip.editorSnapshot().text
             strip.holdUndo {
-                check(strip.nodeOrNull("Iaido history preview") != null) {
+                val preview = strip.waitForNodeOrNull("Iaido history preview")
+                check(preview != null) {
                     "Holding undo did not show its action and before/after preview"
                 }
                 check(strip.editorSnapshot().text == beforeHeldUndo) {
                     "The long-press preview applied before release"
                 }
+                strip.captureScreenshot("undo-preview-held")
             }
             val afterHeldUndo = strip.editorSnapshot().text
             check(afterHeldUndo != beforeHeldUndo) { "Releasing the held undo did not apply it" }
@@ -588,13 +605,9 @@ class ImeReelE2eTest {
                     check(strip.editorSnapshot().text == before) {
                         "Join preview changed editor text before release"
                     }
-                    val join = strip.joinPreviewOrNull()
-                        ?: error("Join preview did not expose its two-word union")
-                    check(join.visibleBounds.contains(sourceBounds)) {
-                        "Join outline " + join.visibleBounds + " did not cover both source words " + sourceBounds
-                    }
-                    check(strip.previewTextOrNull().orEmpty().contains("into", ignoreCase = true)) {
-                        "Whole-sentence preview did not show the joined word"
+                    strip.captureScreenshot("join-preview-source-word-$sourceWordIndex")
+                    check(strip.screenshotShowsJoinOutlineAcross(sourceBounds)) {
+                        "Join outline did not cover both source words $sourceBounds"
                     }
                 }
 
@@ -619,15 +632,11 @@ class ImeReelE2eTest {
     private fun ImeScenario.typeHebrewTextThroughKeyboard(value: String, stableWindow: KeyboardWindow) {
         val instrumentation = androidx.test.InstrumentationRegistry.getInstrumentation()
         val pointer = PointerInjector(instrumentation.uiAutomation)
-        val keySizePx = stableWindow.surfaceBounds.width() / KEYBOARD_LETTER_ROW_COLUMN_COUNT.toFloat()
-        val showNumberRow = stableWindow.surfaceBounds.height() / keySizePx > 4.5f
-        val layout = keyboardLayoutFor(keySizePx, com.iaido.core.language.Language.HEBREW, showNumberRow)
         value.forEach { character ->
             val (x, y) = if (character == ' ') {
                 stableWindow.keyCenter("space").let { it.x.toFloat() to it.y.toFloat() }
             } else {
-                val key = layout.centerOf(character)
-                (stableWindow.surfaceBounds.left + key.x) to (stableWindow.surfaceBounds.top + key.y)
+                stableWindow.keyCenter(character.toString()).let { it.x.toFloat() to it.y.toFloat() }
             }
             pointer.injectTap(x, y)
             SystemClock.sleep(60L)

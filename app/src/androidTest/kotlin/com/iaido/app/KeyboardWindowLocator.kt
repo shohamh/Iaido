@@ -2,13 +2,15 @@ package com.iaido.app
 
 import android.graphics.Point
 import android.graphics.Rect
-import androidx.test.uiautomator.By
+import android.util.Xml
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import android.os.SystemClock
 import android.util.Log
+import com.iaido.core.gesture.GesturePath
+import com.iaido.core.gesture.GesturePoint
 import com.iaido.core.language.Language
 import java.io.ByteArrayOutputStream
+import java.io.StringReader
 import java.nio.charset.StandardCharsets
 
 data class KeyboardWindow(
@@ -20,6 +22,20 @@ data class KeyboardWindow(
     fun keyCenter(key: String): Point = keyBounds[key]
         ?.let(::centerOf)
         ?: error("No marked key '$key'; available keys=${keyBounds.keys}")
+
+    fun pathThroughVisibleKeys(word: String, startMs: Long = 0L, stepMs: Long = 10L): GesturePath {
+        require(word.isNotEmpty()) { "Swipe word cannot be empty" }
+        require(word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
+        require(stepMs > 0L) { "stepMs must be positive" }
+        return GesturePath(word.mapIndexed { index, letter ->
+            val center = keyCenter(letter.toString().lowercase())
+            GesturePoint(
+                x = (center.x - surfaceBounds.left).toFloat(),
+                y = (center.y - surfaceBounds.top).toFloat(),
+                timestampMs = startMs + index * stepMs,
+            )
+        })
+    }
 }
 
 object KeyboardWindowLocator {
@@ -32,67 +48,56 @@ object KeyboardWindowLocator {
     // opened from the Settings activity now, so it is no longer a required IME
     // key and older emulator tests must not block on it.
     private val requiredKeys = listOf("globe", "space", "backspace", "enter")
+    private val boundsPattern = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
 
-    fun locate(device: UiDevice, timeoutMs: Long = 5_000L): KeyboardWindow {
+    fun locate(
+        device: UiDevice,
+        timeoutMs: Long = 5_000L,
+        expectedLanguage: Language? = null,
+    ): KeyboardWindow {
         val startedAtMs = SystemClock.elapsedRealtime()
-        if (!device.wait(Until.hasObject(By.desc(ROOT_DESCRIPTION)), timeoutMs)) {
-            throw missingMarker("root '$ROOT_DESCRIPTION'", device)
-        }
-
-        val root = device.wait(Until.findObject(By.desc(ROOT_DESCRIPTION)), timeoutMs)
-            ?: throw missingMarker("root '$ROOT_DESCRIPTION'", device)
-        val surface = device.wait(Until.findObject(By.desc(SURFACE_DESCRIPTION)), timeoutMs)
-            ?: throw missingMarker("surface '$SURFACE_DESCRIPTION'", device)
-        val language = waitForLanguage(device, timeoutMs)
-        val keyObjects = requiredKeys.associateWith { key ->
-            device.wait(Until.findObject(By.desc(KEY_DESCRIPTION_PREFIX + key)), timeoutMs)
-                ?: throw missingMarker("key '$key'", device)
-        }
-        val displayBounds = Rect(0, 0, device.displayWidth, device.displayHeight)
-        val rootBounds = root.visibleBounds
-        val surfaceBounds = surface.visibleBounds
-        val keyBounds = keyObjects.mapValues { it.value.visibleBounds }
-
-        validateBounds("root", rootBounds, displayBounds)
-        validateBounds("surface", surfaceBounds, rootBounds)
-        keyBounds.forEach { (key, bounds) -> validateBounds("key '$key'", bounds, surfaceBounds) }
-
-        val window = KeyboardWindow(
-            rootBounds = rootBounds,
-            surfaceBounds = surfaceBounds,
-            language = language,
-            keyBounds = keyBounds,
+        val deadline = startedAtMs + timeoutMs
+        var latestHierarchy = ""
+        var locatedWindow: KeyboardWindow? = null
+        var lastInvalidSnapshot: IllegalArgumentException? = null
+        do {
+            latestHierarchy = dumpHierarchy(device)
+            val window = parseKeyboardWindowHierarchySnapshot(latestHierarchy, expectedLanguage)
+            if (window != null) {
+                try {
+                    validateSnapshot(window, Rect(0, 0, device.displayWidth, device.displayHeight))
+                    locatedWindow = window
+                    break
+                } catch (failure: IllegalArgumentException) {
+                    // IME window bounds can move between hierarchy snapshots while the keyboard
+                    // is being shown or resized. Retry a self-inconsistent snapshot instead of
+                    // accepting it or failing before the existing locate timeout expires.
+                    lastInvalidSnapshot = failure
+                }
+            }
+            SystemClock.sleep(50L)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        val result = locatedWindow ?: throw IllegalStateException(
+            lastInvalidSnapshot?.let { failure ->
+                "Keyboard geometry did not settle within ${timeoutMs}ms: ${failure.message}; " +
+                    "latest hierarchy=$latestHierarchy"
+            } ?: missingMarkerMessage("complete keyboard hierarchy snapshot", latestHierarchy),
+            lastInvalidSnapshot,
         )
         Log.i(
             "E2E-PERF",
             "phase=keyboard_locator durationMs=${SystemClock.elapsedRealtime() - startedAtMs} " +
-                "language=${language.name}",
+                "language=${result.language.name}",
         )
-        return window
+        return result
     }
 
-    private fun waitForLanguage(device: UiDevice, timeoutMs: Long): Language {
-        val englishDescription = LANGUAGE_DESCRIPTION_PREFIX + Language.ENGLISH.name
-        val hebrewDescription = LANGUAGE_DESCRIPTION_PREFIX + Language.HEBREW.name
-        val englishText = Language.ENGLISH.name
-        val hebrewText = Language.HEBREW.name
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        do {
-            val currentLanguage = device.findObjects(By.descStartsWith(LANGUAGE_DESCRIPTION_PREFIX))
-                .mapNotNull { runCatching { it.contentDescription?.toString() }.getOrNull() }
-                .lastOrNull { it == englishDescription || it == hebrewDescription }
-                ?: when {
-                    device.findObject(By.text(englishText)) != null -> englishDescription
-                    device.findObject(By.text(hebrewText)) != null -> hebrewDescription
-                    else -> null
-                }
-            when (currentLanguage) {
-                englishDescription -> return Language.ENGLISH
-                hebrewDescription -> return Language.HEBREW
-            }
-            SystemClock.sleep(50L)
-        } while (SystemClock.elapsedRealtime() < deadline)
-        throw missingMarker("language marker", device)
+    internal fun validateSnapshot(window: KeyboardWindow, displayBounds: Rect) {
+        validateBounds("root", window.rootBounds, displayBounds)
+        validateBounds("surface", window.surfaceBounds, window.rootBounds)
+        window.keyBounds.forEach { (key, bounds) ->
+            validateBounds("key '$key'", bounds, window.surfaceBounds)
+        }
     }
 
     private fun validateBounds(name: String, bounds: Rect, container: Rect) {
@@ -102,12 +107,133 @@ object KeyboardWindowLocator {
         }
     }
 
-    private fun missingMarker(name: String, device: UiDevice): IllegalStateException =
-        IllegalStateException(missingMarkerMessage(name, dumpHierarchy(device)))
-
     private fun dumpHierarchy(device: UiDevice): String = ByteArrayOutputStream().let { output ->
         device.dumpWindowHierarchy(output)
         output.toString(StandardCharsets.UTF_8.name())
+    }
+
+    private fun parseBounds(value: String?): Rect? {
+        val match = value?.let(boundsPattern::matchEntire) ?: return null
+        return Rect(
+            match.groupValues[1].toInt(),
+            match.groupValues[2].toInt(),
+            match.groupValues[3].toInt(),
+            match.groupValues[4].toInt(),
+        )
+    }
+
+    /**
+     * Compose occasionally reports a keyboard key's cached semantics bounds one row above its
+     * rendered label while the IME window is being resized. Use the label's live bounds to
+     * correct that key's vertical center; icon-only keys keep their own bounds.
+     */
+    private fun alignKeyWithLabel(keyBounds: Rect, labelBounds: Rect?): Rect {
+        if (labelBounds == null || labelBounds.centerY() in keyBounds.top until keyBounds.bottom) {
+            return keyBounds
+        }
+        val top = labelBounds.centerY() - keyBounds.height() / 2
+        return Rect(keyBounds.left, top, keyBounds.right, top + keyBounds.height())
+    }
+
+    /**
+     * The parent surface can carry the same stale vertical offset as its first key row. Its
+     * height and horizontal bounds remain current, so anchor its bottom to the rendered bottom
+     * row before validating the snapshot.
+     */
+    private fun alignSurfaceWithKeys(surfaceBounds: Rect, keyBounds: Map<String, Rect>): Rect {
+        val renderedBottom = keyBounds.values.maxOfOrNull(Rect::bottom) ?: return surfaceBounds
+        val bottom = maxOf(surfaceBounds.bottom, renderedBottom)
+        if (bottom == surfaceBounds.bottom) return surfaceBounds
+        return Rect(
+            surfaceBounds.left,
+            bottom - surfaceBounds.height(),
+            surfaceBounds.right,
+            bottom,
+        )
+    }
+
+    internal fun parseKeyboardWindowHierarchySnapshot(
+        hierarchy: String,
+        expectedLanguage: Language? = null,
+    ): KeyboardWindow? {
+        val parser = Xml.newPullParser()
+        parser.setInput(StringReader(hierarchy))
+
+        var rootDepth = -1
+        var rootBounds: Rect? = null
+        var surfaceBounds: Rect? = null
+        var language: Language? = null
+        val keyBounds = mutableMapOf<String, Rect>()
+        var activeKey: String? = null
+        var activeKeyDepth = -1
+        var activeKeyBounds: Rect? = null
+        var activeKeyLabelBounds: Rect? = null
+
+        while (parser.next() != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+            when (parser.eventType) {
+                org.xmlpull.v1.XmlPullParser.START_TAG -> {
+                    if (parser.name != "node") continue
+                    val description = parser.getAttributeValue(null, "content-desc").orEmpty()
+                    if (rootDepth < 0 && description == ROOT_DESCRIPTION) {
+                        rootDepth = parser.depth
+                        rootBounds = parseBounds(parser.getAttributeValue(null, "bounds"))
+                        surfaceBounds = null
+                        language = null
+                        keyBounds.clear()
+                    } else if (rootDepth >= 0 && parser.depth > rootDepth) {
+                        when {
+                            description == SURFACE_DESCRIPTION -> {
+                                surfaceBounds = parseBounds(parser.getAttributeValue(null, "bounds"))
+                            }
+                            description.startsWith(LANGUAGE_DESCRIPTION_PREFIX) -> {
+                                language = description.removePrefix(LANGUAGE_DESCRIPTION_PREFIX)
+                                    .let { name -> runCatching { Language.valueOf(name) }.getOrNull() }
+                            }
+                            description.startsWith(KEY_DESCRIPTION_PREFIX) && activeKey == null -> {
+                                activeKey = description.removePrefix(KEY_DESCRIPTION_PREFIX)
+                                activeKeyDepth = parser.depth
+                                activeKeyBounds = parseBounds(parser.getAttributeValue(null, "bounds"))
+                            }
+                            activeKey != null && parser.depth > activeKeyDepth &&
+                                activeKeyLabelBounds == null &&
+                                parser.getAttributeValue(null, "class") == "android.widget.TextView" -> {
+                                activeKeyLabelBounds = parseBounds(parser.getAttributeValue(null, "bounds"))
+                            }
+                        }
+                    }
+                }
+                org.xmlpull.v1.XmlPullParser.END_TAG -> {
+                    if (parser.name == "node" && activeKey != null && parser.depth == activeKeyDepth) {
+                        activeKeyBounds?.let { bounds ->
+                            keyBounds[activeKey!!] = alignKeyWithLabel(bounds, activeKeyLabelBounds)
+                        }
+                        activeKey = null
+                        activeKeyDepth = -1
+                        activeKeyBounds = null
+                        activeKeyLabelBounds = null
+                    }
+                    if (parser.name == "node" && rootDepth == parser.depth) {
+                        val resolvedLanguage = expectedLanguage ?: language
+                        if (rootBounds != null && surfaceBounds != null && resolvedLanguage != null &&
+                            requiredKeys.all(keyBounds::containsKey)
+                        ) {
+                            return KeyboardWindow(
+                                rootBounds,
+                                alignSurfaceWithKeys(surfaceBounds, keyBounds),
+                                resolvedLanguage,
+                                keyBounds.toMap(),
+                            )
+                        }
+                        rootDepth = -1
+                        rootBounds = null
+                        surfaceBounds = null
+                        language = null
+                        keyBounds.clear()
+                    }
+                }
+            }
+        }
+        return null
     }
 }
 

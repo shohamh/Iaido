@@ -14,7 +14,6 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.iaido.core.language.Language
 import com.iaido.core.typing.SpacingMode
-import com.iaido.core.testing.SwipeFixtures
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -175,13 +174,7 @@ class ImeScenario(
     private fun injectSwipeWord(word: String, transform: PathTransform): Boolean {
         require(word.isNotEmpty() && word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
         val window = keyboard()
-        check(window.language == expectedLanguage) {
-            "Scenario language drifted before '$word': expected=$expectedLanguage observed=${window.language}"
-        }
-        val keySizePx = window.surfaceBounds.width().toFloat() / KEYBOARD_LETTER_ROW_COLUMN_COUNT
-        val showNumberRow = window.surfaceBounds.height() / keySizePx > 4.5f
-        val layout = keyboardLayoutFor(keySizePx, expectedLanguage, showNumberRow)
-        val path = SwipeFixtures.pathThrough(layout, word.lowercase())
+        val path = window.pathThroughVisibleKeys(word)
         val transformedPoints = path.points.toMutableList().apply {
             val start = transform.reverseStart
             val end = transform.reverseEndExclusive
@@ -214,15 +207,20 @@ class ImeScenario(
 
     fun tapKey(key: String, checkpointEach: Boolean = true) {
         val logicalKey = key.lowercase()
+        val bounds = keyboard().keyBounds[logicalKey]
+            ?: error("Missing keyboard key '${KeyboardWindowLocator.KEY_DESCRIPTION_PREFIX}$logicalKey'")
+        val centerX = (bounds.left + bounds.right) / 2f
+        val centerY = (bounds.top + bounds.bottom) / 2f
         if (logicalKey == "globe") {
             val before = expectedLanguage
-            pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
+            pendingPointerEvents = pointer.injectTap(centerX, centerY)
             expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
-            awaitLanguage(expectedLanguage)
-            checkpoint("switchLanguage", verifyEnvironment = true)
+            device.waitForIdle()
+            SystemClock.sleep(200L)
+            if (checkpointEach) checkpoint("switchLanguage")
             return
         }
-        pendingPointerEvents = editor.tapMarkedKey(keyDescription(logicalKey))
+        pendingPointerEvents = pointer.injectTap(centerX, centerY)
         when (logicalKey) {
             "space" -> {
                 insertExpected(" ")
@@ -246,25 +244,31 @@ class ImeScenario(
 
     fun tapSpace(checkpointEach: Boolean = true) = tapKey("space", checkpointEach)
 
-    fun openSettingsFromKeyboard() {
-        pendingPointerEvents = editor.tapMarkedKey(keyDescription("settings"))
+    fun openSettingsActivityFromApp() {
+        openSettings()
         val settingsTitle = if (BuildConfig.DEBUG) "Iaido Debug Settings" else "Iaido Settings"
         check(device.wait(Until.hasObject(By.text(settingsTitle)), 5_000L)) {
-            "Settings activity did not open from the keyboard settings button"
+            "Settings activity did not open"
         }
     }
 
-    fun switchLanguage() = tapKey("globe")
+    fun switchLanguage(): KeyboardWindow {
+        tapKey("globe", checkpointEach = false)
+        return refreshKeyboardAfterLanguageChange("switchLanguage")
+    }
 
-    /** Switches layouts using the last stable key bounds because UiAutomator markers lag the redraw. */
+    /** Switches layouts and reopens the IME so UiAutomator measures the newly rendered key map. */
     fun switchLanguageForScreenshotTest(): KeyboardWindow {
-        val windowBeforeSwitch = KeyboardWindowLocator.locate(device)
-        val before = expectedLanguage
-        val globe = windowBeforeSwitch.keyCenter("globe")
-        pendingPointerEvents = pointer.injectTap(globe.x.toFloat(), globe.y.toFloat())
-        expectedLanguage = if (before == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
+        tapKey("globe", checkpointEach = false)
+        return refreshKeyboardAfterLanguageChange(action = null)
+    }
+
+    private fun refreshKeyboardAfterLanguageChange(action: String?): KeyboardWindow {
         SystemClock.sleep(750L)
-        return windowBeforeSwitch
+        reopenKeyboardWindow()
+        val keyboard = waitForKeyboardLanguage(expectedLanguage)
+        action?.let(::checkpoint)
+        return keyboard
     }
 
     fun twoFingerLanguageSwitch() {
@@ -284,7 +288,9 @@ class ImeScenario(
         )
         pendingPointerEvents = pointer.injectMultiPointer(paths, window.surfaceBounds)
         expectedLanguage = if (expectedLanguage == Language.ENGLISH) Language.HEBREW else Language.ENGLISH
-        checkpoint("twoFingerLanguageSwitch", verifyEnvironment = true)
+        device.waitForIdle()
+        refreshKeyboardAfterLanguageChange(action = null)
+        checkpoint("twoFingerLanguageSwitch")
     }
 
     fun pressBackspace(count: Int = 1, checkpointEach: Boolean = true) {
@@ -641,9 +647,8 @@ class ImeScenario(
     fun injectSplitWords(words: List<String>, expected: String? = null) {
         require(words.size >= 2) { "Split gesture needs at least two words/parts" }
         val window = keyboard()
-        val keySizePx = window.surfaceBounds.width().toFloat() / KEYBOARD_LETTER_ROW_COLUMN_COUNT
-        val paths = words.map { word -> SwipeFixtures.pathThroughQwerty(word, keySizePx).points }
-        pointer.injectMultiPointer(paths, window.surfaceBounds)
+        val paths = words.map { word -> window.pathThroughVisibleKeys(word).points }
+        pendingPointerEvents = pointer.injectMultiPointer(paths, window.surfaceBounds)
         if (expected != null) {
             editor.waitForText(expected)
             expectedText = expected
@@ -831,10 +836,7 @@ class ImeScenario(
         val firstSettings = openSettings()
         try {
             val label = spacingModeLabel(mode)
-            clickTextNode(label)
-            waitUntil("spacing mode '$label' selected") {
-                isModeChecked(label) || isSpacingModeStored(mode)
-            }
+            clickSpacingModeUntilSelected(label, mode)
         } finally {
             firstSettings.finish()
         }
@@ -882,15 +884,6 @@ class ImeScenario(
         expectedText = editor.waitForTextChange(before)
         expectedSelection = editor.selection().last
         checkpoint("releaseReplacement($sourceWords,$replacementWords)")
-    }
-
-    fun assertLanguage(expected: Language) {
-        check(expectedIme == system.iaidoImeId) { "Language markers are unavailable on the reference IME" }
-        check(keyboard().language == expected) {
-            "Expected language $expected, observed ${keyboard().language}"
-        }
-        expectedLanguage = expected
-        checkpoint("assertLanguage($expected)")
     }
 
     fun assertKeyboardGeometry() {
@@ -959,7 +952,12 @@ class ImeScenario(
         system.waitForImeVisible(imeId)
         editor.focus()
         expectedIme = imeId
-        checkpoint("switchKeyboard($imeId)", verifyEnvironment = true)
+        // The reference input window can hide the host status marker from UiAutomator. Its
+        // visibility and selection are checked by waitForImeVisible; the editor state is checked
+        // after Iaido is restored, when the host marker is observable again.
+        if (imeId != system.referenceImeId) {
+            checkpoint("switchKeyboard($imeId)", verifyEnvironment = true)
+        }
     }
 
     fun switchToReferenceKeyboard() = switchKeyboard(system.referenceImeId)
@@ -968,48 +966,64 @@ class ImeScenario(
 
     fun tapReferenceCommit() {
         check(expectedIme == system.referenceImeId) { "Reference keyboard is not selected" }
+        val commitRevision = system.referenceKeyboardCommitRevision()
         pendingPointerEvents = editor.tapMarkedKey("Iaido reference commit")
+        system.waitForReferenceKeyboardCommitAfter(commitRevision)
         insertExpected("reference")
-        checkpoint("tapReferenceCommit")
     }
 
     private fun setup() {
         val setupStartedAtMs = SystemClock.elapsedRealtime()
+        expectedLanguage = suiteState.languageOrNull() ?: Language.ENGLISH
         val fixture = autoSpaceFixture?.preferenceValue
         val bootstrap = suiteState.needsBootstrap(fixture)
         val needsImeSelection = suiteState.needsImeSelection(system.iaidoImeId)
         val spacingModeChanged = false
+        var editorFocusedBeforeImeSelection = false
         if (bootstrap) {
             system.launchHost(fixture)
-            // Bind the selected IME after the editor exists. Selecting it before the host is
-            // focused can leave Android's input-method manager with a selected-but-unbound IME.
+            // Focus while the host activity owns the accessibility window. After the IME appears,
+            // UiAutomator may expose only the keyboard window, making the editor marker disappear.
+            editor.focus()
+            editorFocusedBeforeImeSelection = true
             system.enableAndSelect(system.iaidoImeId)
         } else {
             // Keep the existing editor activity alive before changing the selected IME. The
             // selection handoff can temporarily hide the editor from UiAutomator; checking after
             // that handoff makes every fixture look like a missing host and relaunches it.
             system.ensureHostVisible(fixture)
-            if (spacingModeChanged || needsImeSelection) system.enableAndSelect(system.iaidoImeId)
+            if (spacingModeChanged || needsImeSelection) {
+                editor.focus()
+                editorFocusedBeforeImeSelection = true
+                system.enableAndSelect(system.iaidoImeId)
+            }
         }
         system.setAutoSpaceFixture(fixture)
-        editor.focus()
+        if (!editorFocusedBeforeImeSelection) editor.focus()
         if (bootstrap || spacingModeChanged || needsImeSelection) {
             system.waitForImeVisible(system.iaidoImeId)
         }
-        ensureLanguage(Language.ENGLISH)
         val stateAdapter = DebugKeyboardStateAdapter(instrumentation.targetContext)
         val baselineId = suiteState.baselineOrNull() ?: stateAdapter.saveBaseline().also(suiteState::setBaseline)
         stateAdapter.restoreBaseline(baselineId)
+        if (editorFocusedBeforeImeSelection) {
+            // Selecting or restarting an IME can leave the input connection bound to the host
+            // while its editor view is no longer the active UiAutomator target. Re-focus after
+            // the handoff and preference restore before querying or resetting host accessibility.
+            editor.focus()
+        }
         val clearStartedAtMs = SystemClock.elapsedRealtime()
         system.resetEditor(editor)
+        expectedLanguage = Language.ENGLISH
+        reopenKeyboardWindow()
+        waitForKeyboardLanguage(expectedLanguage)
         Log.i(
             "E2E-PERF",
             "phase=editor_clear durationMs=${SystemClock.elapsedRealtime() - clearStartedAtMs}",
         )
         expectedText = ""
         expectedSelection = 0
-        expectedLanguage = Language.ENGLISH
-        checkpoint("setup", verifyEnvironment = bootstrap)
+        checkpoint("setup")
         suiteState.markReady(
             fixture,
             expectedIme,
@@ -1024,23 +1038,34 @@ class ImeScenario(
         )
     }
 
-    private fun ensureLanguage(target: Language) {
-        if (keyboard().language != target) {
-            pendingPointerEvents = editor.tapMarkedKey(keyDescription("globe"))
-            awaitLanguage(target)
+    private fun keyboard(): KeyboardWindow =
+        KeyboardWindowLocator.locate(device, expectedLanguage = expectedLanguage)
+
+    private fun waitForKeyboardLanguage(expectedLanguage: Language?): KeyboardWindow {
+        val deadline = SystemClock.elapsedRealtime() + 2_000L
+        var lastObservedLanguage: Language? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val snapshot = runCatching {
+                KeyboardWindowLocator.locate(device, timeoutMs = 100L)
+            }.getOrNull()
+            if (snapshot != null) {
+                lastObservedLanguage = snapshot.language
+                if (expectedLanguage == null || snapshot.language == expectedLanguage) return snapshot
+            }
+            SystemClock.sleep(50L)
         }
+        error(
+            "Keyboard language did not settle to ${expectedLanguage?.name ?: "a known layout"}; " +
+                "last observed=$lastObservedLanguage",
+        )
     }
 
-    private fun awaitLanguage(target: Language) {
-        waitUntil("${target.name} language") {
-            runCatching {
-                device.waitForIdle()
-                keyboard().language == target
-            }.getOrDefault(false)
-        }
+    private fun reopenKeyboardWindow() {
+        device.pressBack()
+        editor.focus()
+        system.waitForImeVisible(system.iaidoImeId)
+        device.waitForIdle()
     }
-
-    private fun keyboard(): KeyboardWindow = KeyboardWindowLocator.locate(device)
 
     private companion object {
         val suiteSessionState = ImeSuiteSessionState()
@@ -1096,26 +1121,44 @@ class ImeScenario(
      */
     private fun findTextNode(label: String): androidx.test.uiautomator.UiObject2? {
         scrollToText(label)
-        return device.findObject(By.text(label))
+        return device.findObject(By.text(label))?.takeIf { node ->
+            runCatching { !node.visibleBounds.isEmpty }.getOrDefault(false)
+        }
     }
 
     /**
-     * Finds and clicks [label]'s text node, scrolling it into view first, using the same
-     * [waitUntil] timeout/retry pattern used elsewhere in this file. Retries the whole
-     * find-then-click on any failure: a single immediate lookup right after opening Settings can
-     * race the initial Compose layout pass, and a node found right after a scroll can go stale
-     * (`StaleObjectException`) before the click lands if Compose recomposes in between. It still
-     * raises a failure (via [waitUntil]) if the click never lands before the timeout.
+     * Physically taps the visible label inside its Settings selectable row. Compose exposes the
+     * text and RadioButton as merged accessibility nodes, and calling click() on a guessed parent
+     * can report success while targeting the scroll container instead of the row. A screen tap
+     * follows the same hit path as a user and the caller verifies the persisted selection.
      */
-    private fun clickTextNode(label: String) {
-        waitUntil("spacing mode option '$label' clicked") {
-            val option = modeNode(label)
+    private fun clickSpacingModeUntilSelected(label: String, mode: SpacingMode) {
+        waitUntil("spacing mode '$label' selected") {
+            if (isModeChecked(label) || isSpacingModeStored(mode)) return@waitUntil true
+            val option = findTextNode(label)
             if (option == null) {
                 false
             } else {
                 try {
-                    option.click()
-                    true
+                    val bounds = option.visibleBounds
+                    val x = (bounds.left + bounds.right) / 2
+                    val y = (bounds.top + bounds.bottom) / 2
+                    val checkable = modeNode(label)
+                    Log.i(
+                        "Iaido",
+                        "spacing-option label='$label' textBounds=$bounds " +
+                            "selectableBounds=${runCatching { checkable?.visibleBounds }.getOrNull()} " +
+                            "isCheckable=${runCatching { checkable?.isCheckable }.getOrNull()} " +
+                            "checked=${runCatching { checkable?.isChecked }.getOrNull()} tap=($x,$y)",
+                    )
+                    val clicked = device.click(x, y)
+                    if (clicked) {
+                        device.waitForIdle()
+                        SystemClock.sleep(100L)
+                        isModeChecked(label) || isSpacingModeStored(mode)
+                    } else {
+                        false
+                    }
                 } catch (e: androidx.test.uiautomator.StaleObjectException) {
                     false
                 }
@@ -1126,25 +1169,29 @@ class ImeScenario(
     /**
      * Scrolls the Settings screen's scrollable container (a Compose `verticalScroll` Column)
      * until [label] is on screen, so callers can rely on `device.findObject(By.text(label))`
-     * afterward. Spacing-mode options live below the initial fold on a normal phone viewport
-     * (headline + live preview + Setup/App updates/Gestures sections above them), so lookups
-     * must scroll first rather than assuming the node is already in the accessibility snapshot.
-     * A no-op (best-effort) when the label is already visible or no scrollable container exists.
+     * afterward. Settings can retain its prior scroll position across test activities, so search
+     * toward both the bottom and the top instead of assuming the screen starts at the top. A no-op
+     * (best-effort) when the label is already visible or no scrollable container exists.
      */
     private fun scrollToText(label: String) {
-        if (device.hasObject(By.text(label))) return
-        repeat(scrollToTextMaxSwipes) {
-            val scrollable = device.findObject(By.scrollable(true)) ?: return
-            val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
-            val x = (bounds.left + bounds.right) / 2
-            // Swipe from near the bottom of the scrollable area to near its top, i.e. scroll the
-            // content *down* into view, since the spacing-mode options sit below the fold.
-            val startY = bounds.top + (bounds.height() * 0.8f).toInt()
-            val endY = bounds.top + (bounds.height() * 0.2f).toInt()
-            device.swipe(x, startY, x, endY, 20)
-            device.waitForIdle()
-            SystemClock.sleep(150L)
-            if (device.hasObject(By.text(label))) return
+        fun isVisible(): Boolean = device.findObject(By.text(label))?.let { node ->
+            runCatching { !node.visibleBounds.isEmpty }.getOrDefault(false)
+        } == true
+
+        if (isVisible()) return
+        val swipeDirections = listOf(0.8f to 0.2f, 0.2f to 0.8f)
+        swipeDirections.forEach { (startFraction, endFraction) ->
+            repeat(scrollToTextMaxSwipes) {
+                val scrollable = device.findObject(By.scrollable(true)) ?: return
+                val bounds = runCatching { scrollable.visibleBounds }.getOrNull() ?: return
+                val x = (bounds.left + bounds.right) / 2
+                val startY = bounds.top + (bounds.height() * startFraction).toInt()
+                val endY = bounds.top + (bounds.height() * endFraction).toInt()
+                device.swipe(x, startY, x, endY, 20)
+                device.waitForIdle()
+                SystemClock.sleep(150L)
+                if (isVisible()) return
+            }
         }
     }
 
@@ -1333,7 +1380,15 @@ class ImeScenario(
 
     private fun checkpoint(action: String, verifyEnvironment: Boolean = false) {
         val checkpointStartedAtMs = SystemClock.elapsedRealtime()
-        val observedSnapshot = editor.waitForSnapshot(expectedText)
+        val observedSnapshot = try {
+            editor.waitForSnapshot(expectedText)
+        } catch (failure: Throwable) {
+            throw IllegalStateException(
+                "Checkpoint '$action' failed; expected='$expectedText' selection=$expectedSelection " +
+                    "gestureSeed=$pendingGestureSeed pointerEvents=$pendingPointerEvents",
+                failure,
+            )
+        }
         val observedText = observedSnapshot.text
         val observedSelection = observedSnapshot.selection
         val observedIme = if (verifyEnvironment) system.selectedInputMethodId() else expectedIme

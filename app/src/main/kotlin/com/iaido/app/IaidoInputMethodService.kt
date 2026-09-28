@@ -197,7 +197,7 @@ class IaidoInputMethodService : InputMethodService() {
     // onReplacementOptionsChanged on every frame but never touches correctionHistory, so
     // recomputing this (a full activeDictionary() rebuild plus a fresh lowercase index) on every
     // preview frame would be a hot-path regression with no correctness benefit.
-    private var cachedHistoryJoinCandidates: List<ReplacementOption> = emptyList()
+    private var cachedHistoryReplacementCandidates: List<ReplacementOption> = emptyList()
     private var cursorPosition = 0
     private var selectionEndPosition = 0
     private var pendingCandidates: List<String>? = null
@@ -783,7 +783,13 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun rememberCandidates(results: List<ScoredCandidate>) {
-        pendingCandidates = results.take(5).map { it.word.word }
+        val recognized = results.take(5).map { it.word.word }
+        val recognizedWord = results.firstOrNull()?.word?.word
+        pendingCandidates = if (recognizedWord == null) {
+            recognized
+        } else {
+            (recognized + typedWordCandidates(recognizedWord, activeDictionary())).distinct()
+        }
     }
 
     private fun rememberCandidatesForCommittedSwipe(results: List<ScoredCandidate>) {
@@ -822,7 +828,7 @@ class IaidoInputMethodService : InputMethodService() {
     ) {
         sentenceEditHistory.closeGroup()
         pendingCandidates = null
-        val candidatesByWord = inferenceWordCandidates(words, alternatives)
+        val candidatesByWord = inferenceWordCandidates(words, alternatives, activeDictionary())
         val outputIds = correctionHistory.replaceRange(
             start = span.start,
             end = span.end,
@@ -863,6 +869,10 @@ class IaidoInputMethodService : InputMethodService() {
                 selectionAfterEnd = cursorPosition,
             )
         }
+        // A newly focused editor can briefly return null from getExtractedText even though it
+        // accepts commits. Recover the host snapshot after the first successful key so the
+        // sentence strip does not stay empty while the editor and typed-word suggestions advance.
+        if (textObservationEnabled && captured == null) observeCurrentEditorText()
         if (coalescingKey == null) sentenceEditHistory.closeGroup()
         val deletedWord = lastDeletedWord
         lastDeletedWord = null
@@ -1279,10 +1289,12 @@ class IaidoInputMethodService : InputMethodService() {
                 id = word.id,
             )
         }
-        cachedHistoryJoinCandidates = historyJoinCandidates(
-            correctionHistory.aroundCursor(cursorPosition, maxWords = VISIBLE_HISTORY_WORDS),
-            activeDictionary(),
-        )
+        val historyWords = correctionHistory.aroundCursor(cursorPosition, maxWords = VISIBLE_HISTORY_WORDS)
+        cachedHistoryReplacementCandidates = if (historyWords.isEmpty()) {
+            emptyList()
+        } else {
+            historyReplacementCandidates(historyWords, activeDictionary())
+        }
         val live = swipeTypingCoordinator.replacementOptions()
         liveReplacementOptionIds.value = live.map { it.id }.toSet()
         val merged = mergedReplacementOptions(live)
@@ -1311,7 +1323,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun mergedReplacementOptions(liveOptions: List<ReplacementOption>): List<ReplacementOption> =
-        (liveOptions + cachedHistoryJoinCandidates).distinctBy(ReplacementOption::id)
+        (liveOptions + cachedHistoryReplacementCandidates).distinctBy(ReplacementOption::id)
 
     private fun joinSessionWords(firstId: Int, secondId: Int, replacement: String): Boolean {
         val words = correctionHistory.words()
@@ -1382,6 +1394,37 @@ class IaidoInputMethodService : InputMethodService() {
                     .any { (actual, expected) -> !actual.equals(expected, ignoreCase = true) }
             ) return false
             return joinSessionWords(ids[0], ids[1], current.option.replacementWords.single())
+        }
+
+        if (current.sourceWordIds.size == 1 && current.option.replacementWords.size > 1) {
+            val id = current.sourceWordIds.single().substringAfter("session:", "").toIntOrNull() ?: return false
+            val word = correctionHistory.words().firstOrNull { it.id == id } ?: return false
+            if (current.option.sourceWords.size != 1 || word.start != current.sourceStart ||
+                word.end != current.sourceEndExclusive ||
+                !word.current.equals(current.option.sourceWords.single(), ignoreCase = true)
+            ) return false
+            val replacementText = current.option.replacementWords.joinToString(" ")
+            if (!applyEditorReplacement(
+                    start = word.start,
+                    endExclusive = word.end,
+                    replacement = replacementText,
+                    kind = SentenceEditKind.CORRECTION,
+                    expectedSourceText = word.current,
+                    cursorAfter = word.start + replacementText.length,
+                    refresh = false,
+                )
+            ) return false
+            val dictionary = activeDictionary()
+            val outputIds = correctionHistory.replaceRange(
+                start = word.start,
+                end = word.end,
+                replacementWords = current.option.replacementWords,
+                candidatesByWord = current.option.replacementWords.map { typedWordCandidates(it, dictionary) },
+                composite = true,
+            )
+            typedWords.reset()
+            refreshSuggestionChips(outputIds.firstOrNull())
+            return true
         }
 
         return releaseReplacementOption(current.option)
