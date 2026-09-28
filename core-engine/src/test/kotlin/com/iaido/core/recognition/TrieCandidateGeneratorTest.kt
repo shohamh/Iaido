@@ -73,4 +73,34 @@ class TrieCandidateGeneratorTest {
 
         assertTrue(candidates.any { it.word == "The" })
     }
+
+    @Test
+    fun `keeps the two most recent language dictionary indexes warm`() {
+        val english = CountingWordList(WordEntry("hi", 1.0))
+        val hebrew = CountingWordList(WordEntry("ani", 1.0))
+        val gesture = pathThrough('h', 'i')
+
+        generator.generateCandidates(gesture, layout, english)
+        generator.generateCandidates(gesture, layout, hebrew)
+        val englishReadsBeforeReuse = english.readCount
+
+        generator.generateCandidates(gesture, layout, english)
+
+        assertTrue(
+            english.readCount - englishReadsBeforeReuse == 1,
+            "A warm dictionary should only be traversed to filter results, not rebuilt into the trie",
+        )
+    }
+
+    private class CountingWordList(private vararg val entries: WordEntry) : AbstractList<WordEntry>() {
+        var readCount = 0
+            private set
+
+        override val size: Int get() = entries.size
+
+        override fun get(index: Int): WordEntry {
+            readCount++
+            return entries[index]
+        }
+    }
 }

@@ -11,8 +11,7 @@ class TrieCandidateGenerator(
     private val proximityThreshold: Float = ScoringConstants.PROXIMITY_THRESHOLD,
 ) : CandidateGenerator {
 
-    private var indexedDictionary: List<WordEntry>? = null
-    private var dictionaryIndex: Node = Node()
+    private val dictionaryIndexes = mutableListOf<IndexedDictionary>()
 
     override fun generateCandidates(
         path: GesturePath,
@@ -28,7 +27,13 @@ class TrieCandidateGenerator(
     }
 
     private fun indexFor(dictionary: List<WordEntry>): Node {
-        if (dictionary === indexedDictionary) return dictionaryIndex
+        val cachedIndex = dictionaryIndexes.indexOfFirst { it.dictionary === dictionary }
+        if (cachedIndex >= 0) {
+            val cached = dictionaryIndexes.removeAt(cachedIndex)
+            dictionaryIndexes.add(0, cached)
+            return cached.root
+        }
+
         val root = Node()
         dictionary.forEach { entry ->
             if (entry.word.isBlank()) return@forEach
@@ -38,8 +43,10 @@ class TrieCandidateGenerator(
             }
             node.words += entry.word
         }
-        indexedDictionary = dictionary
-        dictionaryIndex = root
+        dictionaryIndexes.add(0, IndexedDictionary(dictionary, root))
+        if (dictionaryIndexes.size > MAX_CACHED_DICTIONARY_INDEXES) {
+            dictionaryIndexes.removeAt(dictionaryIndexes.lastIndex)
+        }
         return root
     }
 
@@ -74,5 +81,14 @@ class TrieCandidateGenerator(
     private class Node {
         val children = linkedMapOf<Char, Node>()
         val words = mutableListOf<String>()
+    }
+
+    private data class IndexedDictionary(
+        val dictionary: List<WordEntry>,
+        val root: Node,
+    )
+
+    private companion object {
+        const val MAX_CACHED_DICTIONARY_INDEXES = 2
     }
 }

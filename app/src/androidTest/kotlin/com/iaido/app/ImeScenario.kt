@@ -61,6 +61,10 @@ data class ImeScenarioState(
     val trace: List<ImeScenarioEvent>,
 )
 
+data class SwipeCommitTiming(
+    val textUpdateAfterReleaseMs: Long,
+)
+
 data class PathTransform(
     val jitterSeed: Long = 0L,
     val jitterPx: Float = 0f,
@@ -171,7 +175,33 @@ class ImeScenario(
         checkpoint("swipeWordExpecting($word)")
     }
 
-    private fun injectSwipeWord(word: String, transform: PathTransform): Boolean {
+    fun swipeCommitTiming(word: String, transform: PathTransform = PathTransform(stepMs = 32L)): SwipeCommitTiming {
+        val before = editor.text()
+        var releasedAtMs = 0L
+        check(!injectSwipeWord(
+            word = word,
+            transform = transform,
+            onPointerEvent = { event ->
+                if (event.action == android.view.MotionEvent.ACTION_UP) {
+                    releasedAtMs = SystemClock.elapsedRealtime()
+                }
+            },
+        )) { "Expected a completed swipe for '$word'" }
+        val after = editor.waitForTextChange(before)
+        val textUpdatedAtMs = SystemClock.elapsedRealtime()
+        expectedText = after
+        expectedSelection = editor.selection().last
+        expectedLastInputWasSwipe = true
+        return SwipeCommitTiming(
+            textUpdateAfterReleaseMs = textUpdatedAtMs - releasedAtMs,
+        )
+    }
+
+    private fun injectSwipeWord(
+        word: String,
+        transform: PathTransform,
+        onPointerEvent: (InjectedPointerEvent) -> Unit = {},
+    ): Boolean {
         require(word.isNotEmpty() && word.all(Char::isLetter)) { "Swipe word must contain letters: '$word'" }
         val window = keyboard()
         val path = window.pathThroughVisibleKeys(word)
@@ -199,6 +229,7 @@ class ImeScenario(
             cancel = cancelled,
             pauseAfterPoint = transform.pauseAfterPoint,
             pauseMs = transform.pauseMs,
+            onEvent = onPointerEvent,
         )
         pendingPointerEvents = injected
         pendingGestureSeed = transform.jitterSeed

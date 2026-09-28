@@ -642,6 +642,7 @@ private fun KeyboardModifierRow(
 ) {
     val gap = 3.dp
     val modifierWeight = modifierKeyWeight(letters.length, showShift)
+    val leadingWeight = modifierLeadingKeyWeight(letters.length, showShift)
     val letterWeight = modifierLetterKeyWeight(letters.length, showShift)
     Row(
         modifier = Modifier.fillMaxWidth().offset(y = y),
@@ -650,15 +651,13 @@ private fun KeyboardModifierRow(
         if (showShift) {
             KeyboardKey(
                 label = "",
-                modifier = Modifier.weight(modifierWeight),
+                modifier = Modifier.weight(leadingWeight),
                 height = keySize,
                 pressed = shiftState != KeyboardShiftState.LOWERCASE || pressedKey == SHIFT_KEY,
                 testKey = SHIFT_KEY,
                 icon = KeyboardKeyIcon.SHIFT,
                 shiftState = shiftState,
             )
-        } else {
-            Spacer(Modifier.weight(modifierWeight).height(keySize))
         }
         key(letters) {
             letters.forEach { letter ->
@@ -897,8 +896,9 @@ internal fun keyAt(
     val modifierRowTop = keyboardBottomRowTopPx(size, keyboardRowCount(showNumberRow)) - size
     if (y >= modifierRowTop) {
         val showShift = language == Language.ENGLISH
+        val leadingWeight = modifierLeadingKeyWeight(keyboardLetterRowsFor(language).last().length, showShift)
         val modifierWeight = modifierKeyWeight(keyboardLetterRowsFor(language).last().length, showShift)
-        if (x < modifierWeight * size) {
+        if (x < leadingWeight * size) {
             return if (language == Language.ENGLISH) SHIFT_KEY else null
         }
         if (x >= (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierWeight) * size) return BACKSPACE_KEY
@@ -944,12 +944,19 @@ internal fun bottomRowKeyWeights(spaceLabel: String): List<Pair<String, Float>> 
 
 internal fun modifierKeyWeight(letterCount: Int, showShift: Boolean = true): Float =
     if (letterCount <= 0) 0f else {
-        ((KEYBOARD_LETTER_ROW_COLUMN_COUNT - letterCount).coerceAtLeast(0)) / 2f
+        val unusedWidth = (KEYBOARD_LETTER_ROW_COLUMN_COUNT - letterCount).coerceAtLeast(0)
+        if (showShift) unusedWidth / 2f else unusedWidth.toFloat()
     }
+
+internal fun modifierLeadingKeyWeight(letterCount: Int, showShift: Boolean = true): Float =
+    if (showShift) modifierKeyWeight(letterCount, showShift) else 0f
 
 internal fun modifierLetterKeyWeight(letterCount: Int, showShift: Boolean = true): Float =
     if (letterCount <= 0) 0f else {
-        (KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierKeyWeight(letterCount, showShift) * 2f) / letterCount
+        (
+            KEYBOARD_LETTER_ROW_COLUMN_COUNT - modifierLeadingKeyWeight(letterCount, showShift) -
+                modifierKeyWeight(letterCount, showShift)
+            ) / letterCount
     }
 
 internal fun modifierRowLetterCenterPx(
@@ -960,7 +967,7 @@ internal fun modifierRowLetterCenterPx(
 ): Float {
     require(index in 0 until letterCount)
     return (
-        modifierKeyWeight(letterCount, showShift) +
+        modifierLeadingKeyWeight(letterCount, showShift) +
             (index + 0.5f) * modifierLetterKeyWeight(letterCount, showShift)
         ) * keySizePx
 }

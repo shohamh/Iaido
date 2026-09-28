@@ -20,13 +20,15 @@ class KeyboardGeometryTest {
     }
 
     @Test
-    fun `Hebrew lower row fits nine letters between narrow side modifiers`() {
-        assertEquals(0.5f, modifierKeyWeight(9, showShift = false), 0.001f)
+    fun `Hebrew lower row gives unused width to backspace`() {
+        assertEquals(0f, modifierLeadingKeyWeight(9, showShift = false), 0.001f)
+        assertEquals(1.5f, modifierLeadingKeyWeight(7), 0.001f)
+        assertEquals(1f, modifierKeyWeight(9, showShift = false), 0.001f)
         assertEquals(1.5f, modifierKeyWeight(7), 0.001f)
         assertEquals(1f, modifierLetterKeyWeight(9, showShift = false), 0.001f)
-        assertEquals(10f, modifierKeyWeight(9, false) * 2 + modifierLetterKeyWeight(9, false) * 9, 0.001f)
-        assertEquals(100f, modifierRowLetterCenterPx(0, 9, 100f, showShift = false), 0.001f)
-        assertEquals(900f, modifierRowLetterCenterPx(8, 9, 100f, showShift = false), 0.001f)
+        assertEquals(10f, modifierKeyWeight(9, false) + modifierLetterKeyWeight(9, false) * 9, 0.001f)
+        assertEquals(50f, modifierRowLetterCenterPx(0, 9, 100f, showShift = false), 0.001f)
+        assertEquals(850f, modifierRowLetterCenterPx(8, 9, 100f, showShift = false), 0.001f)
     }
 
     @Test
@@ -36,7 +38,7 @@ class KeyboardGeometryTest {
         assertEquals(150f, layout.centerOf('\u05e7').x, 0.001f)
         assertEquals(850f, layout.centerOf('\u05e4').x, 0.001f)
         assertEquals(modifierRowLetterCenterPx(0, 9, 100f, showShift = false), layout.centerOf('\u05d6').x, 0.001f)
-        assertEquals(900f, layout.centerOf('\u05e5').x, 0.001f)
+        assertEquals(850f, layout.centerOf('\u05e5').x, 0.001f)
     }
 
     @Test
@@ -152,5 +154,22 @@ class KeyboardGeometryTest {
         assertEquals(SHIFT_KEY, keyAt(0.5f * size, 3.5f * size, size, layout, Language.ENGLISH, true))
         assertEquals("z", keyAt(2.5f * size, 3.5f * size, size, layout, Language.ENGLISH, true))
         assertEquals(BACKSPACE_KEY, keyAt(9.5f * size, 3.5f * size, size, layout, Language.ENGLISH, true))
+    }
+
+    @Test
+    fun `Hebrew lower row hit testing uses the full backspace column`() {
+        val size = 100f
+        val layout = KeyboardLayout(
+            listOf(
+                KeyPosition('\u05d6', 50f, 350f),
+                KeyPosition('\u05e5', 850f, 350f),
+            ),
+        )
+
+        assertEquals("\u05d6", keyAt(50f, 3.5f * size, size, layout, Language.HEBREW, showNumberRow = true))
+        assertEquals(
+            BACKSPACE_KEY,
+            keyAt(9.5f * size, 3.5f * size, size, layout, Language.HEBREW, showNumberRow = true),
+        )
     }
 }

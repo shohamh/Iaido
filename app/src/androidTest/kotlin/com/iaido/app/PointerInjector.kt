@@ -33,9 +33,10 @@ class PointerInjector(private val automation: UiAutomation) {
         cancel: Boolean = false,
         pauseAfterPoint: Int? = null,
         pauseMs: Long = 0L,
+        onEvent: (InjectedPointerEvent) -> Unit = {},
     ): List<InjectedPointerEvent> {
         return buildSwipeEvents(points, surfaceBounds, startTimeMs, stepMs, jitterSeed, jitterPx, cancel, pauseAfterPoint, pauseMs)
-            .also(::inject)
+            .also { inject(it, onEvent = onEvent) }
     }
 
     fun injectMultiPointer(

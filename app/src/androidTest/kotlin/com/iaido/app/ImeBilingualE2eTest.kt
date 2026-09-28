@@ -1,6 +1,10 @@
 package com.iaido.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
+import com.iaido.core.language.Language
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +40,27 @@ class ImeBilingualE2eTest {
             twoFingerLanguageSwitch()
             swipeWord("\u05d0\u05e0\u05d9")
             assertText("Hello \u05d0\u05e0\u05d9")
+        }
+    }
+
+    @Test
+    fun hebrewBackspaceUsesAtLeastOneLetterKeyWidth() {
+        scenario().run {
+            switchLanguage()
+            val screenshot = captureScreenshot("hebrew-backspace-width")
+            val window = KeyboardWindowLocator.locate(
+                UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()),
+                expectedLanguage = Language.HEBREW,
+            )
+            val backspace = requireNotNull(window.keyBounds["backspace"])
+            val zayin = requireNotNull(window.keyBounds["\u05d6"])
+
+            assertTrue("Keyboard screenshot missing at ${screenshot.absolutePath}", screenshot.isFile)
+            assertTrue(
+                "Hebrew backspace should occupy at least one letter key: " +
+                    "backspace=$backspace zayin=$zayin",
+                backspace.width() >= zayin.width(),
+            )
         }
     }
 
