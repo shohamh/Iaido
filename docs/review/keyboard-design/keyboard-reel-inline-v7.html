@@ -1,0 +1,1960 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iaido keyboard and word reel study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page:#111518; --panel:#191e21; --screen:#171c1f; --deck:#1a2023;
+      --key:#20272a; --key-border:#3b4549; --ink:#edf0f1; --muted:#8e9a9e;
+      --subtle:#647176; --accent:#8bcbd0; --accent-wash:#263b3e;
+      --line:#30393d; --shadow:rgba(0,0,0,.24); --delete:#eb737b;
+      --row-gap:6px; --key-gap:4px; --key-height:43px;
+      font-family:Inter,"Segoe UI",Roboto,sans-serif;
+    }
+    [data-theme="light"] {
+      color-scheme:light;
+      --page:#e9edef; --panel:#f5f7f8; --screen:#f7f9fa; --deck:#e7ecee;
+      --key:#f3f6f7; --key-border:#c6d0d3; --ink:#263136; --muted:#69777c;
+      --subtle:#879499; --accent:#3f838b; --accent-wash:#dcebed;
+      --line:#d6dfe1; --shadow:rgba(30,45,50,.09); --delete:#b24e57;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at 48% -20%,rgba(139,203,208,.10),transparent 50%),var(--page); color:var(--ink); transition:background-color 180ms ease,color 180ms ease; }
+    button,input,textarea { font:inherit; }
+    button { color:inherit; }
+    .wrap { max-width:1160px; margin:0 auto; padding:26px 24px 34px; }
+    .masthead { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .brand { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:10px; letter-spacing:.18em; font-weight:700; }
+    .mark { width:20px; height:20px; display:grid; place-items:center; border:1px solid var(--accent); border-radius:6px; color:var(--accent); letter-spacing:0; }
+    .tag { padding:7px 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:9px; letter-spacing:.12em; }
+    h1 { margin:22px 0 6px; font-size:clamp(27px,4vw,39px); line-height:1.1; font-weight:500; letter-spacing:-.045em; }
+    .intro { margin:0; max-width:740px; color:var(--muted); font-size:13px; line-height:1.55; }
+    .layout { display:grid; grid-template-columns:minmax(420px,1.2fr) minmax(280px,.8fr); gap:18px; align-items:start; margin-top:24px; }
+    .panel { overflow:hidden; border:1px solid var(--line); border-radius:18px; background:var(--panel); }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 17px; border-bottom:1px solid var(--line); }
+    .eyebrow { color:var(--muted); font-size:9px; font-weight:700; letter-spacing:.16em; }
+    .status { color:var(--accent); font-size:10px; letter-spacing:.08em; }
+    .preview { display:grid; place-items:center; padding:15px; }
+    .phone { width:min(100%,460px); overflow:hidden; border:1px solid #495357; border-radius:28px; background:var(--screen); box-shadow:0 22px 50px var(--shadow); }
+    .appbar { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 9px; color:var(--muted); font-size:10px; }
+    .contact { display:flex; align-items:center; gap:7px; }
+    .avatar { width:21px; height:21px; display:grid; place-items:center; border:1px solid var(--line); border-radius:50%; color:var(--accent); background:var(--panel); }
+    .conversation { min-height:82px; display:flex; flex-direction:column; justify-content:end; align-items:flex-end; padding:8px 13px 11px; }
+    .bubble { max-width:82%; padding:9px 11px; border:1px solid var(--line); border-radius:13px 13px 4px 13px; color:var(--muted); background:var(--panel); font-size:11px; line-height:1.4; }
+    .editor-wrap { margin:0 11px 9px; padding:8px 10px; border:1px solid var(--line); border-radius:11px; background:var(--panel); }
+    .editor-label { margin:0 0 4px; color:var(--subtle); font-size:8px; letter-spacing:.11em; }
+    #editor { display:block; width:100%; min-height:40px; max-height:90px; resize:vertical; border:0; outline:0; padding:0; color:var(--ink); background:transparent; font-size:13px; line-height:1.45; caret-color:var(--accent); }
+    #editor::placeholder { color:var(--subtle); }
+    .keyboard { padding:8px 8px 9px; border-top:1px solid var(--line); background:var(--deck); }
+    .strip-head { position:relative; display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:24px; margin:0 3px 5px; }
+    .strip-title { min-width:0; flex:1 1 auto; overflow:hidden; color:var(--subtle); font-size:8px; letter-spacing:.13em; text-overflow:ellipsis; white-space:nowrap; }
+    .strip-head-tools { display:flex; flex:0 0 auto; align-items:center; gap:7px; min-width:0; }
+    #focus-label { max-width:clamp(44px,18vw,92px); overflow:hidden; color:var(--accent); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+    .history-controls { display:flex; align-items:center; gap:2px; }
+    .history-button { width:24px; height:24px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:6px; color:var(--muted); background:transparent; cursor:pointer; -webkit-tap-highlight-color:transparent; touch-action:manipulation; transition:color 100ms ease,border-color 100ms ease,background-color 100ms ease; }
+    .history-button svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+    .history-button:not(:disabled):hover { border-color:var(--line); color:var(--ink); background:var(--panel); }
+    .history-button:not(:disabled):active { color:var(--accent); background:var(--accent-wash); }
+    .history-button:disabled { color:var(--subtle); opacity:.42; cursor:default; }
+    .history-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .history-preview { position:absolute; z-index:12; top:calc(100% + 5px); right:0; width:min(280px,100%); display:grid; gap:6px; padding:9px 10px; border:1px solid var(--key-border); border-radius:9px; color:var(--ink); background:var(--panel); box-shadow:0 8px 24px var(--shadow); pointer-events:none; }
+    .history-preview[hidden] { display:none; }
+    .history-preview-title { color:var(--accent); font-size:9px; font-weight:650; letter-spacing:.07em; }
+    .history-preview-row { display:grid; grid-template-columns:34px minmax(0,1fr); gap:6px; align-items:start; font-size:9px; line-height:1.35; }
+    .history-preview-row b { color:var(--subtle); font-size:7px; font-weight:650; letter-spacing:.09em; }
+    .history-preview-row span { min-width:0; display:-webkit-box; overflow:hidden; overflow-wrap:anywhere; color:var(--muted); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+    .history-preview-row.is-target span { color:var(--ink); }
+    .word-strip-frame { position:relative; min-width:0; margin:0 0 7px; }
+    .word-strip { position:relative; display:block; min-height:75px; margin:0; padding:4px 4px 7px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:thin; scrollbar-color:var(--key-border) transparent; line-height:1.1; white-space:nowrap; touch-action:pan-y; }
+    .word-strip::-webkit-scrollbar { height:4px; }
+    .word-strip::-webkit-scrollbar-thumb { border-radius:99px; background:var(--key-border); }
+    .edge-scroll-zone { position:absolute; z-index:5; top:4px; bottom:9px; width:clamp(34px,14%,58px); display:grid; place-items:center; border:0; border-radius:7px; opacity:0; pointer-events:none; transition:opacity 110ms ease; }
+    .edge-scroll-left { left:0; background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 30%,transparent),transparent); }
+    .edge-scroll-right { right:0; background:linear-gradient(270deg,color-mix(in srgb,var(--accent) 30%,transparent),transparent); }
+    .edge-scroll-arrow { color:var(--accent); font-size:21px; font-weight:450; line-height:1; opacity:.82; text-shadow:0 1px 5px var(--page); transition:opacity 110ms ease,transform 110ms ease; }
+    .word-strip-frame.is-edge-scroll-mode .edge-scroll-zone { opacity:.72; }
+    .word-strip-frame.is-edge-left .edge-scroll-left .edge-scroll-arrow,
+    .word-strip-frame.is-edge-right .edge-scroll-right .edge-scroll-arrow { opacity:1; }
+    .word-strip-frame.is-edge-left .edge-scroll-left .edge-scroll-arrow { transform:translateX(-2px); }
+    .word-strip-frame.is-edge-right .edge-scroll-right .edge-scroll-arrow { transform:translateX(2px); }
+    .word-lane { position:relative; z-index:1; display:inline-grid; grid-template-rows:17px 30px 17px; max-width:none; margin:0 4px 2px; padding:0 2px; border:0; border-radius:0; color:var(--ink); background:transparent; font:inherit; vertical-align:middle; text-align:center; cursor:ns-resize; user-select:none; -webkit-tap-highlight-color:transparent; touch-action:none; }
+    .word-lane::before { content:""; position:absolute; z-index:2; top:0; right:-4px; bottom:0; left:-4px; pointer-events:auto; }
+    .word-lane.is-active .lane-current { color:var(--accent); }
+    .word-lane.is-preview .lane-current { color:var(--accent); }
+    .lane-option { min-width:0; align-self:center; overflow:hidden; color:var(--ink); opacity:.64; font-size:12px; line-height:17px; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; transition:opacity 100ms ease,color 100ms ease; }
+    .lane-option.is-empty { opacity:0; }
+    .lane-current { min-width:0; align-self:center; overflow:visible; color:var(--ink); font-size:16px; font-weight:550; line-height:30px; white-space:nowrap; transition:color 90ms ease; pointer-events:none; }
+    .strip-caret { position:absolute; z-index:4; width:2px; height:19px; border-radius:2px; background:var(--accent); box-shadow:0 0 7px color-mix(in srgb,var(--accent),transparent 20%); pointer-events:none; visibility:hidden; transform:translateX(-1px); }
+    .strip-caret.is-visible { visibility:visible; }
+    .word-lane.swap-up .lane-current { animation:reel-from-up 110ms cubic-bezier(.18,.75,.22,1) both; }
+    .word-lane.swap-up .lane-up { animation:reel-to-up 110ms cubic-bezier(.18,.75,.22,1) both; }
+    .word-lane.swap-down .lane-current { animation:reel-from-down 110ms cubic-bezier(.18,.75,.22,1) both; }
+    .word-lane.swap-down .lane-down { animation:reel-to-down 110ms cubic-bezier(.18,.75,.22,1) both; }
+    @keyframes reel-from-up { from { opacity:.35; transform:translateY(-9px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes reel-to-up { from { opacity:1; transform:translateY(13px); } to { opacity:.64; transform:translateY(0); } }
+    @keyframes reel-from-down { from { opacity:.35; transform:translateY(9px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes reel-to-down { from { opacity:1; transform:translateY(-13px); } to { opacity:.64; transform:translateY(0); } }
+    .join-preview-outline { position:absolute; z-index:0; border:1px solid color-mix(in srgb,var(--accent),transparent 18%); border-radius:7px; background:rgba(116,202,208,.035); box-shadow:0 0 0 1px rgba(116,202,208,.11),0 0 14px rgba(116,202,208,.1); pointer-events:none; transition:opacity 120ms ease; }
+    .join-preview-outline span { position:absolute; top:-7px; left:50%; transform:translateX(-50%); padding:1px 5px; border-radius:99px; color:var(--page); background:var(--accent); font-size:6px; font-weight:700; letter-spacing:.08em; white-space:nowrap; }
+    .delete-preview-outline { position:absolute; z-index:0; border:1.5px solid var(--delete); border-radius:7px; background:color-mix(in srgb,var(--delete),transparent 91%); box-shadow:0 0 0 1px color-mix(in srgb,var(--delete),transparent 78%),0 0 12px color-mix(in srgb,var(--delete),transparent 82%); pointer-events:none; }
+    .delete-preview-outline span { position:absolute; top:-7px; left:50%; transform:translateX(-50%); padding:1px 5px; border-radius:99px; color:#fff; background:var(--delete); font-size:6px; font-weight:700; letter-spacing:.08em; white-space:nowrap; }
+    .word-lane.is-delete-preview .lane-current { color:var(--delete); text-decoration:line-through; text-decoration-color:var(--delete); text-decoration-thickness:1.5px; }
+    .word-lane.is-delete-preview .lane-option { visibility:hidden; }
+    .strip-empty { display:grid; place-items:center; min-height:50px; padding:8px; color:var(--subtle); font-size:9px; text-align:center; }
+    .key-board { position:relative; display:flex; flex-direction:column; gap:var(--row-gap); padding:0 1px; touch-action:none; user-select:none; }
+    .key-row { display:flex; align-items:center; justify-content:center; gap:var(--key-gap); }
+    .key { position:relative; z-index:1; flex:0 0 calc((100% - 10 * var(--key-gap))/11); height:var(--key-height); min-width:0; display:grid; place-items:center; padding:0; border:1px solid var(--key-border); border-radius:7px; color:var(--ink); background:var(--key); cursor:pointer; -webkit-tap-highlight-color:transparent; transition:background-color 80ms linear,border-color 80ms linear,color 80ms linear; }
+    .key.is-down { background:var(--accent-wash); border-color:var(--accent); color:var(--ink); }
+    .legend { position:relative; z-index:5; font-size:15px; font-weight:450; line-height:1; pointer-events:none; }
+    .number { position:absolute; z-index:6; top:3px; right:4px; color:var(--subtle); font-size:7px; line-height:1; pointer-events:none; }
+    .punctuation .legend { font-size:12px; }
+    .control-row .key { flex:var(--weight) 1 0; }
+    .space-key { color:var(--muted); }
+    .space-label { font-size:8px; letter-spacing:.1em; }
+    .icon { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+    #swipe-overlay { position:absolute; z-index:4; inset:-2px; width:calc(100% + 4px); height:calc(100% + 4px); overflow:visible; pointer-events:none; }
+    #swipe-path { fill:none; stroke:var(--accent); stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round; opacity:.9; filter:drop-shadow(0 0 5px color-mix(in srgb,var(--accent),transparent 35%)); transition:opacity 210ms ease; }
+    #swipe-path.fade { opacity:0; }
+    #swipe-dot { fill:var(--accent); opacity:0; }
+    .board-foot { display:flex; justify-content:space-between; padding:8px 3px 0; color:var(--subtle); font-size:8px; letter-spacing:.08em; }
+    .home-bar { width:88px; height:4px; margin:10px auto 1px; border-radius:99px; background:var(--muted); opacity:.4; }
+    .explain { padding:12px 16px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:10px; line-height:1.55; }
+    .controls { padding:17px; }
+    h2 { margin:0 0 5px; font-size:14px; font-weight:550; letter-spacing:-.015em; }
+    .hint { margin:0 0 12px; color:var(--muted); font-size:11px; line-height:1.5; }
+    .control-section + .control-section { margin-top:17px; padding-top:16px; border-top:1px solid var(--line); }
+    .segmented { display:flex; gap:4px; padding:3px; border:1px solid var(--line); border-radius:9px; background:color-mix(in srgb,var(--panel),var(--ink) 3%); }
+    .segmented button { flex:1; min-height:32px; border:1px solid transparent; border-radius:6px; color:var(--muted); background:transparent; font-size:11px; cursor:pointer; }
+    .segmented button[aria-pressed="true"] { border-color:var(--key-border); color:var(--ink); background:var(--key); }
+    .motion-steps { display:grid; gap:9px; margin-top:11px; }
+    .step { display:grid; grid-template-columns:22px 1fr; gap:8px; align-items:start; color:var(--muted); font-size:10px; line-height:1.45; }
+    .step-num { width:19px; height:19px; display:grid; place-items:center; border:1px solid var(--line); border-radius:50%; color:var(--accent); font-size:9px; }
+    .step b { color:var(--ink); font-weight:500; }
+    .demo-note { margin-top:13px; padding:10px; border:1px solid var(--line); border-radius:9px; color:var(--subtle); background:var(--screen); font-size:9px; line-height:1.5; }
+    .reset { width:100%; min-height:34px; margin-top:12px; border:1px solid var(--key-border); border-radius:8px; color:var(--muted); background:transparent; font-size:10px; cursor:pointer; }
+    .reset:hover { border-color:var(--accent); color:var(--ink); }
+    @media(max-width:760px) { .wrap{padding:18px 12px 28px}.layout{grid-template-columns:1fr}.preview{padding:10px}.tag{font-size:8px} }
+    @media(max-width:390px) { .wrap{padding-left:7px;padding-right:7px}.keyboard{padding-left:5px;padding-right:5px}.key{border-radius:6px}.legend{font-size:13px}.number{right:2px;top:2px}.lane-current{font-size:15px}.lane-option{font-size:11px} }
+    @media(prefers-reduced-motion:reduce) { *,*:before,*:after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important} }
+  </style>
+</head>
+<body data-theme="dark">
+  <main class="wrap">
+    <header class="masthead">
+      <div class="brand"><span class="mark">ã„</span><span>IAIDO&nbsp; / &nbsp;INTERACTION STUDY</span></div>
+      <span class="tag">MOCKUP Â· NOT PREDICTION OR FINAL UI</span>
+    </header>
+    <h1>Word reels in motion.</h1>
+    <p class="intro">Type any text, tap a character or gap in the sentence to place the caret; the strip follows it automatically. Hold a word to place the caret at that letter, then drag sideways to move the caret through the sentence. Hold at an edge to scroll the text beneath your finger. Swipe a word up or down to preview a replacement; move into a neighboring word to begin deleting, then cross its center to include it.</p>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head"><span class="eyebrow">LIVE KEYBOARD</span><span class="status" id="readout">DARK Â· ENGLISH</span></div>
+        <div class="preview">
+          <div class="phone">
+            <div class="appbar"><div class="contact"><span class="avatar">A</span><span>Alex Â· today</span></div><span>9:41</span></div>
+            <div class="conversation"><div class="bubble">That sounds good. See you soon.</div></div>
+            <div class="editor-wrap">
+              <div class="editor-label">YOUR MESSAGE Â· EDITABLE</div>
+              <textarea id="editor" dir="auto" spellcheck="false" autocapitalize="off" aria-label="Type any message">we put alot in to it</textarea>
+            </div>
+            <div class="keyboard">
+              <div class="strip-head">
+                <span class="strip-title">SWIPE A WORD TO CORRECT</span>
+                <div class="strip-head-tools">
+                  <span id="focus-label">MOVE THE TEXT CURSOR</span>
+                  <div class="history-controls" role="group" aria-label="Undo and redo">
+                    <button class="history-button" type="button" id="undo-button" aria-label="Undo" title="Undo" aria-keyshortcuts="Control+Z Meta+Z" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4.5 9H13a6.5 6.5 0 0 1 0 13h-2"></path></svg>
+                    </button>
+                    <button class="history-button" type="button" id="redo-button" aria-label="Redo" title="Redo" aria-keyshortcuts="Control+Y Control+Shift+Z Meta+Shift+Z" disabled>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5-5 5"></path><path d="M19.5 9H11a6.5 6.5 0 0 0 0 13h2"></path></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="history-preview" id="history-preview" role="status" aria-live="polite" hidden>
+                  <div class="history-preview-title" id="history-preview-title"></div>
+                  <div class="history-preview-row"><b>NOW</b><span id="history-preview-before"></span></div>
+                  <div class="history-preview-row is-target"><b>AFTER</b><span id="history-preview-after"></span></div>
+                </div>
+              </div>
+              <div class="word-strip-frame" id="word-strip-frame">
+                <div class="word-strip" id="word-strip" aria-label="Scrollable sentence strip that keeps the cursor visible. Tap a character or gap to place the cursor. Hold a word to place the cursor at that letter, then drag sideways to move the cursor through the text beneath your finger. Hold at an edge to scroll the text beneath your finger. Swipe a word vertically to swap it, then move into another word to preview deletion. Cross each word center to include it. The farther into an edge zone, the faster it scrolls."></div>
+                <div class="edge-scroll-zone edge-scroll-left" aria-hidden="true"><span class="edge-scroll-arrow">‹</span></div>
+                <div class="edge-scroll-zone edge-scroll-right" aria-hidden="true"><span class="edge-scroll-arrow">›</span></div>
+              </div>
+              <div class="key-board" id="key-board" aria-label="Interactive keyboard">
+                <div id="letter-rows"></div>
+                <div class="key-row control-row">
+                  <button class="key" data-key="globe" style="--weight:1" aria-label="Change language"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 9h16.4M3.8 15h16.4M12 3.5c2.2 2.3 3.2 5.1 3.2 8.5s-1 6.2-3.2 8.5c-2.2-2.3-3.2-5.1-3.2-8.5s1-6.2 3.2-8.5z"></path></svg></button>
+                  <button class="key" data-key="settings" style="--weight:1" aria-label="Keyboard settings"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"></circle><path d="M19.2 13.7a7.8 7.8 0 0 0 0-3.4l1.4-1.1-1.5-2.6-1.7.7a7.7 7.7 0 0 0-2.9-1.7L14.2 4h-3l-.3 1.7A7.7 7.7 0 0 0 8 7.4l-1.7-.7-1.5 2.6 1.4 1.1a7.8 7.8 0 0 0 0 3.4l-1.4 1.1 1.5 2.6 1.7-.7a7.7 7.7 0 0 0 2.9 1.7l.3 1.7h3l.3-1.7a7.7 7.7 0 0 0 2.9-1.7l1.7.7 1.5-2.6z"></path></svg></button>
+                  <button class="key space-key" data-key="space" style="--weight:7" aria-label="Space"><span class="space-label" id="space-label">ENGLISH (US)</span></button>
+                  <button class="key" data-key="backspace" style="--weight:2" aria-label="Backspace"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5H20v14H9l-6-7z"></path><path d="m12 9 5 6m0-6-5 6"></path></svg></button>
+                </div>
+                <svg id="swipe-overlay" aria-hidden="true"><path id="swipe-path"></path><circle id="swipe-dot" r="3.1"></circle></svg>
+              </div>
+              <div class="board-foot"><span>SWIPE TO TYPE</span><span>TRAIL FLOATS ABOVE KEY FACES</span></div>
+            </div>
+            <div class="home-bar"></div>
+          </div>
+        </div>
+        <div class="explain">Tap a letter to insert it. Drag across several letters to make a demo word. The swipe trail is layered over the key surfaces while the labels remain readable.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span class="eyebrow">HOW TO EXPLORE</span><span class="eyebrow" id="active-word-readout">0 WORDS</span></div>
+        <div class="controls">
+          <div class="control-section">
+            <h2>Surface and language</h2>
+            <p class="hint">Switch the palette or key legends; Hebrew labels change in place, without mirroring the physical key rows.</p>
+            <div class="segmented" role="group" aria-label="Color theme">
+              <button type="button" data-theme-choice="dark" aria-pressed="true">Graphite</button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">Soft silver</button>
+            </div>
+            <div class="segmented" role="group" aria-label="Keyboard language" style="margin-top:8px">
+              <button type="button" data-language="en" aria-pressed="true">English</button>
+              <button type="button" data-language="he" aria-pressed="false">×¢×‘×¨×™×ª</button>
+            </div>
+          </div>
+          <div class="control-section">
+            <h2>Move between words</h2>
+            <div class="motion-steps">
+              <div class="step"><span class="step-num">1</span><span><b>Type freely</b> in the message field or tap the on-screen keys. Words are generated from your text.</span></div>
+              <div class="step"><span class="step-num">2</span><span><b>Place the caret.</b> Tap a character or the gap between words, or hold a word to place the caret at that letter and drag it through the sentence. Swipe left or right on empty strip space to scroll without moving the caret.</span></div>
+              <div class="step"><span class="step-num">3</span><span><b>Swap or delete.</b> Swipe up or down to preview a swap. Move into another word to start deleting; cross each word center to include it. Hold at an edge while moving the caret or deleting to keep scrolling through the sentence. Scrolling speeds up deeper in the edge zone. Return to the starting word to resume its alternatives, or pull back to shrink the delete range, then release to commit.</span></div>
+            </div>
+          </div>
+          <div class="control-section">
+            <h2>Sentence reels</h2>
+            <div class="segmented" role="group" aria-label="Keyboard key height">
+              <button type="button" data-height="40">Compact</button>
+              <button type="button" data-height="43" aria-pressed="true">Balanced</button>
+              <button type="button" data-height="49">Roomy</button>
+            </div>
+            <div class="demo-note">A sentence-first reel: faint words above and below each committed word. Swipe to preview the edited sentence and release to swap. Use the undo and redo arrows above the sentence; hold an enabled arrow to preview the change before releasing. Includes the “alot” → “a lot” split and “in to” → “into” join.</div>
+            <button class="reset" type="button" id="reset">Reset text and motion</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const editor = document.getElementById("editor");
+      const wordStrip = document.getElementById("word-strip");
+      const undoButton = document.getElementById("undo-button");
+      const redoButton = document.getElementById("redo-button");
+      const historyPreview = document.getElementById("history-preview");
+      const historyPreviewTitle = document.getElementById("history-preview-title");
+      const historyPreviewBefore = document.getElementById("history-preview-before");
+      const historyPreviewAfter = document.getElementById("history-preview-after");
+      const wordStripFrame = document.getElementById("word-strip-frame");
+      const stripCaret = document.createElement("span");
+      stripCaret.className = "strip-caret";
+      stripCaret.setAttribute("aria-hidden", "true");
+      const rowsHost = document.getElementById("letter-rows");
+      const board = document.getElementById("key-board");
+      const swipePath = document.getElementById("swipe-path");
+      const swipeDot = document.getElementById("swipe-dot");
+      const rowLayouts = {
+        en: ["qwertyuiop", "asdfghjkl", "'?zxcvbnm,."],
+        he: ["\u05e7\u05e8\u05d0\u05d8\u05d5\u05df\u05dd\u05e4", "\u05e9\u05d3\u05d2\u05db\u05e2\u05d9\u05d7\u05dc\u05da\u05e3", "\u00b3\u05d6\u05e1\u05d1\u05d4\u05e0\u05de\u05e6\u05ea\u00b4"]
+      };
+      let language = "en";
+      let tokens = [];
+      let activeStart = null;
+      let wordStatesByStart = new Map();
+      let wordGesture = null;
+      let stripCaretScrollFrame = 0;
+      let deleteAutoScrollFrame = 0;
+      let deleteAutoScrollLastTime = 0;
+      let suppressSentenceClick = false;
+      let suppressSentenceClickTimer = 0;
+      let stripTextRanges = new Map();
+      let selectedByStart = new Map();
+      let wheelDrag = null;
+      let suppressReelClick = false;
+      let reelSnapTimer = 0;
+      let typingGesture = null;
+      let fadeTimer = 0;
+      const undoHistory = [];
+      const redoHistory = [];
+      let historyBaseline = null;
+      let historyApplying = false;
+      let historyPreviewTimer = 0;
+      let historyPreviewOpened = false;
+      let suppressHistoryClick = false;
+      let nextInputHistoryKind = null;
+      const initialText = "we put alot in to it";
+
+      function readTokens(value) {
+        const found = [];
+        const pattern = /[\p{L}\p{N}][\p{L}\p{N}'â€™_-]*/gu;
+        let match;
+        while ((match = pattern.exec(value)) !== null) found.push({ word: match[0], start: match.index, end: match.index + match[0].length });
+        return found;
+      }
+
+      const curatedSuggestions = {
+        we:["well", "were"], put:["but", "out"], alot:["a lot", "allot"],
+        to:["too", "two"], it:["if", "is"], meet:["meat", "met"], me:["my", "we"],
+        at:["as", "it"], the:["they", "then"], old:["hold", "only"],
+        station:["stations", "situation"], teh:["the", "ten"], thier:["their", "there"],
+        recieve:["receive", "recipe"], definately:["definitely", "definition"],
+        hello:["hell", "help"], good:["food", "wood"], form:["from", "for"],
+        have:["gave", "save"], this:["thus", "his"], that:["than", "what"],
+        dont:["don't", "don"], cant:["can't", "cant"], your:["you're", "our"],
+        its:["it's", "is"], into:["in", "onto"]
+      };
+      const correctionLexicon = "about above after again all also always am an and any are around as ask at back be because been before being between big but by call can change come could day did do down each even every feel find first for from get give go good great had has have he her here him his how I if in into is it its just know like little long look lot made make many may me more most much must my new no not now of off old on once one only or other our out over own people place put real right said same say see she should small so some something still such take tell than that the their them then there these they thing think this those through time to too try two up us use want was way we well were what when where which who why will with word work world would write you your".split(/\s+/);
+      const hebrewLexicon = "×©×œ×•× ×©×œ×•×ž×š ×©×œ× ×©×œ×™×• ×¢×•×œ× ×”×™×•× ×—×œ×•× ×”×œ×•× ×ž×™×œ×” ×ž×™×œ×™× ×ž×§×œ×“×ª ×˜×•×‘×” ×˜×•×‘ ×ª×•×“×” ×ª×•×“×•×ª ×“×‘×¨ ×“×‘×¨×™× ×‘×™×ª ×—×‘×¨ ×—×‘×¨×™× ××¤×©×¨ ×¢×›×©×™×• ×›×Ÿ ×œ×".split(/\s+/);
+
+      function editDistance(left, right) {
+        let previous = Array.from({ length:right.length + 1 }, function (_, index) { return index; });
+        for (let row = 1; row <= left.length; row++) {
+          const next = [row];
+          for (let column = 1; column <= right.length; column++) {
+            next[column] = Math.min(
+              next[column - 1] + 1,
+              previous[column] + 1,
+              previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
+            );
+          }
+          previous = next;
+        }
+        return previous[right.length];
+      }
+
+      function preserveWordCase(suggestion, original) {
+        if (original === original.toLocaleUpperCase()) return suggestion.toLocaleUpperCase();
+        if (original.length && original[0] === original[0].toLocaleUpperCase() && original.slice(1) === original.slice(1).toLocaleLowerCase()) {
+          return suggestion.charAt(0).toLocaleUpperCase() + suggestion.slice(1);
+        }
+        return suggestion;
+      }
+
+      function getCandidates(token) {
+        const lower = token.word.toLocaleLowerCase();
+        const tokenIndex = tokens.findIndex(function (item) { return item.start === token.start; });
+        const nextToken = tokens[tokenIndex + 1];
+        const previousToken = tokens[tokenIndex - 1];
+        const gap = nextToken ? editor.value.slice(token.end, nextToken.start) : "";
+        const previousGap = previousToken ? editor.value.slice(previousToken.end, token.start) : "";
+        let suggestions = (curatedSuggestions[lower] || []).map(function (text) {
+          return { text:text, hint:lower === "alot" && text === "a lot" ? "Split 1â†’2" : "Autocorrect" };
+        });
+
+        if (lower === "in" && nextToken && nextToken.word.toLocaleLowerCase() === "to" && /^\s+$/.test(gap)) {
+          suggestions = [
+            { text:"into", hint:"Join 2â†’1", start:token.start, end:nextToken.end, kind:"join" },
+            { text:"inside", hint:"Autocorrect", start:token.start, end:token.end }
+          ];
+        }
+        if (lower === "to" && previousToken && previousToken.word.toLocaleLowerCase() === "in" && /^\s+$/.test(previousGap)) {
+          suggestions = [
+            { text:"into", hint:"Join 2→1", start:previousToken.start, end:token.end, kind:"join" },
+            { text:"too", hint:"Autocorrect", start:token.start, end:token.end }
+          ];
+        }
+
+        const lexicon = /\p{Script=Hebrew}/u.test(token.word) ? hebrewLexicon : correctionLexicon;
+        const ranked = lexicon
+          .filter(function (word, index, all) { return word.toLocaleLowerCase() !== lower && all.indexOf(word) === index; })
+          .map(function (word) { return { text:word, distance:editDistance(lower, word.toLocaleLowerCase()) }; })
+          .sort(function (a, b) { return a.distance - b.distance || a.text.localeCompare(b.text); });
+        const result = [{ text:token.word, hint:"In use", start:token.start, end:token.end }];
+        const seen = new Set([token.word.toLocaleLowerCase()]);
+        suggestions.concat(ranked.map(function (item) {
+          return { text:item.text, hint:item.distance <= 2 ? "Autocorrect" : "Suggestion" };
+        })).forEach(function (item) {
+          const formatted = preserveWordCase(item.text, token.word);
+          const key = formatted.toLocaleLowerCase();
+          if (result.length < 3 && !seen.has(key)) {
+            seen.add(key);
+            result.push({
+              text:formatted,
+              hint:item.hint,
+              start:item.start === undefined ? token.start : item.start,
+              end:item.end === undefined ? token.end : item.end,
+              kind:item.kind
+            });
+          }
+        });
+        return result;
+      }
+
+      function clampIndex(index, length) {
+        return Math.max(0, Math.min(length - 1, index));
+      }
+
+      function clampReelIndex(index, optionCount) {
+        return Math.max(0, Math.min(optionCount - 1, index));
+      }
+
+      function updateReelLabel(card, token, candidates, selected) {
+        const current = candidates[selected];
+        const alternatives = candidates.slice(selected + 1, selected + 3);
+        const below = alternatives.length
+          ? alternatives.map(function (item) { return item.text + ", " + item.hint; }).join("; ")
+          : "no further options";
+        const count = alternatives.length;
+        card.setAttribute("aria-label", "Word " + token.word + ". Selected suggestion: " + current.text + ". " + count + " option" + (count === 1 ? "" : "s") + " below: " + below + ". Drag up to browse suggestions; drag down to return. Release to commit.");
+      }
+
+      function tokenAtCaret() {
+        if (!tokens.length) return null;
+        const caret = editor.selectionStart || 0;
+        const sentenceWord = Array.from(wordStatesByStart.values()).find(function (state) {
+          return caret >= state.current.start && caret <= state.current.end && editor.value.slice(state.current.start, state.current.end) === state.current.text;
+        });
+        if (sentenceWord) return tokens.find(function (token) { return token.start === sentenceWord.current.start; }) || null;
+        const exact = tokens.find(function (token) { return caret >= token.start && caret <= token.end; });
+        if (exact) return exact;
+        let nearest = tokens[0];
+        let distance = Infinity;
+        tokens.forEach(function (token) {
+          const nextDistance = Math.min(Math.abs(caret - token.start), Math.abs(caret - token.end));
+          if (nextDistance < distance) { distance = nextDistance; nearest = token; }
+        });
+        return distance <= 2 ? nearest : null;
+      }
+
+      function makeCandidate(item, isCurrent) {
+        const line = document.createElement("div");
+        line.className = "candidate" + (isCurrent ? " current" : "");
+        const word = document.createElement("span");
+        word.className = "candidate-word";
+        word.textContent = item.text;
+        line.appendChild(word);
+        const hint = document.createElement("span");
+        hint.className = "candidate-hint";
+        hint.textContent = item.hint;
+        line.appendChild(hint);
+        return line;
+      }
+
+      function createWordCard() {
+        const card = document.createElement("div");
+        card.className = "word-card";
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        const viewport = document.createElement("div");
+        viewport.className = "reel-window";
+        const track = document.createElement("div");
+        track.className = "reel-track";
+        viewport.append(track);
+        card.append(viewport);
+        return card;
+      }
+
+      function updateWordCard(card, token, index) {
+        const viewport = card.querySelector(".reel-window");
+        const track = card.querySelector(".reel-track");
+        const candidates = getCandidates(token);
+        const candidateSignature = candidates.map(function (item) { return [item.text, item.hint, item.start, item.end, item.kind || ""].join("|"); }).join("~");
+        const selected = clampReelIndex(selectedByStart.get(token.start) || 0, candidates.length);
+        card.dataset.order = String(index);
+        card.dataset.start = String(token.start);
+        card.dataset.word = token.word;
+        card.classList.toggle("is-active", token.start === activeStart);
+        viewport.dataset.start = String(token.start);
+        viewport.setAttribute("aria-label", "Candidate reel for " + token.word);
+        track.setAttribute("aria-hidden", "true");
+        viewport.style.height = String(Math.min(3, candidates.length) * rowHeight) + "px";
+        updateReelLabel(card, token, candidates, selected);
+        if (card.dataset.candidateSignature !== candidateSignature) {
+          const rows = candidates.map(function (candidate) { return makeCandidate(candidate, false); });
+          track.dataset.optionCount = String(candidates.length);
+          card.dataset.candidateSignature = candidateSignature;
+          track.replaceChildren(...rows);
+          positionTrack(viewport, selected, false, 0);
+        }
+      }
+
+      function renderStrip() {
+        clearJoinPreview();
+        document.getElementById("active-word-readout").textContent = tokens.length + (tokens.length === 1 ? " WORD" : " WORDS");
+        if (!tokens.length) {
+          let empty = wordStrip.querySelector(".strip-empty");
+          if (!empty) {
+            empty = document.createElement("div");
+            empty.className = "strip-empty";
+            empty.textContent = "Type a word above or tap the keys. Its reel will appear here.";
+          }
+          wordStrip.replaceChildren(empty);
+          document.getElementById("focus-label").textContent = "READY FOR TEXT";
+          activeStart = null;
+          return;
+        }
+        const empty = wordStrip.querySelector(".strip-empty");
+        if (empty) empty.remove();
+        const cardsByOrder = new Map(Array.from(wordStrip.querySelectorAll(".word-card")).map(function (card) {
+          return [Number(card.dataset.order), card];
+        }));
+        tokens.forEach(function (token, index) {
+          let card = cardsByOrder.get(index);
+          if (!card) card = createWordCard();
+          updateWordCard(card, token, index);
+          const slot = wordStrip.children[index] || null;
+          if (slot !== card) wordStrip.insertBefore(card, slot);
+          cardsByOrder.delete(index);
+        });
+        cardsByOrder.forEach(function (card) { card.remove(); });
+        updateFocusLabel();
+      }
+
+      function positionTrack(viewport, index, animate, offset) {
+        const track = viewport.querySelector(".reel-track");
+        if (!track) return;
+        const optionCount = Number(track.dataset.optionCount) || 1;
+        const selected = clampReelIndex(index, optionCount);
+        const dragOffset = offset || 0;
+        const selectedRow = clampIndex(Math.round(index - dragOffset / rowHeight), optionCount);
+        track.style.transitionDuration = animate ? "170ms" : "0ms";
+        track.style.transform = "translateY(" + (-selected * rowHeight + dragOffset) + "px)";
+        Array.from(track.children).forEach(function (item, itemIndex) {
+          item.classList.toggle("current", itemIndex === selectedRow);
+        });
+      }
+
+      let joinPreview = null;
+      let joinPreviewCards = [];
+
+      function clearJoinPreview() {
+        joinPreviewCards.forEach(function (card) { card.classList.remove("is-join-source", "is-join-target"); });
+        joinPreviewCards = [];
+        if (joinPreview) joinPreview.classList.remove("is-visible");
+      }
+
+      function updateJoinPreview(token, candidate) {
+        clearJoinPreview();
+        if (!candidate || candidate.kind !== "join") return;
+        const firstCard = wordStrip.querySelector('[data-start="' + token.start + '"].word-card');
+        const nextToken = tokens.find(function (item) { return item.start > token.start && item.end === candidate.end; });
+        const secondCard = nextToken && wordStrip.querySelector('[data-start="' + nextToken.start + '"].word-card');
+        if (!firstCard || !secondCard) return;
+        if (!joinPreview || !joinPreview.isConnected) {
+          joinPreview = document.createElement("div");
+          joinPreview.className = "join-merge-preview";
+          joinPreview.setAttribute("aria-hidden", "true");
+          joinPreview.appendChild(document.createElement("span"));
+          wordStrip.appendChild(joinPreview);
+        }
+        const stripBounds = wordStrip.getBoundingClientRect();
+        const firstBounds = firstCard.getBoundingClientRect();
+        const secondBounds = secondCard.getBoundingClientRect();
+        joinPreview.style.left = String(firstBounds.left - stripBounds.left + wordStrip.scrollLeft) + "px";
+        joinPreview.style.top = String(Math.min(firstBounds.top, secondBounds.top) - stripBounds.top + wordStrip.scrollTop) + "px";
+        joinPreview.style.width = String(secondBounds.right - firstBounds.left) + "px";
+        joinPreview.style.height = String(Math.max(firstBounds.height, secondBounds.height)) + "px";
+        joinPreview.firstElementChild.textContent = "JOIN Â· " + candidate.text.toLocaleUpperCase();
+        firstCard.classList.add("is-join-source");
+        secondCard.classList.add("is-join-target");
+        joinPreviewCards = [firstCard, secondCard];
+        joinPreview.classList.add("is-visible");
+      }
+
+      function updateFocusLabel() {
+        const token = tokens.find(function (item) { return item.start === activeStart; });
+        document.getElementById("focus-label").textContent = token ? "FOCUSED Â· " + token.word.toLocaleUpperCase() : "MOVE THE TEXT CURSOR";
+      }
+
+      function getStripScrollBounds() {
+        const max = Math.max(0, wordStrip.scrollWidth - wordStrip.clientWidth);
+        return getComputedStyle(wordStrip).direction === "rtl" ? { min:-max, max:0 } : { min:0, max:max };
+      }
+
+      function scrollCardIntoView(card) {
+        const stripBounds = wordStrip.getBoundingClientRect();
+        const cardBounds = card.getBoundingClientRect();
+        const stripCenter = (stripBounds.left + stripBounds.right) / 2;
+        const cardCenter = (cardBounds.left + cardBounds.right) / 2;
+        let target = wordStrip.scrollLeft + cardCenter - stripCenter;
+        const limits = getStripScrollBounds();
+        target = Math.max(limits.min, Math.min(limits.max, target));
+        if (Math.abs(target - wordStrip.scrollLeft) > 1) wordStrip.scrollTo({ left:target, behavior:"smooth" });
+      }
+
+      function scheduleStripCaretScroll() {
+        if (wordGesture) return;
+        if (stripCaretScrollFrame) window.cancelAnimationFrame(stripCaretScrollFrame);
+        stripCaretScrollFrame = window.requestAnimationFrame(function () {
+          stripCaretScrollFrame = 0;
+          if (wordGesture) return;
+          if (!stripCaret.classList.contains("is-visible")) return;
+          const caretBounds = stripCaret.getBoundingClientRect();
+          const stripBounds = wordStrip.getBoundingClientRect();
+          const edge = 18;
+          if (caretBounds.left >= stripBounds.left + edge && caretBounds.right <= stripBounds.right - edge) return;
+          const activeLane = activeStart === null ? null : wordStrip.querySelector('[data-start="' + activeStart + '"].word-lane');
+          const focusBounds = activeLane && activeLane.getBoundingClientRect().width <= wordStrip.clientWidth
+            ? activeLane.getBoundingClientRect()
+            : caretBounds;
+          const stripCenter = (stripBounds.left + stripBounds.right) / 2;
+          const focusCenter = (focusBounds.left + focusBounds.right) / 2;
+          const current = wordStrip.scrollLeft;
+          let target = current + focusCenter - stripCenter;
+          const limits = getStripScrollBounds();
+          target = Math.max(limits.min, Math.min(limits.max, target));
+          if (Math.abs(target - current) > 1) wordStrip.scrollTo({ left:target, behavior:"smooth" });
+        });
+      }
+
+      function setActive(token, shouldScroll) {
+        if (!token) {
+          const changed = activeStart !== null;
+          activeStart = null;
+          if (changed) wordStrip.querySelectorAll(".word-card, .word-lane").forEach(function (item) { item.classList.remove("is-active"); });
+          updateFocusLabel();
+          return;
+        }
+        const changed = activeStart !== token.start;
+        activeStart = token.start;
+        if (changed) {
+          wordStrip.querySelectorAll(".word-card, .word-lane").forEach(function (item) {
+            item.classList.toggle("is-active", Number(item.dataset.start) === activeStart);
+          });
+          const card = wordStrip.querySelector('[data-start="' + activeStart + '"].word-card');
+          const lane = wordStrip.querySelector('[data-start="' + activeStart + '"].word-lane');
+          const viewport = card && card.querySelector(".reel-window");
+          const activeTrack = viewport && viewport.querySelector(".reel-track");
+          const selected = clampReelIndex(selectedByStart.get(activeStart) || 0, Number(activeTrack && activeTrack.dataset.optionCount) || 1);
+          if (viewport) positionTrack(viewport, selected, true, 0);
+          if (shouldScroll && (card || lane)) scrollCardIntoView(card || lane);
+        }
+        updateFocusLabel();
+      }
+
+      function syncFromEditor() {
+        const previousTokens = tokens;
+        const previousSelection = selectedByStart;
+        tokens = readTokens(editor.value);
+        const nextSelection = new Map();
+        tokens.forEach(function (token, index) {
+          const previous = previousTokens[index];
+          if (!previous) return;
+          const selected = previousSelection.get(previous.start);
+          if (selected !== undefined) nextSelection.set(token.start, selected);
+        });
+        selectedByStart = nextSelection;
+        const token = tokenAtCaret();
+        if (activeStart !== null && !tokens.some(function (item) { return item.start === activeStart; })) activeStart = token ? token.start : null;
+        renderStrip();
+        if (token) setActive(token, true);
+        else setActive(null, false);
+      }
+
+      function replaceToken(token, candidateIndex) {
+        const candidates = getCandidates(token);
+        const candidate = candidates[clampIndex(candidateIndex, candidates.length)];
+        const beforeHistoryState = captureHistoryState();
+        const caret = editor.selectionStart || token.end;
+        const start = candidate.start;
+        const end = candidate.end;
+        const relativeCaret = Math.max(0, Math.min(candidate.text.length, caret - start));
+        editor.setRangeText(candidate.text, start, end, "preserve");
+        const newCaret = start + relativeCaret;
+        editor.setSelectionRange(newCaret, newCaret);
+        recordHistoryChange(beforeHistoryState, captureHistoryState(), "correction");
+        selectedByStart.clear();
+        tokens = readTokens(editor.value);
+        const updated = tokens.find(function (item) { return item.start === token.start; });
+        activeStart = updated ? updated.start : null;
+        renderStrip();
+        if (updated) setActive(updated, false);
+      }
+
+      function cycleCandidate(tokenStart, direction) {
+        const token = tokens.find(function (item) { return item.start === tokenStart; });
+        if (!token) return;
+        const candidates = getCandidates(token);
+        const current = clampReelIndex(selectedByStart.get(token.start) || 0, candidates.length);
+        const next = clampReelIndex(current + direction, candidates.length);
+        if (next === current) return;
+        selectedByStart.set(token.start, next);
+        const card = wordStrip.querySelector('[data-start="' + token.start + '"].word-card');
+        const viewport = card && card.querySelector(".reel-window");
+        if (viewport) positionTrack(viewport, next, true, 0);
+        replaceToken(token, next);
+      }
+
+      function copyWordCandidate(candidate) {
+        return candidate ? Object.assign({}, candidate) : null;
+      }
+
+      function getWordState(token) {
+        const saved = wordStatesByStart.get(token.start);
+        if (saved && saved.current.start === token.start && editor.value.slice(saved.current.start, saved.current.end) === saved.current.text) return saved;
+        const candidates = getCandidates(token);
+        const normalize = function (candidate) {
+          if (!candidate) return null;
+          return Object.assign({}, candidate, {
+            start:candidate.start === undefined ? token.start : candidate.start,
+            end:candidate.end === undefined ? token.end : candidate.end
+          });
+        };
+        const state = { current:normalize(candidates[0]), above:normalize(candidates[1]), below:normalize(candidates[2]) };
+        wordStatesByStart.set(token.start, state);
+        return state;
+      }
+
+      function swapWordState(state, direction) {
+        const slot = direction === "up" ? "above" : "below";
+        const candidate = state[slot];
+        if (!candidate) return null;
+        const start = candidate.start;
+        const replaceEnd = candidate.end;
+        const oldLength = replaceEnd - start;
+        const displaced = editor.value.slice(start, replaceEnd);
+        const currentEnd = start + candidate.text.length;
+        const next = {
+          current:copyWordCandidate(candidate),
+          above:copyWordCandidate(state.above),
+          below:copyWordCandidate(state.below)
+        };
+        next.current.start = start;
+        next.current.end = currentEnd;
+        next.current.sourceEnd = replaceEnd;
+        if (candidate.kind === "join") next.current.joinTargetEnd = replaceEnd;
+        next[slot] = { text:displaced, hint:"Previous word", start:start, end:currentEnd };
+        const otherSlot = slot === "above" ? "below" : "above";
+        if (next[otherSlot] && next[otherSlot].kind === "join" && candidate.kind !== "join" && next[otherSlot].end > replaceEnd) {
+          next[otherSlot].end += candidate.text.length - oldLength;
+        } else if (next[otherSlot]) {
+          next[otherSlot].start = start;
+          next[otherSlot].end = currentEnd;
+          delete next[otherSlot].kind;
+          delete next[otherSlot].joinTargetEnd;
+        }
+        return next;
+      }
+
+      function makeWordLane(token, state, previewDirection, isDeleting) {
+        const lane = document.createElement("button");
+        lane.type = "button";
+        lane.className = "word-lane" + (token.start === activeStart ? " is-active" : "") + (previewDirection ? " is-preview swap-" + previewDirection : "") + (isDeleting ? " is-delete-preview" : "");
+        lane.dataset.start = String(token.start);
+        lane.setAttribute("aria-label", "Word " + token.word + ". Above: " + (state.above ? state.above.text : "none") + ". Current: " + state.current.text + ". Below: " + (state.below ? state.below.text : "none") + ". Tap a character to place the text cursor, or swipe up or down and release to swap.");
+        if (!isDeleting) lane.setAttribute("aria-label", "Word " + token.word + ". Above: " + (state.above ? state.above.text : "none") + ". Current: " + state.current.text + ". Below: " + (state.below ? state.below.text : "none") + ". Tap to place the cursor. Swipe vertically to preview a swap; move into another word to begin deletion, or return here to resume alternatives.");
+        if (isDeleting) lane.setAttribute("aria-label", "Word marked for deletion. Cross another word center to include it, pull back to shrink the selection, or return to the starting word to resume its alternatives. Release to delete.");
+        const above = document.createElement("span");
+        above.className = "lane-option lane-up" + (state.above ? "" : " is-empty");
+        if (isDeleting) above.classList.add("is-empty");
+        above.textContent = state.above ? state.above.text : "·";
+        const current = document.createElement("span");
+        current.className = "lane-current";
+        current.textContent = state.current.text;
+        if (current.firstChild) stripTextRanges.set(current.firstChild, {
+          start:state.current.start,
+          end:state.current.end,
+          sourceEnd:state.current.sourceEnd === undefined ? state.current.end : state.current.sourceEnd,
+          displayLength:state.current.text.length,
+          isLane:true
+        });
+        const below = document.createElement("span");
+        below.className = "lane-option lane-down" + (state.below ? "" : " is-empty");
+        if (isDeleting) below.classList.add("is-empty");
+        below.textContent = state.below ? state.below.text : "·";
+        lane.append(above, current, below);
+        return lane;
+      }
+
+      function getJoinOutline(token, state) {
+        if (!state.current || state.current.kind !== "join") return null;
+        const secondToken = tokens.find(function (item) { return item.start > token.start && item.end === state.current.joinTargetEnd; });
+        const firstLane = wordStrip.querySelector('[data-start="' + token.start + '"].word-lane');
+        const secondLane = secondToken && wordStrip.querySelector('[data-start="' + secondToken.start + '"].word-lane');
+        if (!firstLane || !secondLane) return null;
+        const strip = wordStrip.getBoundingClientRect();
+        const first = firstLane.getBoundingClientRect();
+        const second = secondLane.getBoundingClientRect();
+        return {
+          left:first.left - strip.left + wordStrip.scrollLeft - 6,
+          top:Math.min(first.top, second.top) - strip.top + wordStrip.scrollTop,
+          width:second.right - first.left + 12,
+          height:Math.max(first.height, second.height)
+        };
+      }
+
+      function captureDeleteLayout() {
+        return Array.from(wordStrip.querySelectorAll(".word-lane")).map(function (lane) {
+          const token = tokens.find(function (item) { return item.start === Number(lane.dataset.start); });
+          if (!token) return null;
+          const firstIndex = tokens.findIndex(function (item) { return item.start === token.start; });
+          const state = getWordState(token);
+          const sourceEnd = state.current.sourceEnd === undefined ? state.current.end : state.current.sourceEnd;
+          let lastIndex = firstIndex;
+          while (lastIndex + 1 < tokens.length && tokens[lastIndex].end < sourceEnd) lastIndex++;
+          const bounds = lane.getBoundingClientRect();
+          return {
+            start:token.start,
+            firstIndex:firstIndex,
+            lastIndex:lastIndex,
+            left:bounds.left,
+            right:bounds.right,
+            top:bounds.top,
+            bottom:bounds.bottom,
+            centerX:(bounds.left + bounds.right) / 2,
+            hitLeft:bounds.left - 4,
+            hitRight:bounds.right + 4,
+            width:bounds.width
+          };
+        }).filter(Boolean);
+      }
+
+      function getDeleteEdgeIntent(clientX) {
+        const bounds = wordStrip.getBoundingClientRect();
+        const zoneWidth = Math.min(bounds.width / 2, Math.max(34, Math.min(58, bounds.width * .14)));
+        if (clientX < bounds.left + zoneWidth) {
+          return { direction:-1, depth:Math.max(0, Math.min(1, (bounds.left + zoneWidth - clientX) / zoneWidth)) };
+        }
+        if (clientX > bounds.right - zoneWidth) {
+          return { direction:1, depth:Math.max(0, Math.min(1, (clientX - (bounds.right - zoneWidth)) / zoneWidth)) };
+        }
+        return null;
+      }
+
+      function updateEdgeScrollVisuals(clientX) {
+        const deleting = Boolean(wordGesture && wordGesture.mode === "delete");
+        const cursorDrag = Boolean(wordGesture && wordGesture.mode === "cursor" && wordGesture.tokenStart !== null);
+        const movingCaret = Boolean(cursorDrag && wordGesture.edgeCursorActive);
+        wordStripFrame.classList.toggle("is-edge-scroll-mode", deleting || cursorDrag);
+        const intent = deleting || movingCaret ? getDeleteEdgeIntent(clientX) : null;
+        wordStripFrame.classList.toggle("is-edge-left", Boolean(intent && intent.direction < 0));
+        wordStripFrame.classList.toggle("is-edge-right", Boolean(intent && intent.direction > 0));
+        return intent;
+      }
+
+      function stopEdgeAutoScroll(clearVisuals) {
+        if (deleteAutoScrollFrame) window.cancelAnimationFrame(deleteAutoScrollFrame);
+        deleteAutoScrollFrame = 0;
+        deleteAutoScrollLastTime = 0;
+        if (clearVisuals) {
+          wordStripFrame.classList.remove("is-edge-scroll-mode", "is-edge-left", "is-edge-right");
+        }
+      }
+
+      function syncEdgeAutoScroll(clientX) {
+        const intent = updateEdgeScrollVisuals(clientX);
+        const eligible = wordGesture && (wordGesture.mode === "delete" || (wordGesture.mode === "cursor" && wordGesture.edgeCursorActive && wordGesture.tokenStart !== null));
+        if (!intent || !eligible) {
+          stopEdgeAutoScroll(false);
+          return;
+        }
+        const limits = getStripScrollBounds();
+        if ((intent.direction < 0 && wordStrip.scrollLeft <= limits.min) || (intent.direction > 0 && wordStrip.scrollLeft >= limits.max)) {
+          stopEdgeAutoScroll(false);
+          return;
+        }
+        if (!deleteAutoScrollFrame) deleteAutoScrollFrame = window.requestAnimationFrame(runEdgeAutoScroll);
+      }
+
+      function runEdgeAutoScroll(timestamp) {
+        deleteAutoScrollFrame = 0;
+        const gesture = wordGesture;
+        const deleting = Boolean(gesture && gesture.mode === "delete");
+        const movingCaret = Boolean(gesture && gesture.mode === "cursor" && gesture.edgeCursorActive && gesture.tokenStart !== null);
+        if (!deleting && !movingCaret) {
+          stopEdgeAutoScroll(true);
+          return;
+        }
+        const intent = updateEdgeScrollVisuals(gesture.lastClientX);
+        if (!intent) {
+          deleteAutoScrollLastTime = 0;
+          return;
+        }
+        const limits = getStripScrollBounds();
+        const elapsed = deleteAutoScrollLastTime ? Math.max(0, Math.min(32, timestamp - deleteAutoScrollLastTime)) : 16;
+        deleteAutoScrollLastTime = timestamp;
+        const speed = 24 + 780 * intent.depth * intent.depth;
+        const previousScroll = wordStrip.scrollLeft;
+        wordStrip.scrollLeft = Math.max(limits.min, Math.min(limits.max, previousScroll + intent.direction * speed * elapsed / 1000));
+        const scrollDelta = wordStrip.scrollLeft - previousScroll;
+        if (Math.abs(scrollDelta) < .1) {
+          deleteAutoScrollLastTime = 0;
+          return;
+        }
+        if (deleting) {
+          gesture.deleteLayout.forEach(function (item) {
+            item.left -= scrollDelta;
+            item.right -= scrollDelta;
+            item.centerX -= scrollDelta;
+            item.hitLeft -= scrollDelta;
+            item.hitRight -= scrollDelta;
+          });
+          updateDeletePreview(gesture.lastClientX);
+        } else {
+          setCaretFromStripPoint(gesture.lastClientX, gesture.lastClientY, wordStrip);
+        }
+        if (wordGesture && (wordGesture.mode === "delete" || (wordGesture.mode === "cursor" && wordGesture.edgeCursorActive && wordGesture.tokenStart !== null))) {
+          deleteAutoScrollFrame = window.requestAnimationFrame(runEdgeAutoScroll);
+        }
+      }
+
+      function updateScrollGesture(event) {
+        const gesture = wordGesture;
+        if (!gesture) return;
+        const scrollSign = getComputedStyle(wordStrip).direction === "rtl" ? 1 : -1;
+        wordStrip.scrollLeft = gesture.startScrollLeft + (event.clientX - gesture.startX) * scrollSign;
+      }
+
+      function updateCursorDragGesture(event) {
+        const gesture = wordGesture;
+        if (!gesture) return;
+        gesture.edgeCursorActive = Boolean(getDeleteEdgeIntent(event.clientX));
+        if (gesture.edgeCursorActive) gesture.edgeScrollUsed = true;
+        setCaretFromStripPoint(event.clientX, event.clientY, wordStrip);
+        syncEdgeAutoScroll(event.clientX);
+      }
+
+      function getDeleteOutline() {
+        if (!wordGesture || !wordGesture.deleteLayout || !wordGesture.deleteTokenStarts || !wordGesture.deleteTokenStarts.size) return null;
+        const selected = wordGesture.deleteLayout.filter(function (item) { return wordGesture.deleteTokenStarts.has(item.start); });
+        if (!selected.length) return null;
+        const strip = wordStrip.getBoundingClientRect();
+        const left = Math.min.apply(null, selected.map(function (item) { return item.left; }));
+        const right = Math.max.apply(null, selected.map(function (item) { return item.right; }));
+        const top = Math.min.apply(null, selected.map(function (item) { return item.top; }));
+        const bottom = Math.max.apply(null, selected.map(function (item) { return item.bottom; }));
+        const horizontalInset = 4;
+        return {
+          left:left - strip.left + wordStrip.scrollLeft - horizontalInset,
+          top:top - strip.top + wordStrip.scrollTop,
+          width:right - left + horizontalInset * 2,
+          height:bottom - top
+        };
+      }
+
+      function updateDeletePreview(clientX) {
+        if (!wordGesture || !wordGesture.deleteLayout) return;
+        const anchor = wordGesture.deleteLayout.find(function (item) { return item.start === wordGesture.tokenStart; });
+        if (!anchor) return;
+        const delta = clientX - anchor.centerX;
+        const endpoint = clientX;
+        const selected = new Set([anchor.start]);
+        if (endpoint > anchor.centerX) {
+          wordGesture.deleteLayout.forEach(function (item) {
+            if (item.centerX > anchor.centerX && item.centerX <= endpoint) selected.add(item.start);
+          });
+        } else if (endpoint < anchor.centerX) {
+          wordGesture.deleteLayout.forEach(function (item) {
+            if (item.centerX < anchor.centerX && item.centerX >= endpoint) selected.add(item.start);
+          });
+        }
+        const previousSelection = wordGesture.deleteTokenStarts || new Set();
+        const selectionChanged = previousSelection.size !== selected.size || Array.from(selected).some(function (start) { return !previousSelection.has(start); });
+        wordGesture.deleteTokenStarts = selected;
+        wordGesture.deleteDirection = delta < 0 ? "left" : delta > 0 ? "right" : null;
+        if (selectionChanged) renderStrip();
+      }
+
+      function updateHorizontalWordMode(clientX, clientY) {
+        if (!wordGesture || !wordGesture.deleteLayout || wordGesture.tokenStart === null) return;
+        const anchor = wordGesture.deleteLayout.find(function (item) { return item.start === wordGesture.tokenStart; });
+        if (!anchor) return;
+        const direction = clientY - wordGesture.startY < -10 ? "up" : clientY - wordGesture.startY > 10 ? "down" : null;
+
+        if (wordGesture.mode === "word") {
+          const enteredAnotherWord = wordGesture.deleteLayout.some(function (item) {
+            return item.start !== anchor.start && clientX >= item.hitLeft && clientX <= item.hitRight;
+          });
+          if (!enteredAnotherWord) return;
+          wordGesture.mode = "delete";
+          wordGesture.previewState = null;
+          wordGesture.deleteTokenStarts = new Set([anchor.start]);
+          renderStrip();
+          updateDeletePreview(clientX);
+          return;
+        }
+
+        if (wordGesture.mode !== "delete") return;
+        if (clientX >= anchor.hitLeft && clientX <= anchor.hitRight) {
+          wordGesture.mode = "word";
+          wordGesture.deleteTokenStarts = new Set();
+          wordGesture.deleteDirection = null;
+          wordGesture.direction = direction;
+          const token = tokens.find(function (item) { return item.start === anchor.start; });
+          wordGesture.previewState = token && direction ? swapWordState(getWordState(token), direction) : null;
+          renderStrip();
+          return;
+        }
+        updateDeletePreview(clientX);
+      }
+
+      function makeStripText(text, start) {
+        const node = document.createTextNode(text);
+        stripTextRanges.set(node, { start:start, end:start + text.length, sourceEnd:start + text.length, displayLength:text.length });
+        return node;
+      }
+
+      function renderStrip() {
+        stripTextRanges.clear();
+        document.getElementById("active-word-readout").textContent = tokens.length + (tokens.length === 1 ? " WORD" : " WORDS");
+        if (!tokens.length) {
+          if (editor.value.length) {
+            wordStrip.replaceChildren(makeStripText(editor.value, 0), stripCaret);
+          } else {
+            const empty = document.createElement("div");
+            empty.className = "strip-empty";
+            empty.textContent = "Type a word above or tap the keys. Its suggestions will appear here.";
+            wordStrip.replaceChildren(empty, stripCaret);
+          }
+          positionStripCaret();
+          document.getElementById("focus-label").textContent = "READY FOR TEXT";
+          activeStart = null;
+          return;
+        }
+        const previewToken = wordGesture && wordGesture.previewState
+          ? tokens.find(function (item) { return item.start === wordGesture.previewState.current.start; }) || tokens.find(function (item) { return item.start === wordGesture.tokenStart; })
+          : null;
+        const previewState = previewToken && wordGesture ? wordGesture.previewState : null;
+        const joinOutline = previewToken && previewState ? getJoinOutline(previewToken, previewState) : null;
+        const deleteOutline = wordGesture && wordGesture.mode === "delete" ? getDeleteOutline() : null;
+        const fragments = [];
+        let cursor = 0;
+        let consumedTo = 0;
+        tokens.forEach(function (token) {
+          if (token.start < consumedTo) return;
+          if (token.start > cursor) fragments.push(makeStripText(editor.value.slice(cursor, token.start), cursor));
+          const state = previewToken && token.start === previewToken.start ? previewState : getWordState(token);
+          const isPreviewLane = Boolean(previewToken && token.start === previewToken.start);
+          const isDeleting = Boolean(wordGesture && wordGesture.mode === "delete" && wordGesture.deleteTokenStarts && wordGesture.deleteTokenStarts.has(token.start));
+          const lane = makeWordLane(token, state, isPreviewLane ? wordGesture.direction : null, isDeleting);
+          if (wordGesture && wordGesture.mode === "delete") {
+            const layout = wordGesture.deleteLayout && wordGesture.deleteLayout.find(function (item) { return item.start === token.start; });
+            if (layout) lane.style.width = String(layout.width) + "px";
+          } else if (isPreviewLane && joinOutline) {
+            lane.style.width = String(joinOutline.width) + "px";
+            lane.style.marginInline = "-2px";
+          }
+          fragments.push(lane);
+          const sourceEnd = state.current.sourceEnd === undefined ? state.current.end : state.current.sourceEnd;
+          consumedTo = Math.max(token.end, sourceEnd);
+          cursor = consumedTo;
+        });
+        if (cursor < editor.value.length) fragments.push(makeStripText(editor.value.slice(cursor), cursor));
+        if (joinOutline) {
+          const outline = document.createElement("div");
+          outline.className = "join-preview-outline";
+          outline.setAttribute("aria-hidden", "true");
+          outline.style.left = String(joinOutline.left) + "px";
+          outline.style.top = String(joinOutline.top) + "px";
+          outline.style.width = String(joinOutline.width) + "px";
+          outline.style.height = String(joinOutline.height) + "px";
+          const label = document.createElement("span");
+          label.textContent = "JOIN";
+          outline.appendChild(label);
+          fragments.push(outline);
+        }
+        if (deleteOutline) {
+          const outline = document.createElement("div");
+          outline.className = "delete-preview-outline";
+          outline.setAttribute("aria-hidden", "true");
+          outline.style.left = String(deleteOutline.left) + "px";
+          outline.style.top = String(deleteOutline.top) + "px";
+          outline.style.width = String(deleteOutline.width) + "px";
+          outline.style.height = String(deleteOutline.height) + "px";
+          const label = document.createElement("span");
+          label.textContent = "DELETE";
+          outline.appendChild(label);
+          fragments.push(outline);
+        }
+        fragments.push(stripCaret);
+        const scrollLeft = wordStrip.scrollLeft;
+        wordStrip.replaceChildren(...fragments);
+        wordStrip.scrollLeft = scrollLeft;
+        positionStripCaret();
+        updateFocusLabel();
+      }
+
+      function updateFocusLabel() {
+        const token = tokens.find(function (item) { return item.start === activeStart; });
+        document.getElementById("focus-label").textContent = token ? "FOCUSED · " + token.word.toLocaleUpperCase() : "MOVE THE TEXT CURSOR";
+      }
+
+      function setActive(token) {
+        activeStart = token ? token.start : null;
+        wordStrip.querySelectorAll(".word-lane").forEach(function (lane) {
+          lane.classList.toggle("is-active", Number(lane.dataset.start) === activeStart);
+        });
+        updateFocusLabel();
+      }
+
+      function mapStripTextOffset(node, offset) {
+        const source = stripTextRanges.get(node);
+        if (!source || node.nodeType !== Node.TEXT_NODE) return null;
+        const maximum = Math.min(node.data.length, source.end - source.start);
+        return source.start + Math.max(0, Math.min(maximum, offset));
+      }
+
+      function caretOffsetAtPoint(x, y) {
+        let position = null;
+        if (document.caretPositionFromPoint) {
+          const caret = document.caretPositionFromPoint(x, y);
+          if (caret) position = mapStripTextOffset(caret.offsetNode, caret.offset);
+        } else if (document.caretRangeFromPoint) {
+          const caret = document.caretRangeFromPoint(x, y);
+          if (caret) position = mapStripTextOffset(caret.startContainer, caret.startOffset);
+        }
+        if (position !== null) return position;
+
+        let nearest = null;
+        let nearestDistance = Infinity;
+        stripTextRanges.forEach(function (source, node) {
+          if (!node.isConnected) return;
+          const length = Math.min(node.data.length, source.end - source.start);
+          for (let offset = 0; offset < length;) {
+            const codePoint = node.data.codePointAt(offset);
+            const characterLength = codePoint > 0xffff ? 2 : 1;
+            const character = document.createRange();
+            character.setStart(node, offset);
+            character.setEnd(node, Math.min(length, offset + characterLength));
+            const rects = Array.from(character.getClientRects());
+            const direction = getComputedStyle(node.parentElement).direction;
+            rects.forEach(function (rect) {
+              const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+              const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+              const distance = dx * dx + dy * dy * 2;
+              if (distance >= nearestDistance) return;
+              const midpoint = (rect.left + rect.right) / 2;
+              const before = direction === "rtl" ? x >= midpoint : x <= midpoint;
+              nearestDistance = distance;
+              nearest = source.start + offset + (before ? 0 : characterLength);
+            });
+            offset += characterLength;
+          }
+        });
+        return nearest;
+      }
+
+      function positionStripCaret() {
+        if (!stripCaret.isConnected) return;
+        scheduleStripCaretScroll();
+        const caret = editor.selectionStart === null ? editor.value.length : editor.selectionStart;
+        let nearest = null;
+        let nearestDistance = Infinity;
+        stripTextRanges.forEach(function (source, node) {
+          if (!node.isConnected) return;
+          const sourceEnd = source.sourceEnd === undefined ? source.end : source.sourceEnd;
+          const distance = caret < source.start ? source.start - caret : caret > sourceEnd ? caret - sourceEnd : 0;
+          if (distance < nearestDistance || (distance === nearestDistance && source.isLane && nearest && !nearest.source.isLane)) {
+            nearest = { source:source, node:node, sourceEnd:sourceEnd };
+            nearestDistance = distance;
+          }
+        });
+
+        if (!nearest) {
+          const stripBounds = wordStrip.getBoundingClientRect();
+          const empty = wordStrip.querySelector(".strip-empty");
+          const rtl = getComputedStyle(wordStrip).direction === "rtl";
+          const left = rtl ? wordStrip.clientWidth - 6 + wordStrip.scrollLeft : 5 + wordStrip.scrollLeft;
+          const top = empty ? empty.getBoundingClientRect().top - stripBounds.top + wordStrip.scrollTop + (empty.getBoundingClientRect().height - 19) / 2 : (wordStrip.clientHeight - 19) / 2;
+          stripCaret.style.left = String(left) + "px";
+          stripCaret.style.top = String(top) + "px";
+          stripCaret.style.height = "19px";
+          stripCaret.classList.add("is-visible");
+          return;
+        }
+
+        const sourceLength = Math.max(0, nearest.sourceEnd - nearest.source.start);
+        const displayLength = Math.min(nearest.node.data.length, nearest.source.displayLength === undefined ? nearest.node.data.length : nearest.source.displayLength);
+        const logicalOffset = Math.max(0, Math.min(sourceLength, caret - nearest.source.start));
+        const displayOffset = sourceLength === 0 ? 0 : Math.round(logicalOffset * displayLength / sourceLength);
+        const rtl = getComputedStyle(nearest.node.parentElement).direction === "rtl";
+        let rangeStart;
+        let rangeEnd;
+        let edge;
+        if (displayOffset < displayLength) {
+          rangeStart = displayOffset;
+          rangeEnd = displayOffset + 1;
+          edge = rtl ? "right" : "left";
+        } else if (displayLength > 0) {
+          rangeStart = displayLength - 1;
+          rangeEnd = displayLength;
+          edge = rtl ? "left" : "right";
+        } else {
+          stripCaret.classList.remove("is-visible");
+          return;
+        }
+        const textRange = document.createRange();
+        textRange.setStart(nearest.node, rangeStart);
+        textRange.setEnd(nearest.node, rangeEnd);
+        const characterBounds = textRange.getBoundingClientRect();
+        if (!characterBounds.height) {
+          stripCaret.classList.remove("is-visible");
+          return;
+        }
+        const stripBounds = wordStrip.getBoundingClientRect();
+        const height = Math.max(16, Math.min(22, characterBounds.height * .72));
+        stripCaret.style.left = String(characterBounds[edge] - stripBounds.left + wordStrip.scrollLeft) + "px";
+        stripCaret.style.top = String(characterBounds.top - stripBounds.top + wordStrip.scrollTop + (characterBounds.height - height) / 2) + "px";
+        stripCaret.style.height = String(height) + "px";
+        stripCaret.classList.add("is-visible");
+      }
+
+      function setStripCaret(offset) {
+        const safeOffset = Math.max(0, Math.min(editor.value.length, offset));
+        editor.focus({ preventScroll:true });
+        editor.setSelectionRange(safeOffset, safeOffset);
+        updateHistoryBaselineSelection();
+        setActive(tokenAtCaret());
+        positionStripCaret();
+      }
+
+      function setCaretFromStripPoint(x, y, fallbackTarget) {
+        let offset = caretOffsetAtPoint(x, y);
+        const target = document.elementFromPoint(x, y) || fallbackTarget;
+        const lane = target instanceof Element ? target.closest(".word-lane") : null;
+        if (offset === null && lane) {
+          const token = tokens.find(function (item) { return item.start === Number(lane.dataset.start); });
+          if (token) offset = getWordState(token).current.end;
+        }
+        if (offset === null) return;
+        setStripCaret(offset);
+      }
+
+      function suppressNextStripClick() {
+        suppressSentenceClick = true;
+        window.clearTimeout(suppressSentenceClickTimer);
+        suppressSentenceClickTimer = window.setTimeout(function () {
+          suppressSentenceClick = false;
+          suppressSentenceClickTimer = 0;
+        }, 120);
+      }
+
+      function captureHistoryState() {
+        const start = editor.selectionStart === null ? editor.value.length : editor.selectionStart;
+        const end = editor.selectionEnd === null ? start : editor.selectionEnd;
+        return { value:editor.value, start:start, end:end };
+      }
+
+      function updateHistoryBaselineSelection() {
+        if (!historyApplying && historyBaseline && historyBaseline.value === editor.value) {
+          historyBaseline = captureHistoryState();
+        }
+      }
+
+      function getHistoryTextDelta(beforeText, afterText) {
+        const before = Array.from(beforeText);
+        const after = Array.from(afterText);
+        let prefix = 0;
+        while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+        let suffix = 0;
+        while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+        return {
+          removed:before.slice(prefix, before.length - suffix).join(""),
+          inserted:after.slice(prefix, after.length - suffix).join("")
+        };
+      }
+
+      function quoteHistoryText(value) {
+        const text = value.replace(/\s+/gu, " ").trim();
+        if (!text) return "spacing";
+        const shortened = Array.from(text).slice(0, 26).join("");
+        return "“" + shortened + (Array.from(text).length > 26 ? "…”" : "”");
+      }
+
+      function describeHistoryChange(beforeText, afterText) {
+        const delta = getHistoryTextDelta(beforeText, afterText);
+        if (delta.removed && delta.inserted) return "Replace " + quoteHistoryText(delta.removed) + " with " + quoteHistoryText(delta.inserted);
+        if (delta.removed) return "Delete " + quoteHistoryText(delta.removed);
+        if (delta.inserted) return "Insert " + quoteHistoryText(delta.inserted);
+        return "Edit sentence";
+      }
+
+      function updateHistoryButtons() {
+        undoButton.disabled = undoHistory.length === 0;
+        redoButton.disabled = redoHistory.length === 0;
+      }
+
+      function recordHistoryChange(before, after, requestedKind) {
+        if (!before || before.value === after.value) {
+          historyBaseline = after;
+          return;
+        }
+        const delta = getHistoryTextDelta(before.value, after.value);
+        const kind = requestedKind || (delta.inserted && !delta.removed && !/\s/u.test(delta.inserted)
+          ? "typing"
+          : delta.removed && !delta.inserted && !/\s/u.test(delta.removed)
+            ? "deleting"
+            : "edit");
+        const now = performance.now();
+        const previous = undoHistory[undoHistory.length - 1];
+        const canMerge = previous && (kind === "typing" || kind === "deleting") && previous.kind === kind &&
+          previous.afterValue === before.value && previous.afterStart === before.start && previous.afterEnd === before.end &&
+          now - previous.changedAt <= 850;
+        if (canMerge) {
+          previous.afterValue = after.value;
+          previous.afterStart = after.start;
+          previous.afterEnd = after.end;
+          previous.changedAt = now;
+          previous.description = describeHistoryChange(previous.beforeValue, after.value);
+        } else {
+          undoHistory.push({
+            beforeValue:before.value,
+            beforeStart:before.start,
+            beforeEnd:before.end,
+            afterValue:after.value,
+            afterStart:after.start,
+            afterEnd:after.end,
+            description:describeHistoryChange(before.value, after.value),
+            kind:kind,
+            changedAt:now
+          });
+          if (undoHistory.length > 40) undoHistory.shift();
+        }
+        redoHistory.length = 0;
+        historyBaseline = after;
+        updateHistoryButtons();
+      }
+
+      function getHistoryEntry(direction) {
+        const stack = direction === "undo" ? undoHistory : redoHistory;
+        return stack.length ? stack[stack.length - 1] : null;
+      }
+
+      function showHistoryPreview(direction) {
+        const entry = getHistoryEntry(direction);
+        if (!entry) return false;
+        const undoing = direction === "undo";
+        historyPreviewTitle.textContent = (undoing ? "UNDO · " : "REDO · ") + entry.description.toLocaleUpperCase();
+        historyPreviewBefore.textContent = undoing ? entry.afterValue : entry.beforeValue;
+        historyPreviewAfter.textContent = undoing ? entry.beforeValue : entry.afterValue;
+        historyPreview.hidden = false;
+        return true;
+      }
+
+      function hideHistoryPreview() {
+        window.clearTimeout(historyPreviewTimer);
+        historyPreviewTimer = 0;
+        historyPreview.hidden = true;
+        historyPreviewOpened = false;
+      }
+
+      function applyHistory(direction) {
+        const undoing = direction === "undo";
+        const source = undoing ? undoHistory : redoHistory;
+        const destination = undoing ? redoHistory : undoHistory;
+        const entry = source.pop();
+        if (!entry) {
+          updateHistoryButtons();
+          return;
+        }
+        destination.push(entry);
+        const value = undoing ? entry.beforeValue : entry.afterValue;
+        const start = undoing ? entry.beforeStart : entry.afterStart;
+        const end = undoing ? entry.beforeEnd : entry.afterEnd;
+        historyApplying = true;
+        try {
+          editor.focus({ preventScroll:true });
+          editor.value = value;
+          editor.setSelectionRange(Math.min(start, value.length), Math.min(end, value.length));
+          historyBaseline = captureHistoryState();
+          selectedByStart.clear();
+          editor.dispatchEvent(new Event("input", { bubbles:true }));
+        } finally {
+          historyApplying = false;
+        }
+        historyBaseline = captureHistoryState();
+        hideHistoryPreview();
+        updateHistoryButtons();
+      }
+
+      function bindHistoryButton(button, direction) {
+        let pointerId = null;
+        let pointerCancelled = false;
+        button.addEventListener("pointerdown", function (event) {
+          if (button.disabled || event.button !== 0) return;
+          event.preventDefault();
+          pointerId = event.pointerId;
+          pointerCancelled = false;
+          historyPreviewOpened = false;
+          window.clearTimeout(historyPreviewTimer);
+          if (button.setPointerCapture) button.setPointerCapture(event.pointerId);
+          historyPreviewTimer = window.setTimeout(function () {
+            if (pointerId !== null && !pointerCancelled) historyPreviewOpened = showHistoryPreview(direction);
+          }, 380);
+        });
+        button.addEventListener("pointermove", function (event) {
+          if (event.pointerId !== pointerId || pointerCancelled) return;
+          const bounds = button.getBoundingClientRect();
+          if (event.clientX < bounds.left - 8 || event.clientX > bounds.right + 8 || event.clientY < bounds.top - 8 || event.clientY > bounds.bottom + 8) {
+            pointerCancelled = true;
+            window.clearTimeout(historyPreviewTimer);
+            hideHistoryPreview();
+          }
+        });
+        button.addEventListener("pointerup", function (event) {
+          if (event.pointerId !== pointerId) return;
+          window.clearTimeout(historyPreviewTimer);
+          const bounds = button.getBoundingClientRect();
+          const inside = event.clientX >= bounds.left - 8 && event.clientX <= bounds.right + 8 && event.clientY >= bounds.top - 8 && event.clientY <= bounds.bottom + 8;
+          if (!pointerCancelled && inside) applyHistory(direction);
+          else hideHistoryPreview();
+          pointerId = null;
+          suppressHistoryClick = true;
+          window.setTimeout(function () { suppressHistoryClick = false; }, 0);
+        });
+        button.addEventListener("pointercancel", function (event) {
+          if (event.pointerId !== pointerId) return;
+          pointerId = null;
+          pointerCancelled = true;
+          window.clearTimeout(historyPreviewTimer);
+          hideHistoryPreview();
+          suppressHistoryClick = true;
+          window.setTimeout(function () { suppressHistoryClick = false; }, 0);
+        });
+        button.addEventListener("click", function (event) {
+          if (suppressHistoryClick) {
+            event.preventDefault();
+            suppressHistoryClick = false;
+            return;
+          }
+          if (button.disabled) return;
+          hideHistoryPreview();
+          applyHistory(direction);
+        });
+      }
+
+      function syncFromEditor() {
+        const currentHistoryState = captureHistoryState();
+        if (historyApplying) historyBaseline = currentHistoryState;
+        else if (historyBaseline && historyBaseline.value !== currentHistoryState.value) {
+          const kind = nextInputHistoryKind;
+          nextInputHistoryKind = null;
+          recordHistoryChange(historyBaseline, currentHistoryState, kind);
+        } else {
+          nextInputHistoryKind = null;
+          historyBaseline = currentHistoryState;
+        }
+        tokens = readTokens(editor.value);
+        wordStatesByStart.clear();
+        const token = tokenAtCaret();
+        activeStart = token ? token.start : null;
+        renderStrip();
+      }
+
+      function commitWordSwap(token, direction, nextState) {
+        const baseState = getWordState(token);
+        const candidate = baseState[direction === "up" ? "above" : "below"];
+        if (!candidate) return;
+        const beforeHistoryState = captureHistoryState();
+        editor.setRangeText(candidate.text, candidate.start, candidate.end, "preserve");
+        const caret = candidate.start + candidate.text.length;
+        nextState.current.sourceEnd = caret;
+        if (nextState.current.kind === "join") nextState.current.joinTargetEnd = caret;
+        editor.setSelectionRange(caret, caret);
+        recordHistoryChange(beforeHistoryState, captureHistoryState(), "correction");
+        wordStatesByStart.clear();
+        wordStatesByStart.set(candidate.start, nextState);
+        tokens = readTokens(editor.value);
+        activeStart = candidate.start;
+        editor.focus({ preventScroll:true });
+        renderStrip();
+      }
+
+      function commitWordDeletion(gesture) {
+        const selected = (gesture.deleteLayout || []).filter(function (item) {
+          return gesture.deleteTokenStarts && gesture.deleteTokenStarts.has(item.start);
+        });
+        if (!selected.length) return;
+        const firstIndex = Math.min.apply(null, selected.map(function (item) { return item.firstIndex; }));
+        const lastIndex = Math.max.apply(null, selected.map(function (item) { return item.lastIndex; }));
+        if (firstIndex < 0 || lastIndex < firstIndex || !tokens[firstIndex] || !tokens[lastIndex]) return;
+        let start = tokens[firstIndex].start;
+        let end = tokens[lastIndex].end;
+        const next = tokens[lastIndex + 1];
+        const previous = tokens[firstIndex - 1];
+        if (next) {
+          const followingGap = editor.value.slice(end, next.start);
+          if (/^\s+$/.test(followingGap)) end = next.start;
+          else if (previous) {
+            const precedingGap = editor.value.slice(previous.end, start);
+            if (/^\s+$/.test(precedingGap)) start = previous.end;
+          }
+        } else {
+          const trailingText = editor.value.slice(end);
+          if (/^\s+$/.test(trailingText)) end = editor.value.length;
+          else if (previous) {
+            const precedingGap = editor.value.slice(previous.end, start);
+            if (/^\s+$/.test(precedingGap)) start = previous.end;
+          }
+        }
+        editor.focus({ preventScroll:true });
+        editor.setRangeText("", start, end, "start");
+        nextInputHistoryKind = "correction";
+        editor.dispatchEvent(new Event("input", { bubbles:true }));
+      }
+
+      function insertText(value) {
+        const start = editor.selectionStart === null ? editor.value.length : editor.selectionStart;
+        const end = editor.selectionEnd === null ? start : editor.selectionEnd;
+        editor.setRangeText(value, start, end, "end");
+        editor.focus({ preventScroll: true });
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      function deleteText() {
+        const start = editor.selectionStart || 0;
+        const end = editor.selectionEnd || 0;
+        if (start !== end) editor.setRangeText("", start, end, "end");
+        else if (start > 0) editor.setRangeText("", start - 1, start, "end");
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        editor.focus({ preventScroll: true });
+      }
+
+      function renderKeys() {
+        rowsHost.replaceChildren();
+        rowLayouts[language].forEach(function (letters, rowIndex) {
+          const row = document.createElement("div");
+          row.className = "key-row";
+          Array.from(letters).forEach(function (letter) {
+            const key = document.createElement("button");
+            key.type = "button";
+            key.className = "key" + ("'?.,\u00b3\u00b4".includes(letter) ? " punctuation" : "");
+            key.dataset.key = letter;
+            key.setAttribute("aria-label", letter);
+            const legend = document.createElement("span");
+            legend.className = "legend";
+            legend.textContent = letter.toLocaleUpperCase(language === "he" ? "he-IL" : "en-US");
+            key.appendChild(legend);
+            const numberIndex = "qwertyuiop".indexOf(letter);
+            if (language === "en" && rowIndex === 0 && numberIndex >= 0) {
+              const number = document.createElement("span");
+              number.className = "number";
+              number.textContent = "1234567890"[numberIndex];
+              key.appendChild(number);
+            }
+            row.appendChild(key);
+          });
+          rowsHost.appendChild(row);
+        });
+      }
+
+      function smoothSvgPath(points) {
+        if (points.length < 2) return "";
+        let path = "M " + points[0].x + " " + points[0].y;
+        for (let i = 1; i < points.length - 1; i++) {
+          const middleX = (points[i].x + points[i + 1].x) / 2;
+          const middleY = (points[i].y + points[i + 1].y) / 2;
+          path += " Q " + points[i].x + " " + points[i].y + " " + middleX + " " + middleY;
+        }
+        const last = points[points.length - 1];
+        path += " T " + last.x + " " + last.y;
+        return path;
+      }
+
+      function keyAtPoint(event) {
+        const element = document.elementFromPoint(event.clientX, event.clientY);
+        const key = element && element.closest(".key");
+        return key && board.contains(key) ? key : null;
+      }
+
+      function pointOnBoard(event) {
+        const rect = board.getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      }
+
+      function finishTypingGesture() {
+        if (!typingGesture) return;
+        const gesture = typingGesture;
+        typingGesture = null;
+        if (gesture.active) gesture.active.classList.remove("is-down");
+        const moved = gesture.distance > 14;
+        const letters = gesture.visited.filter(function (item) { return item.length === 1 && /[\p{L}\p{N}'â€™.,?Â³Â´]/u.test(item); });
+        if (moved && letters.length > 1) {
+          insertText(letters.join(""));
+        } else {
+          const keyName = gesture.origin;
+          if (keyName === "space") insertText(" ");
+          else if (keyName === "backspace") deleteText();
+          else if (keyName === "globe") {
+            language = language === "en" ? "he" : "en";
+            document.querySelectorAll("[data-language]").forEach(function (item) { item.setAttribute("aria-pressed", String(item.dataset.language === language)); });
+            document.getElementById("space-label").textContent = language === "he" ? "×¢×‘×¨×™×ª" : "ENGLISH (US)";
+            wordStrip.dir = language === "he" ? "rtl" : "ltr";
+            renderKeys();
+            updateReadout();
+          } else if (keyName && keyName !== "settings") insertText(keyName);
+        }
+        swipePath.classList.add("fade");
+        swipeDot.style.opacity = "0";
+        fadeTimer = setTimeout(function () { swipePath.setAttribute("d", ""); }, 220);
+      }
+
+      board.addEventListener("pointerdown", function (event) {
+        const key = event.target.closest(".key");
+        if (!key) return;
+        event.preventDefault();
+        clearTimeout(fadeTimer);
+        swipePath.classList.remove("fade");
+        const point = pointOnBoard(event);
+        typingGesture = {
+          origin: key.dataset.key,
+          active: key,
+          visited: key.dataset.key && key.dataset.key.length === 1 ? [key.dataset.key] : [],
+          points: [point],
+          startX: event.clientX,
+          startY: event.clientY,
+          distance: 0
+        };
+        key.classList.add("is-down");
+        board.setPointerCapture(event.pointerId);
+      });
+      board.addEventListener("pointermove", function (event) {
+        if (!typingGesture) return;
+        const point = pointOnBoard(event);
+        typingGesture.points.push(point);
+        if (typingGesture.points.length > 54) typingGesture.points.shift();
+        typingGesture.distance = Math.max(typingGesture.distance, Math.hypot(event.clientX - typingGesture.startX, event.clientY - typingGesture.startY));
+        const key = keyAtPoint(event);
+        if (key && key !== typingGesture.active) {
+          typingGesture.active.classList.remove("is-down");
+          typingGesture.active = key;
+          key.classList.add("is-down");
+          const value = key.dataset.key;
+          if (value && value.length === 1 && typingGesture.visited[typingGesture.visited.length - 1] !== value) typingGesture.visited.push(value);
+        }
+        const rect = board.getBoundingClientRect();
+        document.getElementById("swipe-overlay").setAttribute("viewBox", "0 0 " + rect.width + " " + rect.height);
+        swipePath.setAttribute("d", smoothSvgPath(typingGesture.points));
+        const tail = typingGesture.points[typingGesture.points.length - 1];
+        swipeDot.setAttribute("cx", String(tail.x));
+        swipeDot.setAttribute("cy", String(tail.y));
+        swipeDot.style.opacity = ".9";
+      });
+      board.addEventListener("pointerup", finishTypingGesture);
+      board.addEventListener("pointercancel", finishTypingGesture);
+
+      function beginReelDrag(event, viewport) {
+        const tokenStart = Number(viewport.dataset.start);
+        const token = tokens.find(function (item) { return item.start === tokenStart; });
+        if (!token) return;
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(reelSnapTimer);
+        reelSnapTimer = 0;
+        setActive(token, true);
+        const candidates = getCandidates(token);
+        const selected = clampReelIndex(selectedByStart.get(tokenStart) || 0, candidates.length);
+        const track = viewport.querySelector(".reel-track");
+        positionTrack(viewport, selected, false, 0);
+        track.classList.add("dragging");
+        wheelDrag = { tokenStart:tokenStart, startY:event.clientY, selected:selected, viewport:viewport, track:track, offset:0, moved:false };
+        viewport.setPointerCapture(event.pointerId);
+      }
+      wordStrip.addEventListener("pointerdown", function (event) {
+        const viewport = event.target.closest(".reel-window");
+        if (viewport) beginReelDrag(event, viewport);
+      });
+      wordStrip.addEventListener("pointermove", function (event) {
+        if (!wheelDrag) return;
+        const token = tokens.find(function (item) { return item.start === wheelDrag.tokenStart; });
+        if (!token) return;
+        const candidates = getCandidates(token);
+        const delta = event.clientY - wheelDrag.startY;
+        if (Math.abs(delta) > 3) wheelDrag.moved = true;
+        const rawIndex = wheelDrag.selected - delta / rowHeight;
+        const boundedIndex = Math.max(0, Math.min(candidates.length - 1, rawIndex));
+        wheelDrag.offset = (wheelDrag.selected - boundedIndex) * rowHeight;
+        positionTrack(wheelDrag.viewport, wheelDrag.selected, false, wheelDrag.offset);
+        const previewIndex = clampIndex(Math.round(boundedIndex), candidates.length);
+        updateJoinPreview(token, candidates[previewIndex]);
+      });
+      function endReelDrag() {
+        if (!wheelDrag) return;
+        const drag = wheelDrag;
+        wheelDrag = null;
+        suppressReelClick = drag.moved;
+        if (suppressReelClick) window.setTimeout(function () { suppressReelClick = false; }, 0);
+        const track = drag.track;
+        track.classList.remove("dragging");
+        const token = tokens.find(function (item) { return item.start === drag.tokenStart; });
+        if (!token) return;
+        const candidates = getCandidates(token);
+        const rawIndex = Math.round(drag.selected - drag.offset / rowHeight);
+        const index = clampReelIndex(rawIndex, candidates.length);
+        selectedByStart.set(token.start, index);
+        updateReelLabel(drag.viewport.closest(".word-card"), token, candidates, index);
+        track.style.transitionDuration = "160ms";
+        positionTrack(drag.viewport, index, true, 0);
+        updateJoinPreview(token, candidates[index]);
+        reelSnapTimer = window.setTimeout(function () {
+          reelSnapTimer = 0;
+          if (!document.body.contains(track)) return;
+          replaceToken(token, index);
+          const updated = tokens.find(function (item) { return item.start === token.start; });
+          const currentTrack = drag.viewport.querySelector(".reel-track");
+          if (updated && updated.word === token.word && currentTrack === track) {
+            track.style.transitionDuration = "0ms";
+            positionTrack(drag.viewport, index, false, 0);
+          }
+        }, 180);
+      }
+      wordStrip.addEventListener("pointerup", endReelDrag);
+      wordStrip.addEventListener("pointercancel", function () {
+        if (!wheelDrag) return;
+        const drag = wheelDrag;
+        wheelDrag = null;
+        drag.track.classList.remove("dragging");
+        clearJoinPreview();
+        positionTrack(drag.viewport, drag.selected, true, 0);
+      });
+      wordStrip.addEventListener("pointerover", function (event) {
+        const card = event.target.closest(".word-card");
+        if (!card) return;
+        const previousCard = event.relatedTarget instanceof Element ? event.relatedTarget.closest(".word-card") : null;
+        if (previousCard === card) return;
+        const token = tokens.find(function (item) { return item.start === Number(card.dataset.start); });
+        if (token) setActive(token, true);
+      });
+      wordStrip.addEventListener("click", function (event) {
+        if (suppressReelClick) {
+          event.preventDefault();
+          suppressReelClick = false;
+          return;
+        }
+        const card = event.target.closest(".word-card");
+        if (!card) return;
+        const token = tokens.find(function (item) { return item.start === Number(card.dataset.start); });
+        if (!token) return;
+        editor.focus({ preventScroll:true });
+        editor.setSelectionRange(token.end, token.end);
+        setActive(token, true);
+      });
+      wordStrip.addEventListener("wheel", function (event) {
+        const viewport = event.target.closest(".reel-window");
+        if (!viewport) return;
+        event.preventDefault();
+        cycleCandidate(Number(viewport.dataset.start), event.deltaY > 0 ? 1 : -1);
+      }, { passive:false });
+
+      wordStrip.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0 || wordGesture) return;
+        const lane = event.target.closest(".word-lane");
+        const token = lane && tokens.find(function (item) { return item.start === Number(lane.dataset.start); });
+        const deleteLayout = token ? captureDeleteLayout() : null;
+        event.preventDefault();
+        wordGesture = {
+          tokenStart:token ? token.start : null,
+          startX:event.clientX,
+          startY:event.clientY,
+          lastClientX:event.clientX,
+          lastClientY:event.clientY,
+          startScrollLeft:wordStrip.scrollLeft,
+          pointerId:event.pointerId,
+          mode:"pending",
+          direction:null,
+          previewState:null,
+          moved:false,
+          deleteLayout:deleteLayout
+        };
+        if (token) {
+          setActive(token);
+          setCaretFromStripPoint(event.clientX, event.clientY, lane);
+        }
+        wordStrip.setPointerCapture(event.pointerId);
+      });
+      wordStrip.addEventListener("pointermove", function (event) {
+        if (!wordGesture || event.pointerId !== wordGesture.pointerId) return;
+        wordGesture.lastClientX = event.clientX;
+        wordGesture.lastClientY = event.clientY;
+        const deltaX = event.clientX - wordGesture.startX;
+        const deltaY = event.clientY - wordGesture.startY;
+        if (wordGesture.mode === "pending" && Math.max(Math.abs(deltaX), Math.abs(deltaY)) > 8) {
+          if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            wordGesture.mode = wordGesture.tokenStart !== null ? "cursor" : "scroll";
+            wordGesture.moved = true;
+          } else if (wordGesture.tokenStart !== null) {
+            wordGesture.mode = "word";
+            wordGesture.moved = true;
+          } else {
+            wordGesture.mode = "ignore";
+            wordGesture.moved = true;
+          }
+        }
+        if (wordGesture.mode === "cursor") {
+          updateCursorDragGesture(event);
+          return;
+        }
+        if (wordGesture.mode === "scroll") {
+          updateScrollGesture(event);
+          return;
+        }
+        if (wordGesture.mode === "delete") {
+          updateHorizontalWordMode(event.clientX, event.clientY);
+          syncEdgeAutoScroll(event.clientX);
+          return;
+        }
+        if (wordGesture.mode !== "word") return;
+        const direction = deltaY < -10 ? "up" : deltaY > 10 ? "down" : null;
+        if (direction !== wordGesture.direction) {
+          wordGesture.direction = direction;
+          const token = tokens.find(function (item) { return item.start === wordGesture.tokenStart; });
+          wordGesture.previewState = token && direction ? swapWordState(getWordState(token), direction) : null;
+          renderStrip();
+        }
+        updateHorizontalWordMode(event.clientX, event.clientY);
+        syncEdgeAutoScroll(event.clientX);
+      });
+      wordStrip.addEventListener("pointerup", function (event) {
+        if (!wordGesture || event.pointerId !== wordGesture.pointerId) return;
+        const gesture = wordGesture;
+        gesture.lastClientX = event.clientX;
+        gesture.lastClientY = event.clientY;
+        updateHorizontalWordMode(event.clientX, event.clientY);
+        if (gesture.mode === "cursor") updateCursorDragGesture(event);
+        if (gesture.mode === "scroll") updateScrollGesture(event);
+        stopEdgeAutoScroll(true);
+        wordGesture = null;
+        if (gesture.moved) suppressNextStripClick();
+        if (gesture.mode === "pending") {
+          setCaretFromStripPoint(event.clientX, event.clientY, event.target);
+          return;
+        }
+        if (gesture.mode === "delete") {
+          commitWordDeletion(gesture);
+          renderStrip();
+          return;
+        }
+        if (gesture.mode === "scroll") {
+          if (gesture.edgeScrollUsed) {
+            setActive(tokenAtCaret(), true);
+            positionStripCaret();
+          }
+          return;
+        }
+        if (gesture.mode === "cursor") {
+          setActive(tokenAtCaret(), true);
+          positionStripCaret();
+          return;
+        }
+        if (gesture.mode !== "word") return;
+        const token = tokens.find(function (item) { return item.start === gesture.tokenStart; });
+        if (!token) return;
+        if (gesture.previewState && gesture.direction) {
+          commitWordSwap(token, gesture.direction, gesture.previewState);
+        }
+        renderStrip();
+      });
+      wordStrip.addEventListener("pointercancel", function (event) {
+        if (!wordGesture || event.pointerId !== wordGesture.pointerId) return;
+        stopEdgeAutoScroll(true);
+        wordGesture = null;
+        renderStrip();
+      });
+      wordStrip.addEventListener("pointerover", function (event) {
+        const lane = event.target.closest(".word-lane");
+        if (!lane) return;
+        const previousLane = event.relatedTarget instanceof Element ? event.relatedTarget.closest(".word-lane") : null;
+        if (previousLane === lane) return;
+        const token = tokens.find(function (item) { return item.start === Number(lane.dataset.start); });
+        if (token) setActive(token);
+      });
+      wordStrip.addEventListener("click", function (event) {
+        if (suppressSentenceClick) {
+          event.preventDefault();
+          suppressSentenceClick = false;
+          window.clearTimeout(suppressSentenceClickTimer);
+          suppressSentenceClickTimer = 0;
+          return;
+        }
+        const lane = event.target.closest(".word-lane");
+        if (event.detail === 0 && lane) {
+          const token = tokens.find(function (item) { return item.start === Number(lane.dataset.start); });
+          if (token) setStripCaret(getWordState(token).current.end);
+          return;
+        }
+        setCaretFromStripPoint(event.clientX, event.clientY, event.target);
+      });
+
+      function updateCaretFocus() {
+        updateHistoryBaselineSelection();
+        positionStripCaret();
+        if (document.activeElement !== editor) return;
+        const followCursor = !wordGesture;
+        setActive(tokenAtCaret(), followCursor);
+      }
+      editor.addEventListener("beforeinput", updateHistoryBaselineSelection);
+      editor.addEventListener("input", syncFromEditor);
+      editor.addEventListener("click", updateCaretFocus);
+      editor.addEventListener("keyup", updateCaretFocus);
+      editor.addEventListener("select", updateCaretFocus);
+      document.addEventListener("selectionchange", updateCaretFocus);
+      bindHistoryButton(undoButton, "undo");
+      bindHistoryButton(redoButton, "redo");
+      document.addEventListener("keydown", function (event) {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        const historyButtonFocused = document.activeElement === undoButton || document.activeElement === redoButton;
+        if (document.activeElement !== editor && !wordStrip.contains(document.activeElement) && !historyButtonFocused) return;
+        const key = event.key.toLocaleLowerCase();
+        if (key === "z") {
+          event.preventDefault();
+          applyHistory(event.shiftKey ? "redo" : "undo");
+        } else if (key === "y" && !event.shiftKey) {
+          event.preventDefault();
+          applyHistory("redo");
+        }
+      });
+
+      document.querySelectorAll("[data-theme-choice]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          document.body.dataset.theme = button.dataset.themeChoice;
+          document.querySelectorAll("[data-theme-choice]").forEach(function (item) { item.setAttribute("aria-pressed", String(item === button)); });
+          updateReadout();
+        });
+      });
+      document.querySelectorAll("[data-language]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          language = button.dataset.language;
+          document.querySelectorAll("[data-language]").forEach(function (item) { item.setAttribute("aria-pressed", String(item === button)); });
+          wordStrip.dir = language === "he" ? "rtl" : "ltr";
+          document.getElementById("space-label").textContent = language === "he" ? "×¢×‘×¨×™×ª" : "ENGLISH (US)";
+          renderKeys();
+          updateReadout();
+        });
+      });
+      document.querySelectorAll("[data-height]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          document.documentElement.style.setProperty("--key-height", button.dataset.height + "px");
+          document.querySelectorAll("[data-height]").forEach(function (item) { item.setAttribute("aria-pressed", String(item === button)); });
+        });
+      });
+      document.getElementById("reset").addEventListener("click", function () {
+        clearTimeout(reelSnapTimer);
+        reelSnapTimer = 0;
+        editor.value = initialText;
+        selectedByStart.clear();
+        editor.setSelectionRange(editor.value.length, editor.value.length);
+        undoHistory.length = 0;
+        redoHistory.length = 0;
+        historyBaseline = captureHistoryState();
+        nextInputHistoryKind = null;
+        hideHistoryPreview();
+        updateHistoryButtons();
+        document.body.dataset.theme = "dark";
+        language = "en";
+        document.documentElement.style.setProperty("--key-height", "43px");
+        document.querySelectorAll("[data-theme-choice]").forEach(function (item) { item.setAttribute("aria-pressed", String(item.dataset.themeChoice === "dark")); });
+        document.querySelectorAll("[data-language]").forEach(function (item) { item.setAttribute("aria-pressed", String(item.dataset.language === "en")); });
+        document.querySelectorAll("[data-height]").forEach(function (item) { item.setAttribute("aria-pressed", String(item.dataset.height === "43")); });
+        wordStrip.dir = "ltr";
+        document.getElementById("space-label").textContent = "ENGLISH (US)";
+        renderKeys();
+        updateReadout();
+        syncFromEditor();
+      });
+      function updateReadout() {
+        document.getElementById("readout").textContent = (document.body.dataset.theme === "dark" ? "DARK" : "SOFT SILVER") + " Â· " + (language === "he" ? "HEBREW" : "ENGLISH");
+      }
+      renderKeys();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      syncFromEditor();
+    })();
+  </script>
+</body>
+</html>

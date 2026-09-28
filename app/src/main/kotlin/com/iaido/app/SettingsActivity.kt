@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -84,6 +85,7 @@ class SettingsActivity : ComponentActivity() {
         var appUpdateState by remember { mutableStateOf<AppUpdateUiState>(AppUpdateUiState.Idle) }
         var settingsLoaded by remember { mutableStateOf(false) }
         var notificationsEnabled by remember { mutableStateOf(updateNotificationsEnabled()) }
+        var showUpdateNotificationRationale by remember { mutableStateOf(false) }
         val appUpdateClient = remember(updateChannel) {
             AppUpdateClient(this@SettingsActivity, channel = updateChannel)
         }
@@ -124,7 +126,19 @@ class SettingsActivity : ComponentActivity() {
             showNumberRow = preferences[showNumberRowKey] ?: SettingsDefaults.SHOW_NUMBER_ROW
             showCandidateScores = preferences[showCandidateScoresKey] ?: false
             updateChannel = updateChannelFromStoredValue(preferences[updateChannelKey], installedVersionName)
+            showUpdateNotificationRationale = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !notificationsEnabled && preferences[updateNotificationRationaleShownKey] != true
             settingsLoaded = true
+        }
+
+        fun closeUpdateNotificationRationale(requestPermission: Boolean) {
+            showUpdateNotificationRationale = false
+            lifecycleScope.launch {
+                settingsStore.edit { it[updateNotificationRationaleShownKey] = true }
+                if (requestPermission) {
+                    requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
         }
 
         suspend fun checkForUpdates(openInstallPermission: Boolean) {
@@ -192,6 +206,25 @@ class SettingsActivity : ComponentActivity() {
             color = androidx.compose.material3.MaterialTheme.colorScheme.background,
             contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onBackground,
         ) {
+            if (showUpdateNotificationRationale) {
+                AlertDialog(
+                    onDismissRequest = { closeUpdateNotificationRationale(requestPermission = false) },
+                    title = { Text("Get update notifications?") },
+                    text = {
+                        Text("Iaido checks for keyboard updates in the background and can notify you when a new release is ready.")
+                    },
+                    confirmButton = {
+                        Button(onClick = { closeUpdateNotificationRationale(requestPermission = true) }) {
+                            Text("Continue")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { closeUpdateNotificationRationale(requestPermission = false) }) {
+                            Text("Not now")
+                        }
+                    },
+                )
+            }
             Column(
                 modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
