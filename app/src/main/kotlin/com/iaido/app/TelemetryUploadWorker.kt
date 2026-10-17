@@ -44,30 +44,66 @@ internal class TelemetryUploadRunner(
      * installation) can never succeed, so it is dropped and the batches behind it still upload;
      * transient failures keep the batch and return RETRY for WorkManager's backoff.
      */
+    /**
+     * Works in passes. After each pass the queue is read again and any batch not seen yet in this
+     * run is uploaded too: a gesture recorded while this worker runs lands in a fresh batch (the
+     * ones handed out are sealed) and its own schedule() is dropped by
+     * [ExistingWorkPolicy.KEEP], so without this the last gesture of a session would wait on the
+     * device for the next gesture. Bounded by [MAX_PASSES]; a queue still growing after that
+     * returns RETRY, so WorkManager runs it again after backoff instead of leaving it behind.
+     *
+     * A 401 retires the rejected credentials and re-provisions once within the same run (the
+     * rejected batch is retried under the new installation, which drops it as foreign); a second
+     * 401 in one run ends it with FAILURE.
+     */
     suspend fun run(plane: TelemetryPlane): WorkerDisposition {
         return try {
-            when (ensureProvisioned()) {
-                UploadDisposition.ACKNOWLEDGED -> Unit
-                UploadDisposition.RETRY -> return WorkerDisposition.RETRY
-                UploadDisposition.DISCARD, UploadDisposition.UNAUTHORIZED -> return WorkerDisposition.FAILURE
-            }
-            for (batch in pendingBatches(plane)) {
-                if (!consentEnabled(plane)) return WorkerDisposition.SUCCESS
-                when (upload(plane, batch)) {
-                    UploadDisposition.ACKNOWLEDGED -> acknowledge(plane, batch.batchId)
-                    UploadDisposition.RETRY -> return WorkerDisposition.RETRY
-                    UploadDisposition.DISCARD -> discard(plane, batch.batchId)
-                    UploadDisposition.UNAUTHORIZED -> {
-                        // A batch holds one installation (TelemetryQueue.append): the rejected one.
-                        batch.events.firstOrNull()?.let { invalidateCredentials(it.installationId) }
-                        return WorkerDisposition.FAILURE
+            val handled = mutableSetOf<String>()
+            var reprovisioned = false
+            var unauthorized = false
+            var pass = 0
+            while (true) {
+                if (pass == 0 || unauthorized) {
+                    when (ensureProvisioned()) {
+                        UploadDisposition.ACKNOWLEDGED -> Unit
+                        UploadDisposition.RETRY -> return WorkerDisposition.RETRY
+                        UploadDisposition.DISCARD, UploadDisposition.UNAUTHORIZED -> return WorkerDisposition.FAILURE
                     }
                 }
+                unauthorized = false
+                val batches = pendingBatches(plane).filter { it.batchId !in handled }
+                if (batches.isEmpty()) return WorkerDisposition.SUCCESS
+                if (pass == MAX_PASSES) return WorkerDisposition.RETRY
+                pass += 1
+                for (batch in batches) {
+                    if (!consentEnabled(plane)) return WorkerDisposition.SUCCESS
+                    when (upload(plane, batch)) {
+                        UploadDisposition.ACKNOWLEDGED -> acknowledge(plane, batch.batchId)
+                        UploadDisposition.RETRY -> return WorkerDisposition.RETRY
+                        UploadDisposition.DISCARD -> discard(plane, batch.batchId)
+                        UploadDisposition.UNAUTHORIZED -> {
+                            // A batch holds one installation (TelemetryQueue.append): the rejected one.
+                            batch.events.firstOrNull()?.let { invalidateCredentials(it.installationId) }
+                            if (reprovisioned) return WorkerDisposition.FAILURE
+                            reprovisioned = true
+                            unauthorized = true
+                            break
+                        }
+                    }
+                    handled += batch.batchId
+                }
+                // After a 401 the next pass re-provisions and retries the rejected batch.
             }
+            @Suppress("UNREACHABLE_CODE")
             WorkerDisposition.SUCCESS
         } catch (_: Exception) {
             WorkerDisposition.RETRY
         }
+    }
+
+    companion object {
+        /** Passes of "upload everything new" one run makes before handing over to a backoff retry. */
+        const val MAX_PASSES = 5
     }
 }
 

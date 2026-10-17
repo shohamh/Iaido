@@ -204,7 +204,7 @@ class TelemetryUploadWorkerTest {
     }
 
     @Test
-    fun `auth rejection invalidates credentials, stops retrying and keeps the batch`() = runBlocking {
+    fun `a second auth rejection in one run invalidates credentials, stops retrying and keeps the batch`() = runBlocking {
         var invalidated = false
         val uploaded = mutableListOf<String>()
         val runner = TelemetryUploadRunner(
@@ -223,7 +223,91 @@ class TelemetryUploadWorkerTest {
 
         assertEquals(WorkerDisposition.FAILURE, runner.run(TelemetryPlane.RESEARCH))
         assertTrue(invalidated)
-        assertEquals(listOf("batch-1"), uploaded)
+        // The first 401 re-provisions once within the run and retries; the second one stops it.
+        assertEquals(listOf("batch-1", "batch-1"), uploaded)
+    }
+
+    /**
+     * KEEP-policy delivery gap: the gesture's own schedule() is dropped while this worker runs,
+     * so the running worker must pick up a batch that was started mid-upload itself.
+     */
+    @Test
+    fun `an event appended while a batch is uploading is uploaded by the same run`() = runBlocking {
+        val directory = Files.createTempDirectory("telemetry-runner").toFile()
+        try {
+            val queue = TelemetryQueue(directory, TelemetryPlane.RESEARCH, { 1_000L }, QueueLimits())
+            val first = sampleBatch("unused").events.single()
+            queue.append(first)
+            val uploadedEvents = mutableListOf<String>()
+            var gestureDuringUpload = true
+            val runner = TelemetryUploadRunner(
+                consentEnabled = { true },
+                pendingBatches = { queue.pendingBatches() },
+                upload = { _, batch ->
+                    if (gestureDuringUpload) {
+                        gestureDuringUpload = false
+                        // The batch being sent is sealed, so this lands in a fresh open batch.
+                        queue.append(first.copy(eventId = "30000000-0000-4000-8000-000000000010"))
+                    }
+                    uploadedEvents += batch.events.map { it.eventId }
+                    UploadDisposition.ACKNOWLEDGED
+                },
+                acknowledge = { _, batchId -> queue.acknowledge(batchId) },
+            )
+
+            assertEquals(WorkerDisposition.SUCCESS, runner.run(TelemetryPlane.RESEARCH))
+            assertEquals(
+                listOf("30000000-0000-4000-8000-000000000009", "30000000-0000-4000-8000-000000000010"),
+                uploadedEvents,
+            )
+            assertTrue(queue.pendingBatches().isEmpty(), "the mid-upload event is still waiting for a new gesture")
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a run that keeps finding new batches stops after a bounded number of passes and retries`() = runBlocking {
+        var next = 0
+        var uploads = 0
+        val runner = TelemetryUploadRunner(
+            consentEnabled = { true },
+            pendingBatches = { listOf(sampleBatch("batch-${next++}")) },
+            upload = { _, _ ->
+                uploads += 1
+                UploadDisposition.ACKNOWLEDGED
+            },
+            acknowledge = { _, _ -> },
+        )
+
+        assertEquals(WorkerDisposition.RETRY, runner.run(TelemetryPlane.RESEARCH))
+        assertEquals(TelemetryUploadRunner.MAX_PASSES, uploads)
+    }
+
+    @Test
+    fun `a 401 re-provisions within the same run and the batches still upload`() = runBlocking {
+        val calls = mutableListOf<String>()
+        val dispositions = ArrayDeque(listOf(UploadDisposition.UNAUTHORIZED, UploadDisposition.ACKNOWLEDGED))
+        val runner = TelemetryUploadRunner(
+            consentEnabled = { true },
+            pendingBatches = { if ("ack:batch-1" in calls) emptyList() else listOf(sampleBatch("batch-1")) },
+            upload = { _, batch ->
+                calls += "upload:${batch.batchId}"
+                dispositions.removeFirst()
+            },
+            acknowledge = { _, batchId -> calls += "ack:$batchId" },
+            ensureProvisioned = {
+                calls += "provision"
+                UploadDisposition.ACKNOWLEDGED
+            },
+            invalidateCredentials = { calls += "invalidate" },
+        )
+
+        assertEquals(WorkerDisposition.SUCCESS, runner.run(TelemetryPlane.RESEARCH))
+        assertEquals(
+            listOf("provision", "upload:batch-1", "invalidate", "provision", "upload:batch-1", "ack:batch-1"),
+            calls,
+        )
     }
 
     @Test
