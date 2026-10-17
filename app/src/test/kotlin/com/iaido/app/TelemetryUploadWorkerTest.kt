@@ -52,17 +52,35 @@ class TelemetryUploadWorkerTest {
     }
 
     @Test
-    fun `schema or auth rejection fails without acknowledging`() = runBlocking {
-        var acknowledged = false
+    fun `a permanently rejected batch is dropped and the batches behind it still upload`() = runBlocking {
+        val removed = mutableListOf<String>()
+        val uploaded = mutableListOf<String>()
+        val dispositions = ArrayDeque(listOf(UploadDisposition.DISCARD, UploadDisposition.ACKNOWLEDGED))
         val runner = TelemetryUploadRunner(
             consentEnabled = { true },
-            pendingBatches = { listOf(sampleBatch("batch-1")) },
-            upload = { _, _ -> UploadDisposition.DISCARD },
-            acknowledge = { _, _ -> acknowledged = true },
+            pendingBatches = { listOf(sampleBatch("batch-1"), sampleBatch("batch-2")) },
+            upload = { _, batch ->
+                uploaded += batch.batchId
+                dispositions.removeFirst()
+            },
+            acknowledge = { _, batchId -> removed += batchId },
         )
 
-        assertEquals(WorkerDisposition.FAILURE, runner.run(TelemetryPlane.DIAGNOSTICS))
-        assertFalse(acknowledged)
+        assertEquals(WorkerDisposition.SUCCESS, runner.run(TelemetryPlane.RESEARCH))
+        assertEquals(listOf("batch-1", "batch-2"), uploaded)
+        assertEquals(listOf("batch-1", "batch-2"), removed)
+    }
+
+    @Test
+    fun `a transient failure keeps the batch and asks for a backoff retry`() = runBlocking {
+        val runner = TelemetryUploadRunner(
+            consentEnabled = { true },
+            pendingBatches = { listOf(sampleBatch("batch-1"), sampleBatch("batch-2")) },
+            upload = { _, _ -> UploadDisposition.RETRY },
+            acknowledge = { _, _ -> error("must not remove a batch that may still be accepted") },
+        )
+
+        assertEquals(WorkerDisposition.RETRY, runner.run(TelemetryPlane.RESEARCH))
     }
 
     @Test

@@ -32,11 +32,16 @@ internal class TelemetryUploadRunner(
     private val acknowledge: suspend (TelemetryPlane, String) -> Unit,
     private val ensureProvisioned: suspend () -> UploadDisposition = { UploadDisposition.ACKNOWLEDGED },
     private val invalidateCredentials: suspend () -> Unit = {},
+    /** Removes a batch the collector permanently rejected; removing it from the queue by default. */
+    private val discard: suspend (TelemetryPlane, String) -> Unit = acknowledge,
 ) {
     /**
      * Provisions server-issued credentials if they are missing (never invents them), then uploads
      * batches oldest first. An auth rejection clears the stored credentials and stops without
      * touching the batch, so the next run re-provisions instead of retrying a dead credential.
+     * A batch the collector permanently rejects (4xx other than auth, oversize, foreign
+     * installation) can never succeed, so it is dropped and the batches behind it still upload;
+     * transient failures keep the batch and return RETRY for WorkManager's backoff.
      */
     suspend fun run(plane: TelemetryPlane): WorkerDisposition {
         return try {
@@ -50,7 +55,7 @@ internal class TelemetryUploadRunner(
                 when (upload(plane, batch)) {
                     UploadDisposition.ACKNOWLEDGED -> acknowledge(plane, batch.batchId)
                     UploadDisposition.RETRY -> return WorkerDisposition.RETRY
-                    UploadDisposition.DISCARD -> return WorkerDisposition.FAILURE
+                    UploadDisposition.DISCARD -> discard(plane, batch.batchId)
                     UploadDisposition.UNAUTHORIZED -> {
                         invalidateCredentials()
                         return WorkerDisposition.FAILURE
