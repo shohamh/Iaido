@@ -74,6 +74,44 @@ class TelemetryQueueTest {
     }
 
     @Test
+    fun `events appended while a batch is being uploaded survive its acknowledgement`() {
+        withQueue { ime, root ->
+            val worker = TelemetryQueue(root, TelemetryPlane.DIAGNOSTICS, { 1_000L }, QueueLimits())
+            ime.append(diagnosticEnvelope(1_000L))
+
+            val inFlight = worker.pendingBatches().single()
+            ime.append(diagnosticEnvelope(1_001L))
+
+            // A batch handed out for upload never changes, so a retry resends identical bytes.
+            assertEquals(inFlight, worker.pendingBatches().first())
+            worker.acknowledge(inFlight.batchId)
+
+            assertEquals(listOf(1_001L), worker.pendingBatches().flatMap { it.events }.map { it.occurredAtMs })
+        }
+    }
+
+    @Test
+    fun `concurrent appends and upload acknowledgements neither lose nor duplicate events`() {
+        withQueue { ime, root ->
+            val worker = TelemetryQueue(root, TelemetryPlane.DIAGNOSTICS, { 1_000L }, QueueLimits())
+            val total = 150
+            val uploaded = mutableListOf<Long>()
+            val appender = Thread { (0 until total).forEach { ime.append(diagnosticEnvelope(1_000L + it)) } }
+            appender.start()
+            while (appender.isAlive) {
+                worker.pendingBatches().forEach { batch ->
+                    uploaded += batch.events.map { it.occurredAtMs }
+                    worker.acknowledge(batch.batchId)
+                }
+            }
+            appender.join()
+            worker.pendingBatches().forEach { batch -> uploaded += batch.events.map { it.occurredAtMs } }
+
+            assertEquals((0 until total).map { 1_000L + it }, uploaded.sorted())
+        }
+    }
+
+    @Test
     fun `queue expires records older than the age limit`() {
         withQueue(QueueLimits(maxAgeMs = 100L), clock = { 1_000L }) { queue, _ ->
             queue.append(diagnosticEnvelope(899L))
@@ -236,7 +274,7 @@ class TelemetryQueueTest {
         )
 
     private fun batchFiles(root: File, plane: TelemetryPlane): List<File> =
-        File(root, plane.name.lowercase()).listFiles { file -> file.extension == "batch" }
+        File(root, plane.name.lowercase()).listFiles { file -> file.extension == "batch" || file.extension == "sealed" }
             ?.sortedBy { it.name } ?: emptyList()
 }
 

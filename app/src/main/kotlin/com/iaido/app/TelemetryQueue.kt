@@ -51,13 +51,20 @@ class TelemetryQueue(
     private val storageDirectory = File(directory, plane.name.lowercase(Locale.ROOT))
     private var nextBatchSequence: Long? = null
 
-    fun append(event: TelemetryEnvelope) {
+    /**
+     * Appends to the newest batch only while it is still open; once [pendingBatches] has sealed a
+     * batch (it may be mid-upload), new events start a fresh batch so acknowledging the sealed one
+     * can never delete them.
+     */
+    fun append(event: TelemetryEnvelope) = locked {
         runSafely {
             try {
                 validateForPlane(event)
                 require(storageDirectory.mkdirs() || storageDirectory.isDirectory)
 
-                val current = batchFiles().lastOrNull()?.let { readBatchOrNull(it.file) }
+                val current = batchFiles().lastOrNull()
+                    ?.takeUnless { it.sealed }
+                    ?.let { readBatchOrNull(it.file) }
                 val appended = current?.events.orEmpty() + event
                 if (current != null && appended.size <= limits.maxBatchEvents && fitsLimits(current.file, appended)) {
                     writeBatch(current.file, appended)
@@ -72,28 +79,52 @@ class TelemetryQueue(
         }
     }
 
-    fun pendingBatches(): List<TelemetryBatch> = try {
-        batchFiles().mapNotNull { batchFile ->
-            readBatchOrNull(batchFile.file)?.takeIf { it.events.isNotEmpty() }?.toPublicBatch()
+    /**
+     * Seals every batch, then returns them oldest first. A returned batch's contents never change
+     * afterwards (later appends go to a new batch), so it is safe to upload, retry with identical
+     * bytes, and acknowledge by id.
+     */
+    fun pendingBatches(): List<TelemetryBatch> = locked {
+        try {
+            batchFiles().map { batchFile -> if (batchFile.sealed) batchFile.file else seal(batchFile.file) }
+                .mapNotNull { file -> readBatchOrNull(file)?.takeIf { it.events.isNotEmpty() }?.toPublicBatch() }
+        } catch (_: Exception) {
+            emptyList()
         }
-    } catch (_: Exception) {
-        emptyList()
     }
 
-    fun acknowledge(batchId: String) {
+    fun acknowledge(batchId: String) = locked {
         runSafely {
             batchFiles().firstOrNull { it.file.nameWithoutExtension == batchId }?.file?.delete()
         }
     }
 
-    fun deleteAll() {
+    fun deleteAll() = locked {
         runSafely {
             storageDirectory.listFiles()?.filter { it.isFile && isQueueFile(it) }?.forEach { it.delete() }
         }
     }
 
-    fun enforceLimits() {
+    fun enforceLimits() = locked {
         runSafely { enforceLimitsInternal() }
+    }
+
+    /**
+     * Serialises append against read/seal/acknowledge across every [TelemetryQueue] instance for
+     * the same directory: the IME and the upload worker each build their own instance, in the
+     * same (main) process.
+     */
+    private fun <T> locked(block: () -> T): T =
+        synchronized(directoryLocks.getOrPut(storageDirectory.absolutePath) { Any() }) { block() }
+
+    private fun seal(file: File): File {
+        val sealed = File(storageDirectory, "${file.nameWithoutExtension}.$SEALED_EXTENSION")
+        try {
+            Files.move(file.toPath(), sealed.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(file.toPath(), sealed.toPath())
+        }
+        return sealed
     }
 
     private fun enforceLimitsInternal() {
@@ -143,7 +174,7 @@ class TelemetryQueue(
     }
 
     private fun batchFiles(): List<BatchFile> = storageDirectory.listFiles { file ->
-        file.isFile && file.extension == "batch"
+        file.isFile && (file.extension == OPEN_EXTENSION || file.extension == SEALED_EXTENSION)
     }?.mapNotNull { file ->
         parseBatchFile(file)
     }?.sortedWith(compareBy<BatchFile> { it.sequence }.thenBy { it.createdAt }.thenBy { it.file.name }
@@ -157,6 +188,7 @@ class TelemetryQueue(
                 file = file,
                 sequence = parts[1].toLong(),
                 createdAt = parts[2].toLong(),
+                sealed = file.extension == SEALED_EXTENSION,
             )
         } catch (_: NumberFormatException) {
             null
@@ -165,7 +197,7 @@ class TelemetryQueue(
 
     private fun newBatchFile(): File {
         val sequence = nextSequence()
-        return File(storageDirectory, "batch-$sequence-${clock()}-${UUID.randomUUID()}.batch")
+        return File(storageDirectory, "batch-$sequence-${clock()}-${UUID.randomUUID()}.$OPEN_EXTENSION")
     }
 
     private fun nextSequence(): Long {
@@ -270,7 +302,8 @@ class TelemetryQueue(
         storageDirectory.listFiles()?.filter { it.isFile && it.extension == "tmp" }?.forEach { it.delete() }
     }
 
-    private fun isQueueFile(file: File): Boolean = file.extension == "batch" || file.extension == "tmp"
+    private fun isQueueFile(file: File): Boolean =
+        file.extension == OPEN_EXTENSION || file.extension == SEALED_EXTENSION || file.extension == "tmp"
 
     private fun runSafely(block: () -> Unit) {
         try {
@@ -280,7 +313,17 @@ class TelemetryQueue(
         }
     }
 
-    private data class BatchFile(val file: File, val sequence: Long, val createdAt: Long)
+    private data class BatchFile(val file: File, val sequence: Long, val createdAt: Long, val sealed: Boolean)
+
+    private companion object {
+        /** A batch that may still receive appends. */
+        const val OPEN_EXTENSION = "batch"
+
+        /** A batch handed out for upload: immutable until acknowledged or evicted. */
+        const val SEALED_EXTENSION = "sealed"
+
+        val directoryLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    }
 
     private data class StoredBatch(val file: File, val events: List<TelemetryEnvelope>) {
         fun toPublicBatch() = TelemetryBatch(file.nameWithoutExtension, events)
