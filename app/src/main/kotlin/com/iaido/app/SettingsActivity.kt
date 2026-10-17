@@ -151,10 +151,15 @@ class SettingsActivity : ComponentActivity() {
                 return
             }
 
-            val downloadStartedAt = SystemClock.elapsedRealtime()
-            appUpdateState = AppUpdateUiState.Downloading()
+            var downloadStartedAt = SystemClock.elapsedRealtime()
             val result = withContext(Dispatchers.IO) {
                 appUpdateClient.update(
+                    onDownloadStarted = {
+                        runOnUiThread {
+                            downloadStartedAt = SystemClock.elapsedRealtime()
+                            appUpdateState = AppUpdateUiState.Downloading()
+                        }
+                    },
                     onDownloadProgress = { downloadedBytes, totalBytes ->
                         val elapsedMillis = SystemClock.elapsedRealtime() - downloadStartedAt
                         val etaMillis = estimateDownloadRemainingMillis(

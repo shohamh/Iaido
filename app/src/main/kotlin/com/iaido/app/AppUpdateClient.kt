@@ -107,8 +107,22 @@ class AppUpdateClient(
                 error("APK exceeds the download size limit")
             }
             val installed = installedPackageInfo()
-            onDownloadStarted()
-            download(asset.browserDownloadUrl, incomingApk, asset.sizeBytes, onDownloadProgress)
+            val identity = release.identity
+            if (identity != null && stagedReleaseIdentity(context) == identity && !stagedApk.isFile) {
+                return@runCatching AppUpdateResult.UpToDate
+            }
+            val installedVersionName = installed.versionName.orEmpty()
+            val downloaded = download(
+                urlValue = asset.browserDownloadUrl,
+                target = incomingApk,
+                expectedSize = asset.sizeBytes,
+                shouldDownload = { finalUrl ->
+                    !isReleaseKnownNotNewer(releaseTagFromDownloadUrl(finalUrl), installedVersionName)
+                },
+                onStarted = onDownloadStarted,
+                onProgress = onDownloadProgress,
+            )
+            if (!downloaded) return@runCatching AppUpdateResult.UpToDate
             val archive = archiveInfo(incomingApk)
             when (val validation = validateAppArchive(
                 archive = archive,
@@ -135,6 +149,7 @@ class AppUpdateClient(
                     }
                 }
                 is AppArchiveValidation.Invalid -> if (validation.reason == NOT_NEWER_REASON) {
+                    release.identity?.let(::recordCheckedRelease)
                     AppUpdateResult.UpToDate
                 } else {
                     error(validation.reason)
@@ -275,13 +290,19 @@ class AppUpdateClient(
         urlValue: String,
         target: File,
         expectedSize: Long?,
+        shouldDownload: (finalUrl: String) -> Boolean,
+        onStarted: () -> Unit,
         onProgress: (downloadedBytes: Long, totalBytes: Long?) -> Unit,
-    ) {
+    ): Boolean {
         val url = URL(urlValue)
         require(isTrustedAppReleaseUrl(url.toString())) { "APK asset URL is not trusted" }
         val connection = openConnection(url)
         try {
             checkResponse(connection)
+            // Redirects are resolved by now but the body is not read yet, so a release that
+            // is not newer is detected without transferring the APK.
+            if (!shouldDownload(connection.url.toString())) return false
+            onStarted()
             val contentLength = connection.contentLengthLong
             if (contentLength > MAX_APP_UPDATE_BYTES) error("APK exceeds the download size limit")
             val totalBytes = expectedSize ?: contentLength.takeIf { it > 0L }
@@ -304,6 +325,7 @@ class AppUpdateClient(
             if (expectedSize != null && total != expectedSize) {
                 error("Downloaded APK size does not match the GitHub asset")
             }
+            return true
         } finally {
             connection.disconnect()
         }
@@ -325,6 +347,13 @@ class AppUpdateClient(
             }
             error("Update request failed: ${connection.responseCode}")
         }
+    }
+
+    private fun recordCheckedRelease(identity: ReleaseIdentity) {
+        context.getSharedPreferences(RELEASE_MONITOR_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString("release_monitor_last_staged", encodeIdentity(identity))
+            .apply()
     }
 
     private fun clearIncoming() {
@@ -384,3 +413,14 @@ object AppUpdateConfig {
 
 internal fun stagedAppUpdateFile(context: Context): File? =
     File(context.filesDir, "app-updates/app-update.apk").takeIf { it.isFile }
+
+/**
+ * True when the release [tagName] (e.g. `v0.1.20`) is provably not newer than the installed
+ * build, so the APK does not need to be downloaded. Nightly installs share their base version
+ * with the stable release, so an equal version is only treated as current for stable installs.
+ */
+internal fun isReleaseKnownNotNewer(tagName: String?, installedVersionName: String): Boolean {
+    val release = parseInstalledAppVersion(tagName?.removePrefix("v")) ?: return false
+    val installed = parseInstalledAppVersion(installedVersionName) ?: return false
+    return release < installed || (release == installed && !installedVersionName.contains('-'))
+}
