@@ -215,8 +215,12 @@ object DiagnosticsTelemetryProvider {
 
         telemetry = DiagnosticsTelemetry(
             diagnosticsEnabled = ::isEnabled,
-            appendToQueue = { envelope -> telemetryQueue(appContext).append(envelope) },
-            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) },
+            // flush() runs on the IME main thread (onFinishInputView): queue IO and scheduling go to
+            // the serial telemetry thread, appends first.
+            appendToQueue = { envelope -> telemetryOffMainThread { telemetryQueue(appContext).append(envelope) } },
+            scheduleUpload = {
+                telemetryOffMainThread { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) }
+            },
             envelopeFactory = { event -> buildEnvelope(appContext, event) },
         )
 

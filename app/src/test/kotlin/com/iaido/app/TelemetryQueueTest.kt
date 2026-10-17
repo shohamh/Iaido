@@ -332,3 +332,19 @@ private class EchoAcknowledgementConnection(url: URL) : HttpURLConnection(url) {
 
     override fun connect() = Unit
 }
+
+class TelemetryOffMainThreadTest {
+    @Test
+    fun `queue work runs later on the telemetry executor, in order, and never throws to the caller`() {
+        val posted = ArrayDeque<Runnable>()
+        val ran = mutableListOf<String>()
+
+        telemetryOffMainThread(posted::addLast) { ran += "append" }
+        telemetryOffMainThread(posted::addLast) { error("disk full") }
+        telemetryOffMainThread(posted::addLast) { ran += "schedule" }
+
+        assertTrue(ran.isEmpty(), "work must not run on the calling (IME main) thread")
+        while (posted.isNotEmpty()) posted.removeFirst().run()
+        assertEquals(listOf("append", "schedule"), ran)
+    }
+}

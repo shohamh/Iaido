@@ -344,3 +344,29 @@ private fun JsonObject.requiredString(name: String): String =
 private fun JsonObject.requiredInt(name: String): Int = requiredString(name).toInt()
 
 private fun JsonObject.requiredLong(name: String): Long = requiredString(name).toLong()
+
+/**
+ * Runs [task] for the telemetry queue on [executor]. Callers on the IME main thread use it so
+ * the queue read, JSON encode, gzip, write and Keystore read never block typing; a single serial
+ * thread keeps an append ordered before the upload scheduling that follows it. Never throws.
+ */
+internal fun telemetryOffMainThread(executor: java.util.concurrent.Executor = TelemetryWriteExecutor, task: () -> Unit) {
+    try {
+        executor.execute {
+            try {
+                task()
+            } catch (_: Exception) {
+                // Telemetry is best effort and must never affect keyboard behavior.
+            }
+        }
+    } catch (_: Exception) {
+        // A rejected submission just drops this telemetry write.
+    }
+}
+
+/** The single background thread shared by every telemetry queue writer. */
+internal val TelemetryWriteExecutor: java.util.concurrent.Executor by lazy {
+    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "iaido-telemetry-writer").apply { isDaemon = true }
+    }
+}

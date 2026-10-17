@@ -124,8 +124,16 @@ object ResearchCorrectionRecorderProvider {
 
         // No server-issued installation yet: drop the event (never invent credentials); the
         // scheduled upload worker provisions, so later events are queued normally.
-        eventSink = { event -> buildEnvelope(appContext, event)?.let { telemetryQueue(appContext).append(it) } }
-        uploadScheduler = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) }
+        // Both run on the serial telemetry thread (callers are on the IME main thread, once per
+        // gesture), so the append always lands before the scheduling that follows it.
+        eventSink = { event ->
+            telemetryOffMainThread {
+                buildEnvelope(appContext, event)?.let { telemetryQueue(appContext).append(it) }
+            }
+        }
+        uploadScheduler = {
+            telemetryOffMainThread { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) }
+        }
         recorder = ResearchCorrectionRecorder(
             enabled = ::isEnabled,
             appendToQueue = { record -> eventSink?.invoke(ResearchEvent.Correction(record)) },
