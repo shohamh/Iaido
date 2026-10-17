@@ -34,5 +34,35 @@ object ScoringConstants {
     const val CORNER_BONUS_WEIGHT: Double = 0.5
 
     /** Weight applied to log(frequency) in the final combined score. */
-    const val FREQUENCY_WEIGHT: Double = 0.1
+    const val FREQUENCY_WEIGHT: Double = 0.5
+
+    /**
+     * Weight applied to the distance between the swipe's first/last point and the word's first/last
+     * key centre (normalized layout units, summed over both ends).
+     */
+    const val ENDPOINT_WEIGHT: Double = 22.0
+
+    /** Scale applied to the n-gram context score when it is added to a recognized candidate. */
+    const val CONTEXT_WEIGHT: Double = 0.6
+
+    /** Number of [1,2,1] smoothing passes applied to the user path before resampling. */
+    const val SMOOTHING_PASSES: Int = 2
+
+    /** Smoothing applies only when the mean gap between touch points is below this (normalized, ~half a key). */
+    const val SMOOTHING_MAX_MEAN_SEGMENT: Double = 0.05
+
+    /** Score cost per key width of path trimmed off a swipe's start/end when reading it past a stray touch. */
+    const val TRIM_PENALTY_PER_KEY: Double = 2.0
+
+    /** Candidate amounts (in key widths) trimmed from each end when looking for a better-aligned reading. */
+    val TRIM_STEPS_KEYS: DoubleArray = doubleArrayOf(0.0, 0.8, 1.6)
+
+    /** Extra frequency weight applied by [InferenceSegmenter] on top of the recognizer's own frequency term. */
+    const val SEGMENTER_FREQUENCY_WEIGHT: Double = 0.1
+
+    /**
+     * Trimmed readings are only tried for candidates whose untrimmed score is within this of the best one
+     * (a pure speed bound: on the synthetic benchmark a gate of 6 already changes no ranking).
+     */
+    const val TRIM_GATE: Double = 12.0
 }

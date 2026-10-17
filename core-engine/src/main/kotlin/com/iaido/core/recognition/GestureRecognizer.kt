@@ -13,6 +13,7 @@ class GestureRecognizer(
     private val candidateGenerator: CandidateGenerator,
     private val pathScorer: PathScorer,
     private val contextScorer: NgramContextScorer? = null,
+    private val contextWeight: Double = ScoringConstants.CONTEXT_WEIGHT,
 ) {
     fun recognize(
         path: GesturePath,
@@ -24,7 +25,7 @@ class GestureRecognizer(
         val scorer = contextScorer ?: return pathScorer.score(path, candidates, layout)
         // The context pass re-sorts, so the shape scores need not be ordered first.
         return pathScorer.scoreUnordered(path, candidates, layout).map { result ->
-            result.copy(score = result.score + scorer.score(previousWords, result.word.word))
+            result.copy(score = result.score + contextWeight * scorer.score(previousWords, result.word.word))
         }.sortedByDescending { it.score }
     }
 }
