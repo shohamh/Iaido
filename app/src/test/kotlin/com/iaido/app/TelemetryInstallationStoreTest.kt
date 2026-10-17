@@ -26,7 +26,7 @@ class TelemetryInstallationStoreTest {
         )
         val store = TelemetryInstallationStore(storage)
 
-        store.invalidateWriteCredential()
+        store.invalidateWriteCredential("installation-1")
 
         assertNull(store.installation())
         assertNull(store.writeCredential(TelemetryPlane.RESEARCH))
@@ -38,6 +38,22 @@ class TelemetryInstallationStoreTest {
         assertFalse(store.needsReprovisioning())
         assertEquals("write-2", store.writeCredential(TelemetryPlane.RESEARCH))
         assertEquals(RetiredInstallation("installation-1", "server-delete"), store.retiredInstallation())
+    }
+
+    @Test
+    fun `a late 401 for an already retired installation never retires its healthy replacement`() {
+        // Both planes' workers uploaded under installation-1 and both got 401.
+        val store = TelemetryInstallationStore(
+            FakeInstallationCredentialStorage(TelemetryInstallation("installation-1", "write-1", "delete-1")),
+        )
+        store.invalidateWriteCredential("installation-1")
+        store.getOrCreateInstallation { TelemetryInstallation("installation-2", "write-2", "delete-2") }
+
+        store.invalidateWriteCredential("installation-1") // the second worker's late 401
+
+        assertEquals("installation-2", store.installation()?.installationId)
+        assertEquals(RetiredInstallation("installation-1", "delete-1"), store.retiredInstallation())
+        assertFalse(store.needsReprovisioning())
     }
 
     @Test

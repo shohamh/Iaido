@@ -31,7 +31,8 @@ internal class TelemetryUploadRunner(
     private val upload: suspend (TelemetryPlane, TelemetryBatch) -> UploadDisposition,
     private val acknowledge: suspend (TelemetryPlane, String) -> Unit,
     private val ensureProvisioned: suspend () -> UploadDisposition = { UploadDisposition.ACKNOWLEDGED },
-    private val invalidateCredentials: suspend () -> Unit = {},
+    /** Receives the installation id whose write credential was rejected. */
+    private val invalidateCredentials: suspend (String) -> Unit = {},
     /** Removes a batch the collector permanently rejected; removing it from the queue by default. */
     private val discard: suspend (TelemetryPlane, String) -> Unit = acknowledge,
 ) {
@@ -57,7 +58,8 @@ internal class TelemetryUploadRunner(
                     UploadDisposition.RETRY -> return WorkerDisposition.RETRY
                     UploadDisposition.DISCARD -> discard(plane, batch.batchId)
                     UploadDisposition.UNAUTHORIZED -> {
-                        invalidateCredentials()
+                        // A batch holds one installation (TelemetryQueue.append): the rejected one.
+                        batch.events.firstOrNull()?.let { invalidateCredentials(it.installationId) }
                         return WorkerDisposition.FAILURE
                     }
                 }
@@ -108,7 +110,7 @@ class TelemetryUploadWorker(
                     withContext(Dispatchers.IO) { transport.provision() }
                 }
             },
-            invalidateCredentials = { withContext(Dispatchers.IO) { store.invalidateWriteCredential() } },
+            invalidateCredentials = { rejected -> withContext(Dispatchers.IO) { store.invalidateWriteCredential(rejected) } },
             pendingBatches = { targetPlane -> queue(targetPlane).pendingBatches() },
             upload = { targetPlane, batch ->
                 withContext(Dispatchers.IO) { transport.upload(targetPlane, batch) }

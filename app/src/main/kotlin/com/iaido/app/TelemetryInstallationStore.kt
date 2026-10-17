@@ -85,9 +85,14 @@ class TelemetryInstallationStore internal constructor(
      * retired, not wiped: its id and deletion credential stay available so "Delete uploaded data"
      * can still reach what was uploaded under it, while uploads wait for fresh provisioning. A
      * single retired slot is kept; a later retirement replaces it.
+     *
+     * Only [rejectedInstallationId] is retired: a late 401 from another plane's upload under an
+     * installation that was already replaced is a no-op, so it can neither retire the healthy
+     * replacement nor overwrite the retired slot.
      */
-    fun invalidateWriteCredential() = synchronized(PROVISIONING_LOCK) {
+    fun invalidateWriteCredential(rejectedInstallationId: String) = synchronized(PROVISIONING_LOCK) {
         val current = storage.read() ?: return@synchronized
+        if (current.installationId != rejectedInstallationId) return@synchronized
         storage.writeRetired(RetiredInstallation(current.installationId, current.deletionCredential))
         storage.clearActive()
     }

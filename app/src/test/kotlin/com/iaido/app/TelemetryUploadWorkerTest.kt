@@ -215,7 +215,10 @@ class TelemetryUploadWorkerTest {
                 UploadDisposition.UNAUTHORIZED
             },
             acknowledge = { _, _ -> error("must not acknowledge or drop on auth failure") },
-            invalidateCredentials = { invalidated = true },
+            invalidateCredentials = { rejected ->
+                assertEquals("10000000-0000-4000-8000-000000000001", rejected)
+                invalidated = true
+            },
         )
 
         assertEquals(WorkerDisposition.FAILURE, runner.run(TelemetryPlane.RESEARCH))
