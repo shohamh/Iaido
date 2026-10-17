@@ -66,7 +66,12 @@ class TelemetryQueue(
                     ?.takeUnless { it.sealed }
                     ?.let { readBatchOrNull(it.file) }
                 val appended = current?.events.orEmpty() + event
-                if (current != null && appended.size <= limits.maxBatchEvents && fitsLimits(current.file, appended)) {
+                // A batch carries one installation: after re-provisioning, new events start a new
+                // batch, so the old-installation batch is rejected alone and never takes them along.
+                val sameInstallation = current?.events?.all { it.installationId == event.installationId } == true
+                if (current != null && sameInstallation && appended.size <= limits.maxBatchEvents &&
+                    fitsLimits(current.file, appended)
+                ) {
                     writeBatch(current.file, appended)
                 } else {
                     // A single event too large to ever be uploaded is dropped rather than queued.

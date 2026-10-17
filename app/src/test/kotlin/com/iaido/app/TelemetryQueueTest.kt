@@ -74,6 +74,20 @@ class TelemetryQueueTest {
     }
 
     @Test
+    fun `a batch never mixes installations`() {
+        withQueue { queue, _ ->
+            queue.append(diagnosticEnvelope(1_000L))
+            queue.append(diagnosticEnvelope(1_001L).copy(installationId = "00000000-0000-0000-0000-0000000000ff"))
+            queue.append(diagnosticEnvelope(1_002L).copy(installationId = "00000000-0000-0000-0000-0000000000ff"))
+
+            val batches = queue.pendingBatches()
+
+            assertEquals(listOf(1, 2), batches.map { it.events.size })
+            assertTrue(batches.all { batch -> batch.events.map { it.installationId }.distinct().size == 1 })
+        }
+    }
+
+    @Test
     fun `events appended while a batch is being uploaded survive its acknowledgement`() {
         withQueue { ime, root ->
             val worker = TelemetryQueue(root, TelemetryPlane.DIAGNOSTICS, { 1_000L }, QueueLimits())
