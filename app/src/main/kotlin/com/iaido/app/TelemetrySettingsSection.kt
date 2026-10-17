@@ -146,10 +146,14 @@ internal class TelemetryConsentController(
         }
     }
 
-    /** Deletes this plane's pending local queue before persisting the disabled consent state. */
+    /**
+     * Persists the disabled consent state, then deletes this plane's pending local queue. In that
+     * order, background appends (which re-check consent right before writing) cannot re-fill the
+     * queue after it was deleted.
+     */
     private suspend fun disable(plane: TelemetryPlane, currentRecord: ConsentRecord): TelemetryConsentOutcome {
-        deletePendingQueue(plane)
         persistConsent(plane, currentRecord.copy(enabled = false, revokedAtMs = now()))
+        deletePendingQueue(plane)
         return TelemetryConsentOutcome(
             TelemetryConsentStatus.DISABLED,
             "${plane.settingsLabel()} telemetry disabled and pending data deleted.",
@@ -184,7 +188,8 @@ internal fun buildTelemetryConsentController(context: Context): TelemetryConsent
 
     return TelemetryConsentController(
         persistConsent = { plane, record -> persistConsentRecord(appContext, plane, record) },
-        deletePendingQueue = { plane -> withContext(Dispatchers.IO) { queueFor(plane).deleteAll() } },
+        // On the telemetry thread, so it runs after any append already posted there.
+        deletePendingQueue = { plane -> onTelemetryThread { queueFor(plane).deleteAll() } },
         deleteUploadedData = { plane ->
             withContext(Dispatchers.IO) { transport?.delete(plane) ?: UploadDisposition.DISCARD }
         },

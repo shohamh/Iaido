@@ -11,7 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
@@ -212,15 +214,23 @@ object DiagnosticsTelemetryProvider {
     fun initialize(context: Context) {
         if (telemetry != null) return
         val appContext = context.applicationContext
+        val writer = TelemetryBackgroundWriter(
+            executor = TelemetryWriteExecutor,
+            consentEnabled = {
+                runCatching {
+                    runBlocking { diagnosticsConsentFromPreferences(appContext.settingsStore.data.first()).enabled }
+                }.getOrDefault(false)
+            },
+            queue = { telemetryQueue(appContext) },
+            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) },
+        )
 
         telemetry = DiagnosticsTelemetry(
             diagnosticsEnabled = ::isEnabled,
             // flush() runs on the IME main thread (onFinishInputView): queue IO and scheduling go to
-            // the serial telemetry thread, appends first.
-            appendToQueue = { envelope -> telemetryOffMainThread { telemetryQueue(appContext).append(envelope) } },
-            scheduleUpload = {
-                telemetryOffMainThread { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) }
-            },
+            // the serial telemetry thread, appends first, each re-checking the stored consent.
+            appendToQueue = { envelope -> writer.append(envelope) },
+            scheduleUpload = { writer.schedule() },
             envelopeFactory = { event -> buildEnvelope(appContext, event) },
         )
 

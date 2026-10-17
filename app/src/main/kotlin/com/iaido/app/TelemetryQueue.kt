@@ -12,6 +12,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -361,6 +362,40 @@ internal fun telemetryOffMainThread(executor: java.util.concurrent.Executor = Te
         }
     } catch (_: Exception) {
         // A rejected submission just drops this telemetry write.
+    }
+}
+
+/** Runs [block] on [executor] after everything already posted there, and waits for it. */
+internal suspend fun <T> onTelemetryThread(
+    executor: java.util.concurrent.Executor = TelemetryWriteExecutor,
+    block: () -> T,
+): T = kotlinx.coroutines.withContext(executor.asCoroutineDispatcher()) { block() }
+
+/**
+ * One plane's background queue writer: every append and upload scheduling for the plane runs on
+ * the shared serial telemetry thread. [consentEnabled] is re-read on that thread right before each
+ * append or schedule, so work posted before consent was revoked never lands afterwards; pending
+ * queue deletion goes through [onTelemetryThread] on the same executor, so it runs after any
+ * append already in flight.
+ */
+internal class TelemetryBackgroundWriter(
+    private val executor: java.util.concurrent.Executor,
+    private val consentEnabled: () -> Boolean,
+    private val queue: () -> TelemetryQueue,
+    private val scheduleUpload: () -> Unit,
+) {
+    /** Builds and appends one envelope on the telemetry thread; a null envelope is dropped. */
+    fun record(buildEnvelope: () -> TelemetryEnvelope?) = telemetryOffMainThread(executor) {
+        if (!consentEnabled()) return@telemetryOffMainThread
+        val envelope = buildEnvelope() ?: return@telemetryOffMainThread
+        if (consentEnabled()) queue().append(envelope)
+    }
+
+    /** Appends an already built envelope on the telemetry thread. */
+    fun append(envelope: TelemetryEnvelope) = record { envelope }
+
+    fun schedule() = telemetryOffMainThread(executor) {
+        if (consentEnabled()) scheduleUpload()
     }
 }
 

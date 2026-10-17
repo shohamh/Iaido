@@ -10,7 +10,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Caller-supplied input for one finished correction action. [sourceText]/[finalText] must be only
@@ -125,15 +127,20 @@ object ResearchCorrectionRecorderProvider {
         // No server-issued installation yet: drop the event (never invent credentials); the
         // scheduled upload worker provisions, so later events are queued normally.
         // Both run on the serial telemetry thread (callers are on the IME main thread, once per
-        // gesture), so the append always lands before the scheduling that follows it.
-        eventSink = { event ->
-            telemetryOffMainThread {
-                buildEnvelope(appContext, event)?.let { telemetryQueue(appContext).append(it) }
-            }
-        }
-        uploadScheduler = {
-            telemetryOffMainThread { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) }
-        }
+        // gesture), so the append always lands before the scheduling that follows it, and both
+        // re-read the stored consent there, so nothing lands after research is turned off.
+        val writer = TelemetryBackgroundWriter(
+            executor = TelemetryWriteExecutor,
+            consentEnabled = {
+                runCatching {
+                    runBlocking { researchConsentFromPreferences(appContext.settingsStore.data.first()).enabled }
+                }.getOrDefault(false)
+            },
+            queue = { telemetryQueue(appContext) },
+            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) },
+        )
+        eventSink = { event -> writer.record { buildEnvelope(appContext, event) } }
+        uploadScheduler = writer::schedule
         recorder = ResearchCorrectionRecorder(
             enabled = ::isEnabled,
             appendToQueue = { record -> eventSink?.invoke(ResearchEvent.Correction(record)) },

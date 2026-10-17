@@ -73,7 +73,7 @@ class TelemetrySettingsSectionTest {
     }
 
     @Test
-    fun `disabling a plane deletes its pending queue before persisting the disabled state`() = runBlocking {
+    fun `disabling a plane persists the disabled state before deleting its pending queue`() = runBlocking {
         val events = mutableListOf<String>()
         val controller = TelemetryConsentController(
             now = { 2_000L },
@@ -88,7 +88,9 @@ class TelemetrySettingsSectionTest {
         val outcome = controller.setEnabled(TelemetryPlane.DIAGNOSTICS, false, enabledRecord)
 
         assertEquals(TelemetryConsentStatus.DISABLED, outcome.status)
-        assertEquals(listOf("delete", "persist:false:2000"), events)
+        // Consent off first, so an append re-checking consent on the telemetry thread after the
+        // deletion can never re-fill the queue.
+        assertEquals(listOf("persist:false:2000", "delete"), events)
     }
 
     @Test
