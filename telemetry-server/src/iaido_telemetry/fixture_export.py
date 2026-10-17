@@ -76,6 +76,7 @@ def export_research_fixtures(
     output_dir: Path,
     *,
     operator_token: str,
+    app_version: str | None = None,
 ) -> Path:
     """Write every reviewed research record in ``[start_ms, end_ms)`` to one fixture bundle.
 
@@ -86,6 +87,8 @@ def export_research_fixtures(
     written in a shape tests would then replay.
     """
     require_operator_token(settings, operator_token)
+    if not app_version:
+        raise ValueError("app_version is required: fixtures are exported per app version")
     if start_ms > end_ms:
         raise ValueError("start_ms must not be greater than end_ms")
 
@@ -94,11 +97,13 @@ def export_research_fixtures(
     directory.mkdir(parents=True, exist_ok=True)
 
     reviewed: dict[str, dict] = {}
-    for record in database.list_batches("research"):
+    for record in database.list_batches("research", app_version):
         if not (start_ms <= record.received_at_ms < end_ms):
             continue
         batch = json.loads(storage.get(record.object_key))
         for event in batch.get("events", []):
+            if event.get("app_version") != app_version:
+                continue
             digest = event_hash(event)
             if digest in approved and digest not in reviewed:
                 reviewed[digest] = _fixture_for(event)

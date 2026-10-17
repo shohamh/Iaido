@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse
 
 from .auth import basic_or_bearer, credentials_match
 from .config import Settings
-from .db import TelemetryRepository
+from .db import UNKNOWN_VERSION, TelemetryRepository, version_sort_key
 from .storage import ObjectStorage
 
 PLANES = ("diagnostics", "research")
@@ -232,12 +232,41 @@ def _recent_events(database: TelemetryRepository, storage: ObjectStorage, plane:
                 yield record, event
 
 
+def _known_versions(database: TelemetryRepository) -> list[str]:
+    """Every app version seen on either plane, newest first (``unknown`` last)."""
+    seen = {row["app_version"] for plane in PLANES for row in database.version_summaries(plane)}
+    return sorted(seen, key=version_sort_key, reverse=True)
+
+
+def _version_picker(versions: list[str], selected: str | None) -> str:
+    if not versions:
+        return ""
+    options = "".join(
+        f'<option value="{_esc(version)}"{" selected" if version == selected else ""}>'
+        f"{_esc(version)}</option>"
+        for version in versions
+    )
+    return (
+        '<form method="get" action="/"><label>App version '
+        f'<select name="app_version">{options}</select></label> '
+        '<button type="submit">Show</button></form>'
+    )
+
+
 def render_dashboard(
     database: TelemetryRepository,
     *,
     now_ms: int | None = None,
+    app_version: str | None = None,
 ) -> str:
-    """Render the overview page: per-plane summaries, recent batches, aggregates, audit log."""
+    """Render the overview page: per-plane summaries, recent batches, aggregates, audit log.
+
+    Batch lists and counts cover one app version (the latest seen unless [app_version] picks
+    another); the aggregate tables below are not versioned and cover everything stored.
+    """
+    versions = _known_versions(database)
+    if app_version is None and versions:
+        app_version = versions[0]
     generated_at = _timestamp(now_ms if now_ms is not None else int(time.time() * 1000))
     parts = [
         "<h1>Iaido telemetry</h1>",
@@ -246,15 +275,21 @@ def render_dashboard(
         '<p class="note">Research batches can contain readable typing content from the affected '
         "span. Treat everything on this page as sensitive and delete it when it is no longer "
         "needed.</p>",
+        _version_picker(versions, app_version),
     ]
 
     for plane in PLANES:
-        batches = list(database.list_batches(plane))
-        events = database.total_event_count(plane)
+        batches = list(database.list_batches(plane, app_version))
+        events = sum(
+            row["events"]
+            for row in database.version_summaries(plane)
+            if app_version is None or row["app_version"] == app_version
+        )
         newest = max((record.received_at_ms for record in batches), default=None)
         parts.append(f"<h2>{_esc(plane.capitalize())}</h2>")
         parts.append(
             "<p>"
+            f"App version <code>{_esc(app_version or UNKNOWN_VERSION)}</code>: "
             f"<strong>{len(batches)}</strong> batch(es), <strong>{events}</strong> event(s) "
             f"recorded, newest {_esc(_timestamp(newest))}.</p>"
         )
@@ -565,8 +600,8 @@ def register_dashboard(
         response_class=HTMLResponse,
         dependencies=[Depends(require_operator)],
     )
-    def dashboard() -> HTMLResponse:
-        return HTMLResponse(render_dashboard(database))
+    def dashboard(app_version: str | None = None) -> HTMLResponse:
+        return HTMLResponse(render_dashboard(database, app_version=app_version or None))
 
     @app.get(
         "/gestures",

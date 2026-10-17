@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import re
 import time
+from collections.abc import Iterable, Mapping
 from typing import Protocol
 from sqlalchemy import (
     BigInteger,
@@ -9,14 +12,47 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
+UNKNOWN_VERSION = "unknown"
+_VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d+))?$")
+
+
 class Base(DeclarativeBase):
     pass
+
+
+def version_sort_key(version: str) -> tuple:
+    """Order app versions: ``unknown`` lowest; a release above its own nightlies; nightlies by run."""
+    match = _VERSION_PATTERN.match(version)
+    if match is None:
+        return (0, 0, 0, 0, 0, 0)
+    major, minor, patch, nightly = match.groups()
+    if nightly is None:
+        return (1, int(major), int(minor), int(patch), 1, 0)
+    return (1, int(major), int(minor), int(patch), 0, int(nightly))
+
+
+def derive_versions(events: Iterable[Mapping]) -> tuple[str, str]:
+    """(app_version, algorithm_version) of a batch: taken from its newest event, else ``unknown``."""
+    newest = None
+    for event in events:
+        if newest is None or event.get("occurred_at_ms", 0) >= newest.get("occurred_at_ms", 0):
+            newest = event
+    if newest is None:
+        return UNKNOWN_VERSION, UNKNOWN_VERSION
+    payload = newest.get("payload")
+    algorithm = payload.get("algorithm_version") if isinstance(payload, Mapping) else None
+    return (
+        str(newest.get("app_version") or UNKNOWN_VERSION),
+        UNKNOWN_VERSION if algorithm is None else str(algorithm),
+    )
 
 
 class InstallationRecord(Base):
@@ -41,6 +77,12 @@ class BatchColumns:
     checksum: Mapped[str] = mapped_column(String(64))
     object_key: Mapped[str] = mapped_column(String(512), unique=True)
     received_at_ms: Mapped[int] = mapped_column(BigInteger)
+    app_version: Mapped[str] = mapped_column(
+        String(32), index=True, default=UNKNOWN_VERSION, server_default=UNKNOWN_VERSION
+    )
+    algorithm_version: Mapped[str] = mapped_column(
+        String(32), index=True, default=UNKNOWN_VERSION, server_default=UNKNOWN_VERSION
+    )
 
 
 class DiagnosticsBatchRecord(BatchColumns, Base):
@@ -139,13 +181,19 @@ class TelemetryRepository(Protocol):
         batch_id: str,
         checksum: str,
         object_key: str,
+        app_version: str = UNKNOWN_VERSION,
+        algorithm_version: str = UNKNOWN_VERSION,
     ) -> None: ...
 
     def delete_batches(self, plane: str, installation_id: str) -> None: ...
 
     def delete_batch(self, plane: str, installation_id: str, batch_id: str) -> None: ...
 
-    def list_batches(self, plane: str): ...
+    def list_batches(self, plane: str, app_version: str | None = None): ...
+
+    def version_summaries(self, plane: str) -> list[dict]: ...
+
+    def backfill_versions(self, storage) -> None: ...
 
     def add_event_facts(
         self,
@@ -196,6 +244,42 @@ class SqlAlchemyRepository:
 
     def create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
+        self._add_missing_version_columns()
+
+    def _add_missing_version_columns(self) -> None:
+        """Additive migration for databases created before batches were tagged by version."""
+        for model in PLANE_RECORDS.values():
+            table = model.__tablename__
+            existing = {column["name"] for column in inspect(self.engine).get_columns(table)}
+            for column in ("app_version", "algorithm_version"):
+                if column in existing:
+                    continue
+                with self.engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table} ADD COLUMN {column} "
+                            f"VARCHAR(32) NOT NULL DEFAULT '{UNKNOWN_VERSION}'"
+                        )
+                    )
+                    connection.execute(
+                        text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
+                    )
+
+    def backfill_versions(self, storage) -> None:
+        """Tag still-``unknown`` batches from their stored payload; unreadable ones stay unknown."""
+        for model in PLANE_RECORDS.values():
+            with self._sessions.begin() as session:
+                for record in session.scalars(
+                    select(model).where(
+                        model.app_version == UNKNOWN_VERSION,
+                        model.algorithm_version == UNKNOWN_VERSION,
+                    )
+                ):
+                    try:
+                        events = json.loads(storage.get(record.object_key)).get("events", [])
+                    except Exception:
+                        continue
+                    record.app_version, record.algorithm_version = derive_versions(events)
 
     def create_installation(
         self, installation_id: str, write_hash: str, deletion_hash: str
@@ -245,6 +329,8 @@ class SqlAlchemyRepository:
         batch_id: str,
         checksum: str,
         object_key: str,
+        app_version: str = UNKNOWN_VERSION,
+        algorithm_version: str = UNKNOWN_VERSION,
     ) -> None:
         model = PLANE_RECORDS[plane]
         try:
@@ -256,6 +342,8 @@ class SqlAlchemyRepository:
                         checksum=checksum,
                         object_key=object_key,
                         received_at_ms=int(time.time() * 1000),
+                        app_version=app_version,
+                        algorithm_version=algorithm_version,
                     )
                 )
         except IntegrityError as error:
@@ -288,10 +376,42 @@ class SqlAlchemyRepository:
             if record is not None:
                 session.delete(record)
 
-    def list_batches(self, plane: str):
+    def list_batches(self, plane: str, app_version: str | None = None):
         model = PLANE_RECORDS[plane]
+        query = select(model).order_by(model.id)
+        if app_version is not None:
+            query = query.where(model.app_version == app_version)
         with self._sessions() as session:
-            return list(session.scalars(select(model).order_by(model.id)))
+            return list(session.scalars(query))
+
+    def version_summaries(self, plane: str) -> list[dict]:
+        """One row per app version, newest first: batch count and event count (from event facts)."""
+        model = PLANE_RECORDS[plane]
+        facts = PLANE_EVENT_FACTS[plane]
+        with self._sessions() as session:
+            batch_counts = dict(
+                session.execute(
+                    select(model.app_version, func.count()).group_by(model.app_version)
+                ).all()
+            )
+            event_counts = dict(
+                session.execute(
+                    select(model.app_version, func.count(facts.id))
+                    .select_from(model)
+                    .join(
+                        facts,
+                        (facts.installation_id == model.installation_id)
+                        & (facts.batch_id == model.batch_id),
+                    )
+                    .group_by(model.app_version)
+                ).all()
+            )
+        return [
+            {"app_version": version, "batches": count, "events": event_counts.get(version, 0)}
+            for version, count in sorted(
+                batch_counts.items(), key=lambda item: version_sort_key(item[0]), reverse=True
+            )
+        ]
 
     def add_event_facts(
         self,

@@ -35,6 +35,7 @@ def export_plane(
     output: IO[str],
     *,
     operator_token: str,
+    app_version: str | None = None,
 ) -> int:
     """Write every event received in [start_ms, end_ms) for ``plane`` to
     ``output`` as newline-delimited JSON (NDJSON), one line per event.
@@ -46,22 +47,29 @@ def export_plane(
     is structurally impossible for an export to include the other plane's
     data even if it exists for the same installation and time range.
 
+    Exactly one ``app_version`` is exported per call (versions are never mixed): only batches
+    tagged with that version, and only events carrying it, are written.
+
     Writes a single audit record (action="export") describing the plane and
     time range that were exported. Returns the number of batches exported.
     """
     if plane not in PLANES:
         raise ValueError("unknown telemetry plane")
     require_operator_token(settings, operator_token)
+    if not app_version:
+        raise ValueError("app_version is required: exports are per app version")
     if start_ms > end_ms:
         raise ValueError("start_ms must not be greater than end_ms")
 
     exported = 0
-    for record in database.list_batches(plane):
+    for record in database.list_batches(plane, app_version):
         if not (start_ms <= record.received_at_ms < end_ms):
             continue
         raw = storage.get(record.object_key)
         batch = json.loads(raw)
         for event in batch.get("events", []):
+            if event.get("app_version") != app_version:
+                continue
             line = {
                 "plane": plane,
                 "installation_id": record.installation_id,
@@ -78,6 +86,6 @@ def export_plane(
         plane=plane,
         installation_id="*",
         actor="operator",
-        detail=f"exported {exported} batch(es) in [{start_ms}, {end_ms})",
+        detail=f"exported {exported} batch(es) of {app_version} in [{start_ms}, {end_ms})",
     )
     return exported
