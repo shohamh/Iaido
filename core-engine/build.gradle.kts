@@ -11,6 +11,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    maxHeapSize = "4g"
 }
 
 tasks.withType<Jar>().configureEach {
