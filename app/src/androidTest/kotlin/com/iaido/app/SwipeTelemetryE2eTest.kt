@@ -203,9 +203,9 @@ class SwipeTelemetryE2eTest {
 
     /**
      * Polls the operator API, filtered by the installed app's exact version, until a batch from
-     * [installationId] that was not there before holds a swipe `gesture_trace`. Re-schedules the
-     * upload while waiting: the IME schedules after every append, but a schedule that lands while
-     * a previous upload is still running is kept out by the KEEP policy.
+     * [installationId] that was not there before holds a swipe `gesture_trace`. Never schedules
+     * an upload itself: only the IME's own scheduling may deliver it, so a gesture whose upload
+     * gets stranded on the device (e.g. a schedule dropped by the KEEP policy) fails this test.
      */
     private fun awaitSwipeAtCollector(
         installationId: String,
@@ -215,7 +215,6 @@ class SwipeTelemetryE2eTest {
         val deadline = SystemClock.elapsedRealtime() + COLLECTOR_TIMEOUT_MS
         var lastSeen = emptyList<OperatorBatch>()
         while (SystemClock.elapsedRealtime() < deadline) {
-            TelemetryUploadScheduler.schedule(context, TelemetryPlane.RESEARCH)
             lastSeen = operatorBatches(BuildConfig.VERSION_NAME)
                 .filter { it.installationId == installationId && it.batchId !in before }
             if (lastSeen.isNotEmpty()) {
@@ -237,9 +236,7 @@ class SwipeTelemetryE2eTest {
 
     private fun awaitQueueDrained(queue: TelemetryQueue): Boolean = waitUntil(QUEUE_DRAIN_TIMEOUT_MS) {
         runBlocking { onTelemetryThread { } }
-        queue.pendingBatches().isEmpty().also { empty ->
-            if (!empty) TelemetryUploadScheduler.schedule(context, TelemetryPlane.RESEARCH)
-        }
+        queue.pendingBatches().isEmpty()
     }
 
     private fun awaitResearchWorkSettled(): Boolean = waitUntil(QUEUE_DRAIN_TIMEOUT_MS) {
