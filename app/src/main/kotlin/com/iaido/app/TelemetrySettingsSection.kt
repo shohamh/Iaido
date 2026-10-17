@@ -71,6 +71,14 @@ internal const val TELEMETRY_UNAVAILABLE_MESSAGE =
     "Telemetry is unavailable in this build: no collector address was configured, so nothing " +
         "can be shared."
 
+internal const val TELEMETRY_REPAIR_MESSAGE =
+    "The collector no longer recognises this device. Re-registering automatically; pending " +
+        "data will upload once that succeeds."
+
+/** Status text for a plane whose upload credentials were rejected, or null when none is needed. */
+internal fun telemetryRepairStatus(consentEnabled: Boolean, needsReprovisioning: Boolean): String? =
+    TELEMETRY_REPAIR_MESSAGE.takeIf { consentEnabled && needsReprovisioning }
+
 internal fun TelemetryPlane.settingsLabel(): String = when (this) {
     TelemetryPlane.DIAGNOSTICS -> "Diagnostics"
     TelemetryPlane.RESEARCH -> "Research"
@@ -243,6 +251,11 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         diagnosticsRecord = diagnosticsConsentFromPreferences(preferences)
         researchRecord = researchConsentFromPreferences(preferences)
         researchWifiOnlyEnabled = withContext(Dispatchers.IO) { researchWifiOnly(context) }
+        val needsReprovisioning = withContext(Dispatchers.IO) {
+            runCatching { TelemetryInstallationStore(context).needsReprovisioning() }.getOrDefault(false)
+        }
+        telemetryRepairStatus(diagnosticsRecord.enabled, needsReprovisioning)?.let { diagnosticsStatus = it }
+        telemetryRepairStatus(researchRecord.enabled, needsReprovisioning)?.let { researchStatus = it }
     }
 
     suspend fun refresh() {

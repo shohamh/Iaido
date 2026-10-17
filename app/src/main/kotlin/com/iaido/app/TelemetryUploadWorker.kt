@@ -108,7 +108,7 @@ class TelemetryUploadWorker(
                     withContext(Dispatchers.IO) { transport.provision() }
                 }
             },
-            invalidateCredentials = { withContext(Dispatchers.IO) { store.clear() } },
+            invalidateCredentials = { withContext(Dispatchers.IO) { store.invalidateWriteCredential() } },
             pendingBatches = { targetPlane -> queue(targetPlane).pendingBatches() },
             upload = { targetPlane, batch ->
                 withContext(Dispatchers.IO) { transport.upload(targetPlane, batch) }

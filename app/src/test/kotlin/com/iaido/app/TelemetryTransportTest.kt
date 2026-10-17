@@ -175,6 +175,41 @@ class TelemetryTransportTest {
     }
 
     @Test
+    fun `delete still reaches data uploaded under a retired installation`() {
+        val requests = mutableListOf<RecordingConnection>()
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(
+                FakeInstallationCredentialStorage(
+                    installation = TelemetryInstallation("installation-2", "write-2", "delete-2"),
+                    retired = RetiredInstallation("installation-1", "delete-1"),
+                ),
+            ),
+        ) { url ->
+            RecordingConnection(url, responseCode = 200, responseBody = """{"deleted":true}""").also { requests += it }
+        }
+
+        assertEquals(UploadDisposition.ACKNOWLEDGED, transport.delete(TelemetryPlane.RESEARCH))
+        assertEquals(
+            setOf("Bearer delete-2", "Bearer delete-1"),
+            requests.map { it.getRequestProperty("Authorization") }.toSet(),
+        )
+        assertTrue(requests.all { it.url.path == "/v1/research" })
+    }
+
+    @Test
+    fun `delete with only a retired installation the collector no longer knows succeeds`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(
+                FakeInstallationCredentialStorage(retired = RetiredInstallation("installation-1", "delete-1")),
+            ),
+        ) { url -> RecordingConnection(url, responseCode = 401, responseBody = "{}") }
+
+        assertEquals(UploadDisposition.ACKNOWLEDGED, transport.delete(TelemetryPlane.RESEARCH))
+    }
+
+    @Test
     fun `provision persists only credentials returned by installation route`() {
         val storage = FakeInstallationCredentialStorage()
         val store = TelemetryInstallationStore(storage)
@@ -300,6 +335,7 @@ class TelemetryTransportTest {
 
 internal class FakeInstallationCredentialStorage(
     private var installation: TelemetryInstallation? = null,
+    private var retired: RetiredInstallation? = null,
 ) : InstallationCredentialStorage {
     override fun read(): TelemetryInstallation? = installation
 
@@ -307,8 +343,19 @@ internal class FakeInstallationCredentialStorage(
         this.installation = installation
     }
 
+    override fun clearActive() {
+        installation = null
+    }
+
+    override fun readRetired(): RetiredInstallation? = retired
+
+    override fun writeRetired(retired: RetiredInstallation) {
+        this.retired = retired
+    }
+
     override fun clear() {
         installation = null
+        retired = null
     }
 }
 

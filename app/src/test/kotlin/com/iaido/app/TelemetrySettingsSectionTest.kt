@@ -189,4 +189,11 @@ class TelemetrySettingsSectionTest {
         assertFalse(isDeleteUploadedAvailable(""))
         assertTrue(isDeleteUploadedAvailable("https://host.tailnet.ts.net"))
     }
+
+    @Test
+    fun `settings says honestly that a rejected registration is being repaired`() {
+        assertEquals(TELEMETRY_REPAIR_MESSAGE, telemetryRepairStatus(consentEnabled = true, needsReprovisioning = true))
+        assertEquals(null, telemetryRepairStatus(consentEnabled = false, needsReprovisioning = true))
+        assertEquals(null, telemetryRepairStatus(consentEnabled = true, needsReprovisioning = false))
+    }
 }

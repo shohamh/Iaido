@@ -105,21 +105,41 @@ class TelemetryTransport(
         }
     }
 
+    /**
+     * Deletes [plane]'s uploaded data for the active installation and for the retired one whose
+     * write credential was rejected. A 401 for the retired installation means the collector holds
+     * nothing under it, so it counts as done.
+     */
     fun delete(plane: TelemetryPlane): UploadDisposition {
-        val credential = installationStore.deletionCredential() ?: return UploadDisposition.DISCARD
-        return try {
-            dispositionForResponse(
-                execute(
-                    method = "DELETE",
-                    path = "/v1/${plane.pathSegment()}",
-                    credential = credential,
-                ).statusCode,
-            )
-        } catch (_: IOException) {
-            UploadDisposition.RETRY
-        } catch (_: Exception) {
-            UploadDisposition.DISCARD
+        val active = installationStore.deletionCredential()
+        val retired = installationStore.retiredInstallation()?.deletionCredential
+        if (active == null && retired == null) return UploadDisposition.DISCARD
+        val outcomes = listOfNotNull(
+            active?.let { deleteWith(plane, it) },
+            retired?.let { credential ->
+                deleteWith(plane, credential).takeUnless { it == UploadDisposition.UNAUTHORIZED }
+                    ?: UploadDisposition.ACKNOWLEDGED
+            },
+        )
+        return when {
+            outcomes.all { it == UploadDisposition.ACKNOWLEDGED } -> UploadDisposition.ACKNOWLEDGED
+            UploadDisposition.RETRY in outcomes -> UploadDisposition.RETRY
+            else -> outcomes.first { it != UploadDisposition.ACKNOWLEDGED }
         }
+    }
+
+    private fun deleteWith(plane: TelemetryPlane, credential: String): UploadDisposition = try {
+        dispositionForResponse(
+            execute(
+                method = "DELETE",
+                path = "/v1/${plane.pathSegment()}",
+                credential = credential,
+            ).statusCode,
+        )
+    } catch (_: IOException) {
+        UploadDisposition.RETRY
+    } catch (_: Exception) {
+        UploadDisposition.DISCARD
     }
 
     private fun execute(
