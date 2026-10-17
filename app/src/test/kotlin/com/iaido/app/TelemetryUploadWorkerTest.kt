@@ -1,5 +1,11 @@
 package com.iaido.app
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -69,6 +75,69 @@ class TelemetryUploadWorkerTest {
         assertEquals(WorkerDisposition.SUCCESS, runner.run(TelemetryPlane.RESEARCH))
         assertEquals(listOf("batch-1", "batch-2"), uploaded)
         assertEquals(listOf("batch-1", "batch-2"), removed)
+    }
+
+    @Test
+    fun `only explicit permanent rejections delete a queued batch`() = runBlocking {
+        val expectations = mapOf(
+            302 to true, 408 to true, 403 to true, 404 to true, 426 to true, 503 to true,
+            400 to false, 409 to false, 413 to false, 422 to false,
+        )
+        for ((status, kept) in expectations) {
+            val directory = Files.createTempDirectory("telemetry-runner").toFile()
+            try {
+                val queue = TelemetryQueue(directory, TelemetryPlane.RESEARCH, { 1_000L }, QueueLimits())
+                queue.append(sampleBatch("unused").events.single())
+                val transport = TelemetryTransport(
+                    URL("https://collector.invalid"),
+                    TelemetryInstallationStore(
+                        FakeInstallationCredentialStorage(
+                            TelemetryInstallation("10000000-0000-4000-8000-000000000001", "write", "delete"),
+                        ),
+                    ),
+                ) { url -> FixedResponseConnection(url, status) }
+                val runner = TelemetryUploadRunner(
+                    consentEnabled = { true },
+                    pendingBatches = { queue.pendingBatches() },
+                    upload = { plane, batch -> transport.upload(plane, batch) },
+                    acknowledge = { _, batchId -> queue.acknowledge(batchId) },
+                )
+
+                runner.run(TelemetryPlane.RESEARCH)
+
+                assertEquals(kept, queue.pendingBatches().isNotEmpty(), "status $status")
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `a local failure while uploading keeps the batch`() = runBlocking {
+        val directory = Files.createTempDirectory("telemetry-runner").toFile()
+        try {
+            val queue = TelemetryQueue(directory, TelemetryPlane.RESEARCH, { 1_000L }, QueueLimits())
+            queue.append(sampleBatch("unused").events.single())
+            val transport = TelemetryTransport(
+                URL("https://collector.invalid"),
+                TelemetryInstallationStore(
+                    FakeInstallationCredentialStorage(
+                        TelemetryInstallation("10000000-0000-4000-8000-000000000001", "write", "delete"),
+                    ),
+                ),
+            ) { error("unexpected local failure") }
+            val runner = TelemetryUploadRunner(
+                consentEnabled = { true },
+                pendingBatches = { queue.pendingBatches() },
+                upload = { plane, batch -> transport.upload(plane, batch) },
+                acknowledge = { _, batchId -> queue.acknowledge(batchId) },
+            )
+
+            assertEquals(WorkerDisposition.RETRY, runner.run(TelemetryPlane.RESEARCH))
+            assertTrue(queue.pendingBatches().isNotEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     @Test
@@ -185,4 +254,21 @@ class TelemetryUploadWorkerTest {
             ),
         ),
     )
+}
+
+/** A collector that answers every request with [status] and an empty JSON body. */
+private class FixedResponseConnection(url: URL, private val status: Int) : HttpURLConnection(url) {
+    override fun getOutputStream(): ByteArrayOutputStream = ByteArrayOutputStream()
+
+    override fun getResponseCode(): Int = status
+
+    override fun getInputStream(): InputStream = ByteArrayInputStream("{}".toByteArray())
+
+    override fun getErrorStream(): InputStream = getInputStream()
+
+    override fun disconnect() = Unit
+
+    override fun usingProxy(): Boolean = false
+
+    override fun connect() = Unit
 }

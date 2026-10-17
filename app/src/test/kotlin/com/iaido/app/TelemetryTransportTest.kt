@@ -33,12 +33,29 @@ class TelemetryTransportTest {
     }
 
     @Test
-    fun `server 429 and 503 retry, auth rejection is unauthorized, schema rejection discards`() {
-        assertEquals(UploadDisposition.RETRY, dispositionForResponse(429))
-        assertEquals(UploadDisposition.RETRY, dispositionForResponse(503))
+    fun `only 401 is an auth failure and only explicit permanent rejections discard`() {
         assertEquals(UploadDisposition.UNAUTHORIZED, dispositionForResponse(401))
-        assertEquals(UploadDisposition.UNAUTHORIZED, dispositionForResponse(403))
-        assertEquals(UploadDisposition.DISCARD, dispositionForResponse(422))
+        // The collector's permanent client rejections: bad request, conflicting batch content,
+        // body too large, schema invalid.
+        listOf(400, 409, 413, 422).forEach { code ->
+            assertEquals(UploadDisposition.DISCARD, dispositionForResponse(code), "status $code")
+        }
+        // Everything else may succeed later and must keep the batch: redirects (not followed; a
+        // captive portal answers 302), 403 (never sent by the collector), timeouts, HTTPS
+        // required, rate limits, server errors and any unknown status.
+        listOf(301, 302, 307, 403, 404, 408, 418, 425, 426, 429, 500, 503, 599, 600, 199).forEach { code ->
+            assertEquals(UploadDisposition.RETRY, dispositionForResponse(code), "status $code")
+        }
+    }
+
+    @Test
+    fun `a local non IO failure while uploading keeps the batch for retry`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            storeWithCredentials(),
+        ) { error("unexpected local failure") }
+
+        assertEquals(UploadDisposition.RETRY, transport.upload(TelemetryPlane.RESEARCH, sampleBatch()))
     }
 
     @Test

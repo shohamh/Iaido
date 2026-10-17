@@ -24,11 +24,18 @@ enum class UploadDisposition {
     UNAUTHORIZED,
 }
 
-fun dispositionForResponse(statusCode: Int): UploadDisposition = when {
-    statusCode in 200..299 -> UploadDisposition.ACKNOWLEDGED
-    statusCode == 429 || statusCode in 500..599 -> UploadDisposition.RETRY
-    statusCode == 401 || statusCode == 403 -> UploadDisposition.UNAUTHORIZED
-    else -> UploadDisposition.DISCARD
+/**
+ * DISCARD deletes queued data, so it is reserved for the collector's explicit permanent client
+ * rejections: 400 (bad request), 409 (batch id already holds different content), 413 (body too
+ * large) and 422 (schema invalid). 401 is the collector's only auth failure (it never sends 403).
+ * Everything else - redirects (never followed; a captive portal answers 302), 403, 404, 408,
+ * 425, 426, 429, 5xx and unknown codes - may succeed later, so the batch is kept for retry.
+ */
+fun dispositionForResponse(statusCode: Int): UploadDisposition = when (statusCode) {
+    in 200..299 -> UploadDisposition.ACKNOWLEDGED
+    401 -> UploadDisposition.UNAUTHORIZED
+    400, 409, 413, 422 -> UploadDisposition.DISCARD
+    else -> UploadDisposition.RETRY
 }
 
 class TelemetryTransport(
@@ -71,7 +78,7 @@ class TelemetryTransport(
             return UploadDisposition.DISCARD
         }
         val body = runCatching { encodeTelemetryBatch(batch) }
-            .getOrElse { return UploadDisposition.DISCARD }
+            .getOrElse { return UploadDisposition.RETRY }
         if (body.size > TELEMETRY_MAX_REQUEST_BYTES) return UploadDisposition.DISCARD
 
         return try {
@@ -92,10 +99,9 @@ class TelemetryTransport(
                 }
                 UploadDisposition.RETRY, UploadDisposition.DISCARD, UploadDisposition.UNAUTHORIZED -> disposition
             }
-        } catch (_: IOException) {
-            UploadDisposition.RETRY
         } catch (_: Exception) {
-            UploadDisposition.DISCARD
+            // IO or any other local failure says nothing about the batch itself: keep it.
+            UploadDisposition.RETRY
         }
     }
 
