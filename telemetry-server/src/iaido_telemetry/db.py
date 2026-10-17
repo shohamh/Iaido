@@ -16,7 +16,7 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -254,32 +254,56 @@ class SqlAlchemyRepository:
             for column in ("app_version", "algorithm_version"):
                 if column in existing:
                     continue
-                with self.engine.begin() as connection:
-                    connection.execute(
-                        text(
-                            f"ALTER TABLE {table} ADD COLUMN {column} "
-                            f"VARCHAR(32) NOT NULL DEFAULT '{UNKNOWN_VERSION}'"
+                try:
+                    with self.engine.begin() as connection:
+                        connection.execute(
+                            text(
+                                f"ALTER TABLE {table} ADD COLUMN {column} "
+                                f"VARCHAR(32) NOT NULL DEFAULT '{UNKNOWN_VERSION}'"
+                            )
                         )
-                    )
+                except (OperationalError, ProgrammingError):
+                    # A concurrent starter may have added it first; re-check before giving up.
+                    current = {c["name"] for c in inspect(self.engine).get_columns(table)}
+                    if column not in current:
+                        raise
+                with self.engine.begin() as connection:
                     connection.execute(
                         text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
                     )
 
-    def backfill_versions(self, storage) -> None:
-        """Tag still-``unknown`` batches from their stored payload; unreadable ones stay unknown."""
+    def backfill_versions(self, storage, chunk_size: int = 200) -> None:
+        """Tag still-``unknown`` batches from their stored payload, once per row per call.
+
+        Rows are processed in id order and committed per chunk, so startup never holds one long
+        transaction. A row whose object cannot be read, or whose payload yields no version, is
+        skipped and stays ``unknown``; it is not retried within this call.
+        """
         for model in PLANE_RECORDS.values():
-            with self._sessions.begin() as session:
-                for record in session.scalars(
-                    select(model).where(
-                        model.app_version == UNKNOWN_VERSION,
-                        model.algorithm_version == UNKNOWN_VERSION,
+            last_id = 0
+            while True:
+                with self._sessions.begin() as session:
+                    records = list(
+                        session.scalars(
+                            select(model)
+                            .where(
+                                model.id > last_id,
+                                model.app_version == UNKNOWN_VERSION,
+                                model.algorithm_version == UNKNOWN_VERSION,
+                            )
+                            .order_by(model.id)
+                            .limit(chunk_size)
+                        )
                     )
-                ):
-                    try:
-                        events = json.loads(storage.get(record.object_key)).get("events", [])
-                    except Exception:
-                        continue
-                    record.app_version, record.algorithm_version = derive_versions(events)
+                    for record in records:
+                        last_id = record.id
+                        try:
+                            events = json.loads(storage.get(record.object_key)).get("events", [])
+                        except Exception:
+                            continue
+                        record.app_version, record.algorithm_version = derive_versions(events)
+                if len(records) < chunk_size:
+                    break
 
     def create_installation(
         self, installation_id: str, write_hash: str, deletion_hash: str

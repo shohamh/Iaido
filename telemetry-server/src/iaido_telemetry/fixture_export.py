@@ -97,7 +97,7 @@ def export_research_fixtures(
     directory.mkdir(parents=True, exist_ok=True)
 
     reviewed: dict[str, dict] = {}
-    for record in database.list_batches("research", app_version):
+    for record in database.list_batches("research"):
         if not (start_ms <= record.received_at_ms < end_ms):
             continue
         batch = json.loads(storage.get(record.object_key))

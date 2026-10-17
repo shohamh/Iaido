@@ -47,8 +47,10 @@ def export_plane(
     is structurally impossible for an export to include the other plane's
     data even if it exists for the same installation and time range.
 
-    Exactly one ``app_version`` is exported per call (versions are never mixed): only batches
-    tagged with that version, and only events carrying it, are written.
+    Exactly one ``app_version`` is exported per call (versions are never mixed): every batch in
+    the range is scanned and only events whose own ``app_version`` matches are written, so a
+    batch holding events of two versions is exported under each, and nothing is lost to the
+    batch-level tag.
 
     Writes a single audit record (action="export") describing the plane and
     time range that were exported. Returns the number of batches exported.
@@ -62,14 +64,16 @@ def export_plane(
         raise ValueError("start_ms must not be greater than end_ms")
 
     exported = 0
-    for record in database.list_batches(plane, app_version):
+    for record in database.list_batches(plane):
         if not (start_ms <= record.received_at_ms < end_ms):
             continue
         raw = storage.get(record.object_key)
         batch = json.loads(raw)
+        matched = False
         for event in batch.get("events", []):
             if event.get("app_version") != app_version:
                 continue
+            matched = True
             line = {
                 "plane": plane,
                 "installation_id": record.installation_id,
@@ -79,7 +83,8 @@ def export_plane(
             }
             output.write(json.dumps(line, sort_keys=True))
             output.write("\n")
-        exported += 1
+        if matched:
+            exported += 1
 
     database.add_audit(
         action="export",

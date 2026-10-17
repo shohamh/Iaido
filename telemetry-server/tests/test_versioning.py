@@ -278,3 +278,76 @@ def test_old_database_is_migrated_and_backfilled_from_stored_payload(settings, o
 
     record = app.state.database.list_batches("research")[0]
     assert (record.app_version, record.algorithm_version) == ("0.1.7", "2")
+
+
+def _mixed_batch(client, installation, headers):
+    iid = installation["installation_id"]
+    old = trace_event(iid, app_version="0.1.4", event_id="00000000-0000-0000-0000-0000000000a1")
+    new = trace_event(iid, app_version="0.1.5", event_id="00000000-0000-0000-0000-0000000000a2")
+    new["occurred_at_ms"] = old["occurred_at_ms"] + 1000
+    post(client, headers, "research", [old, new], 1)
+    return old, new
+
+
+def test_mixed_version_batch_exported_under_each_version(
+    client, installation, diagnostics_headers, settings
+):
+    old, new = _mixed_batch(client, installation, diagnostics_headers)
+    app = client.app
+
+    def run(version):
+        buffer = io.StringIO()
+        export_plane(
+            app.state.database, app.state.storage, settings, "research",
+            0, 2_000_000_000_000, buffer, operator_token=OPERATOR_TOKEN, app_version=version,
+        )
+        return [json.loads(line)["event"]["event_id"] for line in buffer.getvalue().splitlines()]
+
+    assert run("0.1.4") == [old["event_id"]]
+    assert run("0.1.5") == [new["event_id"]]
+    assert run("0.1.9") == []
+    audits = [a for a in app.state.database.audit_rows(action="export")]
+    assert audits[-1].detail.startswith("exported 0 batch(es)")
+
+
+def test_mixed_version_batch_fixtures_exported_under_each_version(
+    client, installation, diagnostics_headers, settings, tmp_path
+):
+    old, new = _mixed_batch(client, installation, diagnostics_headers)
+    app = client.app
+    manifest = {event_hash(old): "ok", event_hash(new): "ok"}
+    for version, directory in (("0.1.4", "a"), ("0.1.5", "b")):
+        path = export_research_fixtures(
+            app.state.database, app.state.storage, settings, 0, 2_000_000_000_000,
+            manifest, tmp_path / directory, operator_token=OPERATOR_TOKEN, app_version=version,
+        )
+        assert len(json.loads(path.read_text(encoding="utf-8"))["fixtures"]) == 1
+
+
+def test_backfill_survives_storage_failure_for_one_row(settings, object_root):
+    from iaido_telemetry.db import SQLiteTestRepository
+    from iaido_telemetry.storage import LocalObjectStorage
+
+    storage = LocalObjectStorage(object_root)
+    repo = SQLiteTestRepository(settings.database_url)
+    repo.create_schema()
+    iid = "00000000-0000-0000-0000-0000000000aa"
+    keys = []
+    for n, version in ((1, "0.1.1"), (2, "0.1.2"), (3, "0.1.3")):
+        batch_id = queue_batch_id(n)
+        key = storage.object_key("research", iid, batch_id)
+        storage.put_if_absent(
+            key, json.dumps({"events": [trace_event(iid, app_version=version)]}).encode()
+        )
+        repo.add_batch("research", iid, batch_id, f"c{n}", key)
+        keys.append(key)
+
+    class Flaky:
+        def get(self, key):
+            if key == keys[1]:
+                raise OSError("boom")
+            return storage.get(key)
+
+    repo.backfill_versions(Flaky(), chunk_size=1)
+
+    assert [r.app_version for r in repo.list_batches("research")] == ["0.1.1", "unknown", "0.1.3"]

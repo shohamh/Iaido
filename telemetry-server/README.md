@@ -147,6 +147,11 @@ such as `0.1.20-nightly.123`.
 - `GET /v1/operator/{plane}/versions` returns `[{app_version, batches, events}]`, newest first.
 - Exports are per version: `app_version` is required (see below). Versions never mix in an export.
 - A retried batch is acknowledged without being stored twice, so it counts once.
+- A batch can hold events of two versions (an upgrade mid-queue). The tag, the `?app_version=`
+  filter and the `/versions` counts follow the batch tag (its newest event), so such a batch is
+  listed and counted under the newer version only. Exports do not depend on the tag: they scan
+  every batch in the time range and keep events whose own `app_version` matches, so the older
+  events are exported under their own version and versions never mix.
 
 ## Retention
 
