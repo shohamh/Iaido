@@ -40,6 +40,9 @@ class TelemetryInstallationStore internal constructor(
         return provision().also(storage::write)
     }
 
+    /** The stored, server-issued installation, or null. Never creates or persists anything. */
+    fun installation(): TelemetryInstallation? = storage.read()
+
     fun writeCredential(plane: TelemetryPlane): String? = when (plane) {
         TelemetryPlane.DIAGNOSTICS, TelemetryPlane.RESEARCH -> storage.read()?.writeCredential
     }
@@ -48,6 +51,14 @@ class TelemetryInstallationStore internal constructor(
 
     fun clear() = storage.clear()
 }
+
+/**
+ * Installation to stamp on a newly recorded envelope, or null when none has been issued by the
+ * collector yet - the caller then drops the event. Credentials are only ever created by
+ * [TelemetryTransport.provision]: a locally invented installation would be persisted, reused by
+ * provisioning, and rejected by the collector with 401 forever.
+ */
+internal fun TelemetryInstallationStore.envelopeInstallation(): TelemetryInstallation? = installation()
 
 private class AndroidKeystoreCredentialStorage(
     context: Context,

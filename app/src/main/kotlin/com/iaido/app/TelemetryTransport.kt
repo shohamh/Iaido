@@ -19,11 +19,15 @@ enum class UploadDisposition {
     ACKNOWLEDGED,
     RETRY,
     DISCARD,
+
+    /** The collector refused our credentials (or we hold none): never retry with them. */
+    UNAUTHORIZED,
 }
 
 fun dispositionForResponse(statusCode: Int): UploadDisposition = when {
     statusCode in 200..299 -> UploadDisposition.ACKNOWLEDGED
     statusCode == 429 || statusCode in 500..599 -> UploadDisposition.RETRY
+    statusCode == 401 || statusCode == 403 -> UploadDisposition.UNAUTHORIZED
     else -> UploadDisposition.DISCARD
 }
 
@@ -48,6 +52,7 @@ class TelemetryTransport(
                 UploadDisposition.ACKNOWLEDGED -> parseInstallation(response.body)
                     ?: throw ProvisionFailure(UploadDisposition.DISCARD)
                 UploadDisposition.RETRY, UploadDisposition.DISCARD -> throw ProvisionFailure(disposition)
+                UploadDisposition.UNAUTHORIZED -> throw ProvisionFailure(UploadDisposition.DISCARD)
             }
         }
         UploadDisposition.ACKNOWLEDGED
@@ -60,10 +65,8 @@ class TelemetryTransport(
     }
 
     fun upload(plane: TelemetryPlane, batch: TelemetryBatch): UploadDisposition {
-        val credential = installationStore.writeCredential(plane) ?: return UploadDisposition.DISCARD
-        val installation = installationStore.getOrCreateInstallation {
-            throw IllegalStateException("Telemetry installation is not provisioned")
-        }
+        val installation = installationStore.installation() ?: return UploadDisposition.UNAUTHORIZED
+        val credential = installation.writeCredential
         if (batch.events.any { it.installationId != installation.installationId }) {
             return UploadDisposition.DISCARD
         }
@@ -87,7 +90,7 @@ class TelemetryTransport(
                         UploadDisposition.RETRY
                     }
                 }
-                UploadDisposition.RETRY, UploadDisposition.DISCARD -> disposition
+                UploadDisposition.RETRY, UploadDisposition.DISCARD, UploadDisposition.UNAUTHORIZED -> disposition
             }
         } catch (_: IOException) {
             UploadDisposition.RETRY

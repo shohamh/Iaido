@@ -122,7 +122,9 @@ object ResearchCorrectionRecorderProvider {
         if (recorder != null) return
         val appContext = context.applicationContext
 
-        eventSink = { event -> telemetryQueue(appContext).append(buildEnvelope(appContext, event)) }
+        // No server-issued installation yet: drop the event (never invent credentials); the
+        // scheduled upload worker provisions, so later events are queued normally.
+        eventSink = { event -> buildEnvelope(appContext, event)?.let { telemetryQueue(appContext).append(it) } }
         uploadScheduler = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.RESEARCH) }
         recorder = ResearchCorrectionRecorder(
             enabled = ::isEnabled,
@@ -189,16 +191,9 @@ object ResearchCorrectionRecorderProvider {
         limits = QueueLimits(),
     )
 
-    private fun buildEnvelope(context: Context, event: ResearchEvent): TelemetryEnvelope {
-        val installation = runCatching {
-            TelemetryInstallationStore(context).getOrCreateInstallation {
-                TelemetryInstallation(
-                    installationId = UUID.randomUUID().toString(),
-                    writeCredential = UUID.randomUUID().toString(),
-                    deletionCredential = UUID.randomUUID().toString(),
-                )
-            }
-        }.getOrNull()
+    private fun buildEnvelope(context: Context, event: ResearchEvent): TelemetryEnvelope? {
+        val installation = runCatching { TelemetryInstallationStore(context).envelopeInstallation() }
+            .getOrNull() ?: return null
         return TelemetryEnvelope(
             schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
             eventId = when (event) {
@@ -207,7 +202,7 @@ object ResearchCorrectionRecorderProvider {
                 is ResearchEvent.Correction -> event.record.correctionId
             },
             batchId = UUID.randomUUID().toString(),
-            installationId = installation?.installationId ?: UUID.randomUUID().toString(),
+            installationId = installation.installationId,
             sessionId = sessionId,
             occurredAtMs = System.currentTimeMillis(),
             appVersion = BuildConfig.VERSION_NAME,

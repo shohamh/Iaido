@@ -33,11 +33,26 @@ class TelemetryTransportTest {
     }
 
     @Test
-    fun `server 429 and 503 retry while schema and auth rejection discard`() {
+    fun `server 429 and 503 retry, auth rejection is unauthorized, schema rejection discards`() {
         assertEquals(UploadDisposition.RETRY, dispositionForResponse(429))
         assertEquals(UploadDisposition.RETRY, dispositionForResponse(503))
-        assertEquals(UploadDisposition.DISCARD, dispositionForResponse(401))
+        assertEquals(UploadDisposition.UNAUTHORIZED, dispositionForResponse(401))
+        assertEquals(UploadDisposition.UNAUTHORIZED, dispositionForResponse(403))
         assertEquals(UploadDisposition.DISCARD, dispositionForResponse(422))
+    }
+
+    @Test
+    fun `upload without stored credentials is unauthorized and opens no connection`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(FakeInstallationCredentialStorage()),
+            ::unexpectedConnection,
+        )
+
+        assertEquals(
+            UploadDisposition.UNAUTHORIZED,
+            transport.upload(TelemetryPlane.RESEARCH, sampleBatch()),
+        )
     }
 
     @Test
@@ -55,7 +70,7 @@ class TelemetryTransportTest {
         )
 
         assertEquals(
-            UploadDisposition.DISCARD,
+            UploadDisposition.UNAUTHORIZED,
             transport.upload(TelemetryPlane.DIAGNOSTICS, sampleBatch()),
         )
     }

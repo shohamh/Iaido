@@ -78,12 +78,69 @@ class TelemetryUploadWorkerTest {
     }
 
     @Test
-    fun `scheduler requires configured endpoint and existing write credential`() {
-        assertFalse(shouldScheduleTelemetry("", "write-secret"))
-        assertFalse(shouldScheduleTelemetry("http://collector.invalid", "write-secret"))
-        assertFalse(shouldScheduleTelemetry("https://collector.invalid", null))
-        assertFalse(shouldScheduleTelemetry("https://collector.invalid", ""))
-        assertTrue(shouldScheduleTelemetry("https://collector.invalid", "write-secret"))
+    fun `missing credentials are provisioned before any upload`() = runBlocking {
+        val calls = mutableListOf<String>()
+        val runner = TelemetryUploadRunner(
+            consentEnabled = { true },
+            pendingBatches = { listOf(sampleBatch("batch-1")) },
+            upload = { _, batch ->
+                calls += "upload:${batch.batchId}"
+                UploadDisposition.ACKNOWLEDGED
+            },
+            acknowledge = { _, _ -> },
+            ensureProvisioned = {
+                calls += "provision"
+                UploadDisposition.ACKNOWLEDGED
+            },
+        )
+
+        assertEquals(WorkerDisposition.SUCCESS, runner.run(TelemetryPlane.RESEARCH))
+        assertEquals(listOf("provision", "upload:batch-1"), calls)
+    }
+
+    @Test
+    fun `provisioning failure keeps batches queued and never uploads`() = runBlocking {
+        for ((provisioning, expected) in listOf(
+            UploadDisposition.RETRY to WorkerDisposition.RETRY,
+            UploadDisposition.DISCARD to WorkerDisposition.FAILURE,
+        )) {
+            val runner = TelemetryUploadRunner(
+                consentEnabled = { true },
+                pendingBatches = { listOf(sampleBatch("batch-1")) },
+                upload = { _, _ -> error("must not upload without server issued credentials") },
+                acknowledge = { _, _ -> error("must not acknowledge") },
+                ensureProvisioned = { provisioning },
+            )
+
+            assertEquals(expected, runner.run(TelemetryPlane.RESEARCH))
+        }
+    }
+
+    @Test
+    fun `auth rejection invalidates credentials, stops retrying and keeps the batch`() = runBlocking {
+        var invalidated = false
+        val uploaded = mutableListOf<String>()
+        val runner = TelemetryUploadRunner(
+            consentEnabled = { true },
+            pendingBatches = { listOf(sampleBatch("batch-1"), sampleBatch("batch-2")) },
+            upload = { _, batch ->
+                uploaded += batch.batchId
+                UploadDisposition.UNAUTHORIZED
+            },
+            acknowledge = { _, _ -> error("must not acknowledge or drop on auth failure") },
+            invalidateCredentials = { invalidated = true },
+        )
+
+        assertEquals(WorkerDisposition.FAILURE, runner.run(TelemetryPlane.RESEARCH))
+        assertTrue(invalidated)
+        assertEquals(listOf("batch-1"), uploaded)
+    }
+
+    @Test
+    fun `scheduler requires a configured HTTPS endpoint but not credentials, so the worker can re-provision`() {
+        assertFalse(shouldScheduleTelemetry(""))
+        assertFalse(shouldScheduleTelemetry("http://collector.invalid"))
+        assertTrue(shouldScheduleTelemetry("https://collector.invalid"))
     }
 
     @Test

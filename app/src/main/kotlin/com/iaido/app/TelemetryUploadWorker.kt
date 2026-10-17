@@ -30,15 +30,31 @@ internal class TelemetryUploadRunner(
     private val pendingBatches: suspend (TelemetryPlane) -> List<TelemetryBatch>,
     private val upload: suspend (TelemetryPlane, TelemetryBatch) -> UploadDisposition,
     private val acknowledge: suspend (TelemetryPlane, String) -> Unit,
+    private val ensureProvisioned: suspend () -> UploadDisposition = { UploadDisposition.ACKNOWLEDGED },
+    private val invalidateCredentials: suspend () -> Unit = {},
 ) {
+    /**
+     * Provisions server-issued credentials if they are missing (never invents them), then uploads
+     * batches oldest first. An auth rejection clears the stored credentials and stops without
+     * touching the batch, so the next run re-provisions instead of retrying a dead credential.
+     */
     suspend fun run(plane: TelemetryPlane): WorkerDisposition {
         return try {
+            when (ensureProvisioned()) {
+                UploadDisposition.ACKNOWLEDGED -> Unit
+                UploadDisposition.RETRY -> return WorkerDisposition.RETRY
+                UploadDisposition.DISCARD, UploadDisposition.UNAUTHORIZED -> return WorkerDisposition.FAILURE
+            }
             for (batch in pendingBatches(plane)) {
                 if (!consentEnabled(plane)) return WorkerDisposition.SUCCESS
                 when (upload(plane, batch)) {
                     UploadDisposition.ACKNOWLEDGED -> acknowledge(plane, batch.batchId)
                     UploadDisposition.RETRY -> return WorkerDisposition.RETRY
                     UploadDisposition.DISCARD -> return WorkerDisposition.FAILURE
+                    UploadDisposition.UNAUTHORIZED -> {
+                        invalidateCredentials()
+                        return WorkerDisposition.FAILURE
+                    }
                 }
             }
             WorkerDisposition.SUCCESS
@@ -59,7 +75,7 @@ class TelemetryUploadWorker(
         val endpoint = BuildConfig.IAIDO_TELEMETRY_BASE_URL
         val store = runCatching { TelemetryInstallationStore(applicationContext) }
             .getOrElse { return Result.success() }
-        if (!shouldScheduleTelemetry(endpoint, store.writeCredential(plane))) return Result.success()
+        if (!shouldScheduleTelemetry(endpoint)) return Result.success()
         val transport = runCatching { TelemetryTransport(URL(endpoint), store) }
             .getOrElse { return Result.failure() }
         val queues = mutableMapOf<TelemetryPlane, TelemetryQueue>()
@@ -71,14 +87,23 @@ class TelemetryUploadWorker(
                 QueueLimits(),
             )
         }
+        suspend fun consentEnabled(targetPlane: TelemetryPlane): Boolean {
+            val preferences = applicationContext.settingsStore.data.first()
+            return when (targetPlane) {
+                TelemetryPlane.DIAGNOSTICS -> diagnosticsConsentFromPreferences(preferences).enabled
+                TelemetryPlane.RESEARCH -> researchConsentFromPreferences(preferences).enabled
+            }
+        }
         val runner = TelemetryUploadRunner(
-            consentEnabled = { targetPlane ->
-                val preferences = applicationContext.settingsStore.data.first()
-                when (targetPlane) {
-                    TelemetryPlane.DIAGNOSTICS -> diagnosticsConsentFromPreferences(preferences).enabled
-                    TelemetryPlane.RESEARCH -> researchConsentFromPreferences(preferences).enabled
+            consentEnabled = { targetPlane -> consentEnabled(targetPlane) },
+            ensureProvisioned = {
+                if (store.installation() != null || !consentEnabled(plane)) {
+                    UploadDisposition.ACKNOWLEDGED
+                } else {
+                    withContext(Dispatchers.IO) { transport.provision() }
                 }
             },
+            invalidateCredentials = { withContext(Dispatchers.IO) { store.clear() } },
             pendingBatches = { targetPlane -> queue(targetPlane).pendingBatches() },
             upload = { targetPlane, batch ->
                 withContext(Dispatchers.IO) { transport.upload(targetPlane, batch) }
@@ -100,8 +125,7 @@ internal object TelemetryUploadScheduler {
         endpoint: String = BuildConfig.IAIDO_TELEMETRY_BASE_URL,
     ): Boolean {
         return try {
-            val credential = TelemetryInstallationStore(context.applicationContext).writeCredential(plane)
-            if (!shouldScheduleTelemetry(endpoint, credential)) return false
+            if (!shouldScheduleTelemetry(endpoint)) return false
             val request = OneTimeWorkRequestBuilder<TelemetryUploadWorker>()
                 .setInputData(workDataOf(INPUT_PLANE to plane.name))
                 .setConstraints(
@@ -127,9 +151,13 @@ internal object TelemetryUploadScheduler {
     }
 }
 
-internal fun shouldScheduleTelemetry(endpoint: String, writeCredential: String?): Boolean =
+/**
+ * Upload work only needs a configured HTTPS collector. Credentials are deliberately not required:
+ * when they are missing (lost Keystore key, restored backup, consent set before provisioning) the
+ * worker provisions fresh server-issued ones instead of the plane going silent forever.
+ */
+internal fun shouldScheduleTelemetry(endpoint: String): Boolean =
     endpoint.isNotBlank() &&
-        !writeCredential.isNullOrBlank() &&
         runCatching { URL(endpoint).protocol.equals("https", ignoreCase = true) }.getOrDefault(false)
 
 internal fun telemetryWorkName(plane: TelemetryPlane): String =
