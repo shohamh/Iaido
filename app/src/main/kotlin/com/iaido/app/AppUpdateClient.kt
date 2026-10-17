@@ -416,11 +416,11 @@ internal fun stagedAppUpdateFile(context: Context): File? =
 
 /**
  * True when the release [tagName] (e.g. `v0.1.20`) is provably not newer than the installed
- * build, so the APK does not need to be downloaded. Nightly installs share their base version
- * with the stable release, so an equal version is only treated as current for stable installs.
+ * build, so the APK does not need to be downloaded. A nightly is always built from the version
+ * bump commit or later, so a nightly with the same base version already contains that stable.
  */
 internal fun isReleaseKnownNotNewer(tagName: String?, installedVersionName: String): Boolean {
     val release = parseInstalledAppVersion(tagName?.removePrefix("v")) ?: return false
     val installed = parseInstalledAppVersion(installedVersionName) ?: return false
-    return release < installed || (release == installed && !installedVersionName.contains('-'))
+    return release <= installed
 }
