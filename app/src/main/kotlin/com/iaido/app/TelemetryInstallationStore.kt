@@ -55,11 +55,15 @@ class TelemetryInstallationStore internal constructor(
 ) {
     constructor(context: Context) : this(AndroidKeystoreCredentialStorage(context.applicationContext))
 
-    @Synchronized
-    fun getOrCreateInstallation(provision: () -> TelemetryInstallation): TelemetryInstallation {
-        storage.read()?.let { return it }
-        return provision().also(storage::write)
-    }
+    /**
+     * Returns the stored installation or runs [provision] (a network call) and stores its result.
+     * Serialised process-wide, not per instance: the worker and the Settings screen each build their
+     * own store, and both provisioning at once would orphan one server installation.
+     */
+    fun getOrCreateInstallation(provision: () -> TelemetryInstallation): TelemetryInstallation =
+        synchronized(PROVISIONING_LOCK) {
+            storage.read() ?: provision().also(storage::write)
+        }
 
     /** The stored, server-issued installation, or null. Never creates or persists anything. */
     fun installation(): TelemetryInstallation? = storage.read()
@@ -82,14 +86,17 @@ class TelemetryInstallationStore internal constructor(
      * can still reach what was uploaded under it, while uploads wait for fresh provisioning. A
      * single retired slot is kept; a later retirement replaces it.
      */
-    @Synchronized
-    fun invalidateWriteCredential() {
-        val current = storage.read() ?: return
+    fun invalidateWriteCredential() = synchronized(PROVISIONING_LOCK) {
+        val current = storage.read() ?: return@synchronized
         storage.writeRetired(RetiredInstallation(current.installationId, current.deletionCredential))
         storage.clearActive()
     }
 
-    fun clear() = storage.clear()
+    fun clear() = synchronized(PROVISIONING_LOCK) { storage.clear() }
+
+    private companion object {
+        val PROVISIONING_LOCK = Any()
+    }
 }
 
 /**

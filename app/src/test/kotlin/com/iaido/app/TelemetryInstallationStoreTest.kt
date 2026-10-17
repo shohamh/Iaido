@@ -1,5 +1,7 @@
 package com.iaido.app
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -36,6 +38,33 @@ class TelemetryInstallationStoreTest {
         assertFalse(store.needsReprovisioning())
         assertEquals("write-2", store.writeCredential(TelemetryPlane.RESEARCH))
         assertEquals(RetiredInstallation("installation-1", "server-delete"), store.retiredInstallation())
+    }
+
+    @Test
+    fun `separate store instances never provision concurrently`() {
+        // The worker and the Settings screen each build their own store over the same storage.
+        val storage = FakeInstallationCredentialStorage()
+        val provisions = AtomicInteger()
+        val firstEntered = CountDownLatch(1)
+        val first = Thread {
+            TelemetryInstallationStore(storage).getOrCreateInstallation {
+                provisions.incrementAndGet()
+                firstEntered.countDown()
+                Thread.sleep(300)
+                TelemetryInstallation("installation-1", "write-1", "delete-1")
+            }
+        }
+        first.start()
+        firstEntered.await()
+
+        val second = TelemetryInstallationStore(storage).getOrCreateInstallation {
+            provisions.incrementAndGet()
+            TelemetryInstallation("installation-2", "write-2", "delete-2")
+        }
+        first.join()
+
+        assertEquals(1, provisions.get())
+        assertEquals("installation-1", second.installationId)
     }
 
     @Test
