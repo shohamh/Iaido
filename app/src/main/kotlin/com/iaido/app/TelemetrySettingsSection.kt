@@ -64,6 +64,9 @@ internal fun telemetryPolicyDigest(plane: TelemetryPlane): String =
 /** True when a collector base URL was baked into this build; blank means telemetry cannot work. */
 internal fun isTelemetryConfigured(baseUrl: String): Boolean = baseUrl.isNotBlank()
 
+/** Server-side deletion needs a collector; without one the action could only report a false retry hint. */
+internal fun isDeleteUploadedAvailable(baseUrl: String): Boolean = isTelemetryConfigured(baseUrl)
+
 internal const val TELEMETRY_UNAVAILABLE_MESSAGE =
     "Telemetry is unavailable in this build: no collector address was configured, so nothing " +
         "can be shared."
@@ -314,6 +317,7 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         onCheckedChange = { enabled -> applyChange(TelemetryPlane.DIAGNOSTICS, enabled) },
         onDeletePending = { deletePending(TelemetryPlane.DIAGNOSTICS) },
         onDeleteUploaded = { deleteUploaded(TelemetryPlane.DIAGNOSTICS) },
+        deleteUploadedEnabled = isDeleteUploadedAvailable(BuildConfig.IAIDO_TELEMETRY_BASE_URL),
     )
 
     TelemetryPlaneToggle(
@@ -327,6 +331,7 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         },
         onDeletePending = { deletePending(TelemetryPlane.RESEARCH) },
         onDeleteUploaded = { deleteUploaded(TelemetryPlane.RESEARCH) },
+        deleteUploadedEnabled = isDeleteUploadedAvailable(BuildConfig.IAIDO_TELEMETRY_BASE_URL),
     )
 
     // Independent of research consent itself (Task 6's plane-isolation pattern): this only ever
@@ -368,6 +373,7 @@ private fun TelemetryPlaneToggle(
     onCheckedChange: (Boolean) -> Unit,
     onDeletePending: () -> Unit,
     onDeleteUploaded: () -> Unit,
+    deleteUploadedEnabled: Boolean,
 ) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
@@ -382,7 +388,7 @@ private fun TelemetryPlaneToggle(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onDeletePending) { Text("Delete pending data") }
-            TextButton(onClick = onDeleteUploaded) { Text("Delete uploaded data") }
+            TextButton(onClick = onDeleteUploaded, enabled = deleteUploadedEnabled) { Text("Delete uploaded data") }
         }
         if (statusText.isNotBlank()) {
             Text(statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)

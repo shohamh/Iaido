@@ -73,9 +73,9 @@ python -m pytest telemetry-server/tests -q
 
 To run the collector on a development machine and reach it from a device over a real HTTPS
 endpoint, follow "Behind a TLS-terminating proxy on the same host" in
-[`telemetry-server/README.md`](telemetry-server/README.md). Tailscale Funnel needs no certificate
-handling — `tailscale funnel --bg 8000` publishes `https://<host>.<tailnet>.ts.net` to the
-loopback-published container — and the Android build then takes
+[`telemetry-server/README.md`](telemetry-server/README.md). `tailscale serve` needs no certificate
+handling — `tailscale serve --bg 8000` publishes tailnet-only `https://<host>.<tailnet>.ts.net` to the
+loopback-published container (never use `tailscale funnel`, which exposes it to the public internet) — and the Android build then takes
 `-PiaidoTelemetryBaseUrl=https://<host>.<tailnet>.ts.net`.
 
 Open `https://<host>.<tailnet>.ts.net/` in a browser to see what has been collected: the operator
@@ -93,9 +93,9 @@ and `:app:connectedDebugAndroidTest` on an API 35 emulator: 56 instrumented test
 telemetry suites (`TelemetryConsentE2eTest`, `ResearchTouchCaptureE2eTest`) passing and six
 failures in other instrumented suites that reproduce on `main` before this work (bilingual,
 inference, and reel gesture fixtures plus the settings update action), so they are not telemetry
-regressions. The collector has also been run locally behind Tailscale Funnel and exercised from
-the emulator against a real public HTTPS endpoint: the app provisioned an installation, enabled
-diagnostics through the funnel, and uploaded a queued batch that the collector acknowledged
+regressions. The collector has also been run locally behind Tailscale Serve and exercised from
+the emulator against a real tailnet HTTPS endpoint: the app provisioned an installation, enabled
+diagnostics through the serve URL, and uploaded a queued batch that the collector acknowledged
 (`TelemetryUploadE2eTest`, which skips when no collector is configured), while the ingestion,
 operator-listing, plane-isolation, and authorization paths were exercised over that endpoint.
 Production ingestion stays disabled until a staging collector is deployed and those pre-existing

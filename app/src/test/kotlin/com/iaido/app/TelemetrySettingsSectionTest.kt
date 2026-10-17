@@ -183,4 +183,10 @@ class TelemetrySettingsSectionTest {
     fun `configuredBaseUrlShowsToggles`() {
         assertTrue(isTelemetryConfigured("https://host.tailnet.ts.net"))
     }
+
+    @Test
+    fun `deleteUploadedIsUnavailableWithoutBaseUrl`() {
+        assertFalse(isDeleteUploadedAvailable(""))
+        assertTrue(isDeleteUploadedAvailable("https://host.tailnet.ts.net"))
+    }
 }

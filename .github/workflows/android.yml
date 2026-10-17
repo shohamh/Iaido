@@ -70,7 +70,7 @@ jobs:
           # The action invokes each newline in `script` separately. Fold this into one POSIX shell
           # command so the substitution, loop, and final status are parsed together.
           script: >-
-            set -u; classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin | sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' | sort); echo "Instrumented classes:"; echo "$classes"; failed=""; for class in $classes; do echo "::group::$class"; if ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain -Pandroid.testInstrumentationRunnerArguments.class="$class"; then echo "$class: PASS"; else echo "$class: FAIL"; failed="$failed $class"; fi; echo "::endgroup::"; done; if [ -n "$failed" ]; then echo "::error::Instrumented classes failed:$failed"; exit 1; fi
+            set -u; classes=$(grep -rl "@RunWith(AndroidJUnit4::class)" app/src/androidTest/kotlin | sed -e 's|app/src/androidTest/kotlin/||' -e 's|/|.|g' -e 's|\.kt$||' | sort); echo "Instrumented classes:"; echo "$classes"; failed=""; for class in $classes; do echo "::group::$class"; if ./gradlew :app:connectedDebugAndroidTest -PiaidoTelemetryBaseUrl="${{ vars.IAIDO_TELEMETRY_BASE_URL }}" --no-daemon --console=plain -Pandroid.testInstrumentationRunnerArguments.class="$class"; then echo "$class: PASS"; else echo "$class: FAIL"; failed="$failed $class"; fi; echo "::endgroup::"; done; if [ -n "$failed" ]; then echo "::error::Instrumented classes failed:$failed"; exit 1; fi
       - name: Collect IME E2E artifacts
         if: always()
         run: |
