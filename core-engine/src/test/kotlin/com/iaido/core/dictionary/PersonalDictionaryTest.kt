@@ -1,6 +1,7 @@
 package com.iaido.core.dictionary
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -104,7 +105,7 @@ class PersonalDictionaryTest {
 
     @Test
     fun `every learning signal records a usable replacement`() {
-        val dictionary = PersonalDictionary(emptyList())
+        val dictionary = PersonalDictionary(LearningSignal.values().map { WordEntry(it.name.lowercase(), 1e-3) })
 
         LearningSignal.values().forEach { signal ->
             dictionary.record(signal, original = "before", replacement = signal.name.lowercase())
@@ -120,7 +121,11 @@ class PersonalDictionaryTest {
         dictionary.restore(listOf(WordEntry("hello", 2.5), WordEntry("ninjacode", 0.02)))
 
         assertEquals(2.5, dictionary.entries().single { it.word == "hello" }.frequency)
-        assertEquals(0.02, dictionary.entries().single { it.word == "ninjacode" }.frequency)
+        // 0.02 is far above the custom ceiling, so it is clamped to base * maxBoost.
+        assertEquals(
+            PersonalLearningPolicy.CUSTOM_WORD_BASE_FREQUENCY * PersonalLearningPolicy.DEFAULT_MAX_BOOST,
+            dictionary.entries().single { it.word == "ninjacode" }.frequency, 1e-12,
+        )
     }
 
     @Test
@@ -136,6 +141,7 @@ class PersonalDictionaryTest {
     @Test
     fun `snapshot preserves exact word and ngram learning state`() {
         val dictionary = PersonalDictionary(listOf(WordEntry("hello", 1.0)))
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "ninjacode")
         dictionary.record(
             signal = LearningSignal.DELETE_RETYPE,
             original = "old",
@@ -165,5 +171,94 @@ class PersonalDictionaryTest {
 
         assertThrows(IllegalArgumentException::class.java) { dictionary.restore(invalid) }
         assertEquals(before, dictionary.snapshot())
+    }
+
+    private fun realisticBase() = listOf(
+        WordEntry("are", 0.0055), WordEntry("you", 0.01), WordEntry("what", 0.003),
+        WordEntry("happens", 9.1e-5), WordEntry("still", 0.001),
+    )
+
+    @Test
+    fun `custom word frequency stays near the rare end after many reinforcements`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "ninjacode")
+        repeat(50) { dictionary.record(LearningSignal.MANUAL_EDIT, replacement = "ninjacode") }
+
+        val frequency = dictionary.entries().single { it.word == "ninjacode" }.frequency
+        assertTrue(frequency < 1e-4, "custom frequency $frequency")
+        assertTrue(frequency > 1e-6)
+    }
+
+    @Test
+    fun `a real word outranks a freshly custom word`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "hawthorne")
+        val entries = dictionary.entries().associate { it.word to it.frequency }
+        assertTrue(entries.getValue("happens") > entries.getValue("hawthorne"))
+    }
+
+    @Test
+    fun `correcting a custom word removes it and it is not relearned by automatic commits`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "areyou")
+        dictionary.record(LearningSignal.MANUAL_EDIT, original = "areyou", replacement = "are")
+
+        assertTrue(dictionary.entries().none { it.word == "areyou" })
+        assertFalse(dictionary.overrides().contains("areyou"))
+
+        dictionary.record(LearningSignal.DELETE_RETYPE, original = "are", replacement = "areyou")
+        dictionary.record(LearningSignal.FLOW_CORRECTION, original = "are", replacement = "areyou")
+        assertTrue(dictionary.entries().none { it.word == "areyou" })
+        assertFalse(dictionary.overrides().contains("areyou"))
+    }
+
+    @Test
+    fun `inferred joins of two dictionary words are only learned when explicitly added`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.SUGGESTION_PICK, replacement = "areyou")
+        dictionary.record(LearningSignal.MANUAL_EDIT, replacement = "areyou")
+        assertTrue(dictionary.entries().none { it.word == "areyou" })
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "areyou")
+        assertTrue(dictionary.entries().any { it.word == "areyou" })
+    }
+
+    @Test
+    fun `multi word replacements are never learned as one word`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.MANUAL_EDIT, original = "areyou", replacement = "are you")
+        assertTrue(dictionary.entries().none { it.word.contains(' ') })
+        assertFalse(dictionary.overrides().any { it.contains(' ') })
+    }
+
+    @Test
+    fun `automatic signals never create custom words`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.FLOW_CORRECTION, original = "what", replacement = "wyatt")
+        dictionary.record(LearningSignal.DELETE_RETYPE, original = "what", replacement = "wyatt")
+        assertTrue(dictionary.entries().none { it.word == "wyatt" })
+    }
+
+    @Test
+    fun `corrections penalize the replaced known word strongly`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.MANUAL_EDIT, original = "still", replacement = "what")
+        val still = dictionary.entries().single { it.word == "still" }.frequency
+        assertTrue(still <= 0.001 / 4.0 + 1e-12, "still=$still")
+    }
+
+    @Test
+    fun `boosted known word stays under a sane ceiling`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        repeat(100) { dictionary.record(LearningSignal.DELETE_RETYPE, replacement = "happens") }
+        assertTrue(dictionary.entries().single { it.word == "happens" }.frequency <= 9.1e-5 * 8.0)
+    }
+
+    @Test
+    fun `forget removes a custom word completely`() {
+        val dictionary = PersonalDictionary(realisticBase())
+        dictionary.record(LearningSignal.EXPLICIT_ADD, replacement = "ninjacode")
+        dictionary.forget("ninjacode")
+        assertTrue(dictionary.entries().none { it.word == "ninjacode" })
+        assertEquals(emptyList<String>(), dictionary.snapshot().customWords)
     }
 }

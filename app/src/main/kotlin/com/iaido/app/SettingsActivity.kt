@@ -454,8 +454,9 @@ class SettingsActivity : ComponentActivity() {
             val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
                 .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
                 .build()
-            database.overrides().reset()
+            RoomPersonalDictionaryRepository(database.overrides(), emptyList()).reset()
             database.close()
+            PersonalLearningEvents.notifyReset()
         }
     }
 
@@ -477,8 +478,9 @@ class SettingsActivity : ComponentActivity() {
             val database = Room.databaseBuilder(applicationContext, PersonalDictionaryDatabase::class.java, "personal_dictionary.db")
                 .addMigrations(PERSONAL_DICTIONARY_MIGRATION_1_2)
                 .build()
-            database.overrides().forget(word)
+            RoomPersonalDictionaryRepository(database.overrides(), emptyList()).forget(word)
             database.close()
+            PersonalLearningEvents.notifyForgotten(word)
         }
     }
 

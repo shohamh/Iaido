@@ -324,8 +324,19 @@ class IaidoInputMethodService : InputMethodService() {
         )
     }
 
+    private val learningEventListener = object : PersonalLearningEvents.Listener {
+        override fun onForgotten(word: String) {
+            mainHandler.post { learningDictionary.forget(word) }
+        }
+
+        override fun onReset() {
+            mainHandler.post { learningDictionary.reset() }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        PersonalLearningEvents.register(learningEventListener)
         inputMethodLifecycleOwner.onCreate()
         observeKeyboardSettings()
         if (isDebugBuild()) observeDebugStateRequests()
@@ -471,6 +482,7 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        PersonalLearningEvents.unregister(learningEventListener)
         inputMethodLifecycleOwner.onDestroy()
         settingsScope.cancel()
         correctionExecutor.shutdownNow()
@@ -882,7 +894,9 @@ class IaidoInputMethodService : InputMethodService() {
         if (coalescingKey == null) sentenceEditHistory.closeGroup()
         val deletedWord = lastDeletedWord
         lastDeletedWord = null
-        if (deletedWord != null && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
+        // A swiped commit is the keyboard's inference, not something the user chose; only typed
+        // retypes count as a correction.
+        if (deletedWord != null && !swipedWord && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
             recordLearning(
                 signal = LearningSignal.DELETE_RETYPE,
                 original = deletedWord,
@@ -1264,11 +1278,8 @@ class IaidoInputMethodService : InputMethodService() {
                             sourceText = correction.before,
                             finalText = correction.after,
                         )
-                        recordLearning(
-                            signal = LearningSignal.FLOW_CORRECTION,
-                            original = correction.before,
-                            replacement = correction.after,
-                        )
+                        // Automatic flow corrections are the keyboard's own decision, not a user
+                        // choice, so they are deliberately not learned (no self-reinforcement).
                     }
                 }
             }
