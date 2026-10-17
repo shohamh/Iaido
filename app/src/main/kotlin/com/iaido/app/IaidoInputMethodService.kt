@@ -18,6 +18,9 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.iaido.core.gesture.GesturePath
+import com.iaido.core.gesture.GesturePoint
+import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureRecognizer
 import com.iaido.core.recognition.InferenceSegmenter
 import com.iaido.core.recognition.ShapePathScorer
@@ -328,7 +331,10 @@ class IaidoInputMethodService : InputMethodService() {
         if (isDebugBuild()) observeDebugStateRequests()
         correctionExecutor.execute {
             val persisted = learningRepository.entries()
-            mainHandler.post { learningDictionary.restore(persisted) }
+            mainHandler.post {
+                learningDictionary.restore(persisted)
+                prewarmRecognition(activeLanguage)
+            }
         }
         correctionExecutor.execute { CoreEngineUpdateClient(applicationContext).checkAndInstall() }
         runCatching { ResearchCorrectionRecorderProvider.initialize(applicationContext) }
@@ -1665,7 +1671,29 @@ class IaidoInputMethodService : InputMethodService() {
     private fun switchLanguage() {
         swipeTypingCoordinator.onNonSwipeInput()
         activeLanguage = languageSwitcher.next()
+        prewarmRecognition(activeLanguage)
         refreshSuggestionChips()
+    }
+
+    /**
+     * Builds the language's candidate index, n-gram store and dictionary on the recognition executor
+     * ahead of the first swipe, which would otherwise pay hundreds of milliseconds for them. Runs on
+     * the same single-thread executor as real recognition, so it can never overlap a swipe.
+     */
+    private fun prewarmRecognition(language: Language) {
+        // English entries come from the main-thread-owned learning dictionary; Hebrew is read-only.
+        val englishDictionary = if (language == Language.ENGLISH) activeDictionary() else null
+        val layout = if (language == Language.ENGLISH) KeyboardLayout.qwertyTestLayout() else KeyboardLayout.hebrewTestLayout()
+        val first = layout.keys.first()
+        val second = layout.keys.last()
+        val warmupPath = GesturePath(
+            listOf(GesturePoint(first.x, first.y, 0L), GesturePoint(second.x, second.y, 10L)),
+        )
+        correctionExecutor.execute {
+            runCatching {
+                controller.recognize(warmupPath, layout, englishDictionary ?: hebrewDictionaryRepository.words())
+            }
+        }
     }
 
     private fun openSettings() {

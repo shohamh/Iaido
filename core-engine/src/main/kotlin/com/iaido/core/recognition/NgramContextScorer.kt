@@ -17,14 +17,17 @@ class NgramContextScorer(
     }
 
     fun score(previousWords: List<String>, candidate: String): Double {
-        val previous = previousWords.takeLast(windowSize)
-        val bigram = previous.lastOrNull()?.let {
-            bigrams[it to candidate] ?: scoreStore.bigram(it, candidate)
-        } ?: 0.0
-        val trigram = if (previous.size >= 2) {
-            val first = previous[previous.lastIndex - 1]
-            val second = previous.last()
-            trigrams[Triple(first, second, candidate)] ?: scoreStore.trigram(first, second, candidate)
+        val size = previousWords.size
+        val previousCount = minOf(size, windowSize)
+        val bigram = if (previousCount >= 1) {
+            val last = previousWords[size - 1]
+            (if (bigrams.isEmpty()) null else bigrams[last to candidate]) ?: scoreStore.bigram(last, candidate)
+        } else 0.0
+        val trigram = if (previousCount >= 2) {
+            val first = previousWords[size - 2]
+            val second = previousWords[size - 1]
+            (if (trigrams.isEmpty()) null else trigrams[Triple(first, second, candidate)])
+                ?: scoreStore.trigram(first, second, candidate)
         } else 0.0
         return bigramWeight * bigram + trigramWeight * trigram
     }

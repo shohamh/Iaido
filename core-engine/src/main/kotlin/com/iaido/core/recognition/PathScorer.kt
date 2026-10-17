@@ -11,4 +11,14 @@ interface PathScorer {
         candidates: List<WordEntry>,
         layout: KeyboardLayout,
     ): List<ScoredCandidate>
+
+    /**
+     * Same scores as [score] in no guaranteed order, for callers that re-rank the results
+     * themselves and would otherwise sort twice.
+     */
+    fun scoreUnordered(
+        path: GesturePath,
+        candidates: List<WordEntry>,
+        layout: KeyboardLayout,
+    ): List<ScoredCandidate> = score(path, candidates, layout)
 }

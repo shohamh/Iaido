@@ -44,19 +44,34 @@ class CompactNgramScoreStore private constructor(
     override fun bigram(previous: String, next: String): Double {
         val previousId = wordIds[previous] ?: return 0.0
         val nextId = wordIds[next] ?: return 0.0
-        val index = findBigram(previousId) ?: return 0.0
-        return findEdge(bigramEdgesStart, index.offset, index.length, index.count, nextId)
+        val position = findBigramPosition(previousId)
+        if (position < 0) return 0.0
+        return findEdge(
+            bigramEdgesStart,
+            buffer.getInt(position + 4),
+            buffer.getInt(position + 8),
+            buffer.getShort(position + 12).toInt() and 0xFFFF,
+            nextId,
+        )
     }
 
     override fun trigram(first: String, second: String, next: String): Double {
         val firstId = wordIds[first] ?: return 0.0
         val secondId = wordIds[second] ?: return 0.0
         val nextId = wordIds[next] ?: return 0.0
-        val index = findTrigram(firstId, secondId) ?: return 0.0
-        return findEdge(trigramEdgesStart, index.offset, index.length, index.count, nextId)
+        val position = findTrigramPosition(firstId, secondId)
+        if (position < 0) return 0.0
+        return findEdge(
+            trigramEdgesStart,
+            buffer.getInt(position + 8),
+            buffer.getInt(position + 12),
+            buffer.getShort(position + 16).toInt() and 0xFFFF,
+            nextId,
+        )
     }
 
-    private fun findBigram(contextId: Int): EdgeIndex? {
+    /** Byte position of the context's index record, or -1. */
+    private fun findBigramPosition(contextId: Int): Int {
         var low = 0
         var high = bigramContexts - 1
         while (low <= high) {
@@ -66,17 +81,13 @@ class CompactNgramScoreStore private constructor(
             when {
                 found < contextId -> low = middle + 1
                 found > contextId -> high = middle - 1
-                else -> return EdgeIndex(
-                    offset = buffer.getInt(position + 4),
-                    length = buffer.getInt(position + 8),
-                    count = buffer.getShort(position + 12).toInt() and 0xFFFF,
-                )
+                else -> return position
             }
         }
-        return null
+        return -1
     }
 
-    private fun findTrigram(firstId: Int, secondId: Int): EdgeIndex? {
+    private fun findTrigramPosition(firstId: Int, secondId: Int): Int {
         var low = 0
         var high = trigramContexts - 1
         while (low <= high) {
@@ -87,14 +98,10 @@ class CompactNgramScoreStore private constructor(
             when {
                 foundFirst < firstId || (foundFirst == firstId && foundSecond < secondId) -> low = middle + 1
                 foundFirst > firstId || (foundFirst == firstId && foundSecond > secondId) -> high = middle - 1
-                else -> return EdgeIndex(
-                    offset = buffer.getInt(position + 8),
-                    length = buffer.getInt(position + 12),
-                    count = buffer.getShort(position + 16).toInt() and 0xFFFF,
-                )
+                else -> return position
             }
         }
-        return null
+        return -1
     }
 
     private fun findEdge(edgesStart: Int, offset: Int, length: Int, count: Int, targetId: Int): Double {
@@ -102,8 +109,15 @@ class CompactNgramScoreStore private constructor(
         val end = position + length
         var previousId = 0
         repeat(count) {
-            val (delta, nextPosition) = readVarInt(position, end)
-            position = nextPosition
+            var delta = 0
+            var shift = 0
+            while (true) {
+                check(position < end && shift <= 28) { "Malformed n-gram varint" }
+                val byte = buffer.get(position++).toInt() and 0xFF
+                delta = delta or ((byte and 0x7F) shl shift)
+                if (byte and 0x80 == 0) break
+                shift += 7
+            }
             val nextId = previousId + delta
             require(position + SCORE_SIZE <= end) { "Truncated n-gram edge" }
             val quantized = buffer.getShort(position).toInt() and 0xFFFF
@@ -114,21 +128,6 @@ class CompactNgramScoreStore private constructor(
         }
         return 0.0
     }
-
-    private fun readVarInt(start: Int, end: Int): Pair<Int, Int> {
-        var position = start
-        var value = 0
-        var shift = 0
-        while (position < end && shift <= 28) {
-            val byte = buffer.get(position++).toInt() and 0xFF
-            value = value or ((byte and 0x7F) shl shift)
-            if (byte and 0x80 == 0) return value to position
-            shift += 7
-        }
-        error("Malformed n-gram varint")
-    }
-
-    private data class EdgeIndex(val offset: Int, val length: Int, val count: Int)
 
     companion object {
         private val MAGIC = byteArrayOf('N'.code.toByte(), 'K'.code.toByte(), 'G'.code.toByte(), '1'.code.toByte())

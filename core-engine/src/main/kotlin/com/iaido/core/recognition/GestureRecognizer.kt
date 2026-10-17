@@ -21,11 +21,10 @@ class GestureRecognizer(
         previousWords: List<String> = emptyList(),
     ): List<ScoredCandidate> {
         val candidates = candidateGenerator.generateCandidates(path, layout, dictionary)
-        val shaped = pathScorer.score(path, candidates, layout)
-        return contextScorer?.let { scorer ->
-            shaped.map { result ->
-                result.copy(score = result.score + scorer.score(previousWords, result.word.word))
-            }.sortedByDescending { it.score }
-        } ?: shaped
+        val scorer = contextScorer ?: return pathScorer.score(path, candidates, layout)
+        // The context pass re-sorts, so the shape scores need not be ordered first.
+        return pathScorer.scoreUnordered(path, candidates, layout).map { result ->
+            result.copy(score = result.score + scorer.score(previousWords, result.word.word))
+        }.sortedByDescending { it.score }
     }
 }

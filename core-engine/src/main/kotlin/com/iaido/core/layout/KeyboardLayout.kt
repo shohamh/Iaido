@@ -31,18 +31,23 @@ class KeyboardLayout(val keys: List<KeyPosition>) {
     fun normalize(position: KeyPosition): KeyPosition =
         position.copy(x = normalizeX(position.x), y = normalizeY(position.y))
 
-    private fun normalizeX(x: Float): Float = (x - minX()) / scale()
+    /** Normalized key centers by letter; computed once per layout. */
+    val normalizedCenters: Map<Char, KeyPosition> by lazy {
+        keys.associate { key -> key.letter to normalize(key) }
+    }
 
-    private fun normalizeY(y: Float): Float = (y - minY()) / scale()
+    private fun normalizeX(x: Float): Float = (x - minX) / scale
 
-    private fun minX(): Float = keys.minOf { it.x }
+    private fun normalizeY(y: Float): Float = (y - minY) / scale
 
-    private fun minY(): Float = keys.minOf { it.y }
+    private val minX: Float by lazy { keys.minOf { it.x } }
 
-    private fun scale(): Float {
-        val width = keys.maxOf { it.x } - minX()
-        val height = keys.maxOf { it.y } - minY()
-        return max(width, height).coerceAtLeast(1f)
+    private val minY: Float by lazy { keys.minOf { it.y } }
+
+    private val scale: Float by lazy {
+        val width = keys.maxOf { it.x } - minX
+        val height = keys.maxOf { it.y } - minY
+        max(width, height).coerceAtLeast(1f)
     }
 
     companion object {

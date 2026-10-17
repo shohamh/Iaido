@@ -25,6 +25,7 @@ class InferenceSegmenter(
         require(maxCandidatesPerPath > 0)
     }
 
+    @Synchronized
     fun rank(
         units: List<GestureUnit>,
         previousWords: List<String>,
@@ -33,16 +34,16 @@ class InferenceSegmenter(
         val boundedUnits = units.takeLast(maxUnits)
         if (boundedUnits.isEmpty() || dictionary.isEmpty()) return emptyList()
 
-        val dictionaryByWord = dictionary
-            .groupBy { it.word }
-            .mapValues { (_, entries) -> entries.maxBy { it.frequency } }
-        val allOptions = rankOptions(boundedUnits, previousWords, dictionaryByWord, contextScorer)
+        val view = dictionaryViewFor(dictionary)
+        view.trimCaches()
+        val run = Run(view)
+        val allOptions = rankOptions(boundedUnits, previousWords, run, contextScorer)
         if (allOptions.isEmpty()) return emptyList()
 
         val currentInterpretation = rankOptions(
             boundedUnits,
             previousWords,
-            dictionaryByWord,
+            run,
             NgramContextScorer(),
         ).firstOrNull()?.let { baseline ->
             allOptions.firstOrNull { option ->
@@ -61,19 +62,73 @@ class InferenceSegmenter(
             .take(maxAlternatives)
     }
 
+    @Volatile
+    private var lastDictionaryView: DictionaryView? = null
+
+    /** Dedupes by word (highest frequency wins); reused while the caller passes the same list. */
+    private fun dictionaryViewFor(dictionary: List<WordEntry>): DictionaryView {
+        lastDictionaryView?.let { if (it.source === dictionary) return it }
+        val byWord = HashMap<String, WordEntry>(dictionary.size * 2)
+        for (entry in dictionary) {
+            val existing = byWord[entry.word]
+            if (existing == null || entry.frequency > existing.frequency) byWord[entry.word] = entry
+        }
+        return DictionaryView(dictionary, byWord).also { lastDictionaryView = it }
+    }
+
+    private class DictionaryView(val source: List<WordEntry>, val byWord: Map<String, WordEntry>) {
+        val maxWordLength: Int = byWord.keys.maxOfOrNull { it.length } ?: 0
+
+        // Group options and per-unit raw candidates depend only on the units and this dictionary, so
+        // they carry over between swipes: a new swipe only has to derive the spans ending at it.
+        val raw = java.util.IdentityHashMap<GestureUnit, List<RawCandidate>>()
+        val groups = HashMap<UnitsKey, List<GroupOption>>()
+
+        fun trimCaches() {
+            if (raw.size > MAX_CACHED_UNITS) raw.clear()
+            if (groups.size > MAX_CACHED_UNITS * 4) groups.clear()
+        }
+
+        /** Dictionary splits of a text depend only on the word set, so they outlive one rank call. */
+        private val segmentations = HashMap<String, List<List<String>>>()
+
+        fun cachedSegmentations(text: String, wordLimit: Int, compute: () -> List<List<String>>): List<List<String>> {
+            val key = "$wordLimit:$text"
+            segmentations[key]?.let { return it }
+            if (segmentations.size >= MAX_CACHED_SEGMENTATIONS) segmentations.clear()
+            return compute().also { segmentations[key] = it }
+        }
+    }
+
+    /** Memo shared by every pass of one [rank] call; group/raw options do not depend on context. */
+    private class Run(val dictionary: DictionaryView)
+
+    /** Compares unit lists by element identity: units are immutable once appended to a transaction. */
+    private class UnitsKey(val units: List<GestureUnit>) {
+        private val hash = units.fold(1) { h, unit -> 31 * h + System.identityHashCode(unit) }
+        override fun hashCode() = hash
+        override fun equals(other: Any?): Boolean {
+            if (other !is UnitsKey || other.units.size != units.size) return false
+            for (i in units.indices) if (units[i] !== other.units[i]) return false
+            return true
+        }
+    }
+
     private fun rankOptions(
         units: List<GestureUnit>,
         previousWords: List<String>,
-        dictionary: Map<String, WordEntry>,
+        run: Run,
         scorer: NgramContextScorer,
     ): List<SegmentationOption> {
         val states = MutableList(units.size + 1) { mutableListOf<Partial>() }
-        states[0] += Partial.empty()
+        states[0] += Partial.empty(previousWords)
 
         for (start in units.indices) {
             if (states[start].isEmpty()) continue
             for (endExclusive in start + 1..units.size) {
-                val groups = groupOptions(units.subList(start, endExclusive), dictionary)
+                val span = units.subList(start, endExclusive)
+                val spanKey = UnitsKey(span.toList())
+                val groups = run.dictionary.groups.getOrPut(spanKey) { groupOptions(span, run) }
                 if (groups.isEmpty()) continue
                 for (prefix in states[start]) {
                     for (group in groups) {
@@ -99,11 +154,13 @@ class InferenceSegmenter(
 
     private fun groupOptions(
         units: List<GestureUnit>,
-        dictionary: Map<String, WordEntry>,
+        run: Run,
     ): List<GroupOption> {
+        val dictionary = run.dictionary.byWord
+        val maxWordLength = run.dictionary.maxWordLength
         var rawCandidates = listOf(RawCandidate.empty())
         for (unit in units) {
-            val unitCandidates = rawCandidatesFor(unit, dictionary.values.toList())
+            val unitCandidates = run.dictionary.raw.getOrPut(unit) { rawCandidatesFor(unit, run.dictionary) }
             if (unitCandidates.isEmpty()) return emptyList()
             rawCandidates = rawCandidates.flatMap { prefix ->
                 unitCandidates.map { candidate -> prefix.append(candidate) }
@@ -138,7 +195,9 @@ class InferenceSegmenter(
         val wordLimit = maxOf(maxWordsPerGroup, units.maxOf { unit -> unit.paths.size })
 
         return rawCandidates.flatMap { candidate ->
-            dictionarySegmentations(candidate.text, dictionary, wordLimit).map { words ->
+            run.dictionary.cachedSegmentations(candidate.text, wordLimit) {
+                dictionarySegmentations(candidate.text, dictionary, maxWordLength, wordLimit)
+            }.map { words ->
                 GroupOption(
                     words = words,
                     score = candidate.score + candidate.languageWeight *
@@ -159,7 +218,7 @@ class InferenceSegmenter(
             .take(maxAlternatives)
     }
 
-    private fun rawCandidatesFor(unit: GestureUnit, dictionary: List<WordEntry>): List<RawCandidate> {
+    private fun rawCandidatesFor(unit: GestureUnit, view: DictionaryView): List<RawCandidate> {
         val rankedPaths = unit.candidates.map { candidates ->
             candidates.sortedWith(candidateComparator).take(maxCandidatesPerPath)
         }
@@ -175,10 +234,10 @@ class InferenceSegmenter(
                 candidateCombinations(hypothesis.candidates).map { selected ->
                     val parts = selected.map { candidate -> candidate.word.word }
                     val concatenated = parts.joinToString(separator = "")
-                    val merged = if (parts.size == 2) {
-                        SplitWordMerger().mergeParts(parts, dictionary).firstOrNull()?.word
+                    val merged = if (parts.size == 2 && parts.any { it.isEmpty() }) {
+                        null
                     } else {
-                        dictionary.firstOrNull { entry -> entry.word == concatenated }?.word
+                        view.byWord[concatenated]?.word
                     }
                     // The concatenated fallback remains available to dictionarySegmentations(),
                     // which yields boundary-preserving words for every ranked path combination.
@@ -227,15 +286,16 @@ class InferenceSegmenter(
     private fun dictionarySegmentations(
         text: String,
         dictionary: Map<String, WordEntry>,
+        maxWordLength: Int,
         wordLimit: Int = maxWordsPerGroup,
     ): List<List<String>> {
-        val memo = mutableMapOf<Pair<Int, Int>, List<List<String>>>()
-        fun visit(index: Int, wordsUsed: Int): List<List<String>> = memo.getOrPut(index to wordsUsed) {
+        val memo = HashMap<Int, List<List<String>>>()
+        fun visit(index: Int, wordsUsed: Int): List<List<String>> = memo.getOrPut(index * (wordLimit + 1) + wordsUsed) {
             if (index == text.length) return@getOrPut listOf(emptyList())
             if (wordsUsed == wordLimit) return@getOrPut emptyList()
 
             buildList {
-                for (endExclusive in index + 1..text.length) {
+                for (endExclusive in index + 1..minOf(text.length, index + maxWordLength)) {
                     val word = text.substring(index, endExclusive)
                     if (word !in dictionary) continue
                     visit(endExclusive, wordsUsed + 1).forEach { suffix ->
@@ -252,8 +312,10 @@ class InferenceSegmenter(
 
     private fun retainTop(options: MutableList<Partial>) {
         val retained = options.sortedWith(partialComparator)
+            .asSequence()
             .distinctBy { it.words }
             .take(maxAlternatives)
+            .toList()
         options.clear()
         options += retained
     }
@@ -311,14 +373,36 @@ class InferenceSegmenter(
         val hypothesisMetadata: List<HypothesisMetadata>,
     )
 
-    private data class Partial(
-        val words: List<String>,
+    /**
+     * A DP state. The word/id/metadata lists are materialized only when a state is compared on a
+     * tie or retained, because most prefix x group products are discarded by [retainTop] on score.
+     */
+    private class Partial private constructor(
+        private val parent: Partial?,
+        private val group: GroupOption?,
         val score: Double,
-        val sourceGestureIds: List<String>,
-        val hypothesisMetadata: List<HypothesisMetadata>,
+        val wordCount: Int,
+        rootContext: List<String>,
     ) {
+        /** Last few words of previousWords + words: all the n-gram scorer can ever look at. */
+        private val contextTail: List<String> by lazy(LazyThreadSafetyMode.NONE) {
+            if (group == null) rootContext else (parent!!.contextTail + group.words).takeLast(CONTEXT_TAIL_WORDS)
+        }
+
+        val words: List<String> by lazy(LazyThreadSafetyMode.NONE) {
+            if (group == null) emptyList() else parent!!.words + group.words
+        }
+        val sourceGestureIds: List<String> by lazy(LazyThreadSafetyMode.NONE) {
+            if (group == null) emptyList() else parent!!.sourceGestureIds + group.sourceGestureIds
+        }
+        val hypothesisMetadata: List<HypothesisMetadata> by lazy(LazyThreadSafetyMode.NONE) {
+            if (group == null) emptyList() else parent!!.hypothesisMetadata + group.hypothesisMetadata
+        }
+        val swappedPairCount: Int by lazy(LazyThreadSafetyMode.NONE) {
+            hypothesisMetadata.count { it.swappedPair != null }
+        }
+
         fun append(group: GroupOption, previousWords: List<String>, scorer: NgramContextScorer): Partial {
-            val context = previousWords + words
             // An over-fragmented group (see groupOptions()) never went through only genuine word
             // boundaries: at least one of its "words" is a fragment of a single touch path's own
             // recognized text, and even its first word isn't guaranteed to be a real word that
@@ -334,23 +418,26 @@ class InferenceSegmenter(
                 0.0
             } else {
                 group.words.foldIndexed(0.0) { index, total, word ->
-                    total + scorer.score(context + group.words.take(index), word)
+                    total + scorer.score(
+                        if (index == 0) contextTail else contextTail + group.words.subList(0, index),
+                        word,
+                    )
                 } * group.languageEvidenceWeight
             }
-            return Partial(
-                words = words + group.words,
-                score = score + group.score + contextScore,
-                sourceGestureIds = sourceGestureIds + group.sourceGestureIds,
-                hypothesisMetadata = hypothesisMetadata + group.hypothesisMetadata,
-            )
+            return Partial(this, group, score + group.score + contextScore, wordCount + group.words.size, emptyList())
         }
 
         companion object {
-            fun empty() = Partial(emptyList(), 0.0, emptyList(), emptyList())
+            fun empty(previousWords: List<String>) =
+                Partial(null, null, 0.0, 0, previousWords.takeLast(CONTEXT_TAIL_WORDS))
         }
     }
 
     companion object {
+        // NgramContextScorer's window is at most three words (trigram), so no more context is read.
+        private const val CONTEXT_TAIL_WORDS = 3
+        private const val MAX_CACHED_SEGMENTATIONS = 4096
+        private const val MAX_CACHED_UNITS = 64
         private const val MAX_GESTURE_UNITS = 6
         private const val MAX_WORDS_PER_GROUP = 3
         private const val MAX_ALTERNATIVES = 16
@@ -380,9 +467,9 @@ class InferenceSegmenter(
             .thenBy { it.words.joinToString(separator = "\u0000") }
             .thenBy { option -> option.hypothesisMetadata.count { it.swappedPair != null } }
         private val partialComparator = compareByDescending<Partial> { it.score }
-            .thenBy { it.words.size }
+            .thenBy { it.wordCount }
             .thenBy { it.words.joinToString(separator = "\u0000") }
-            .thenBy { partial -> partial.hypothesisMetadata.count { it.swappedPair != null } }
+            .thenBy { partial -> partial.swappedPairCount }
         private val optionComparator = compareByDescending<SegmentationOption> { it.score }
             .thenBy { it.words.size }
             .thenBy { it.words.joinToString(separator = "\u0000") }
