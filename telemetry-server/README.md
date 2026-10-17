@@ -133,6 +133,54 @@ telemetry as "unavailable in this build" in Settings.
    `docs/superpowers/diagnosis/2026-10-17-swipe-telemetry.md` for the hosts-file workaround. Real
    phones just need the Tailscale app running.
 
+### Run the emulator end-to-end test
+
+`app/src/androidTest/kotlin/com/iaido/app/SwipeTelemetryE2eTest.kt` enables research consent
+through the real consent controller, swipes "hello" on the real Iaido keyboard, and polls
+`GET /v1/operator/research/batches?app_version=<installed version>` (plus the export) until the
+swipe `gesture_trace` arrives; it also checks the batch is absent under another version, that
+nothing is sent with consent off, and that lost credentials are re-provisioned. Without a baked
+URL and an operator token every test returns early (passes without doing anything).
+
+1. Start the collector with throwaway dev credentials (Git Bash, from `telemetry-server/`):
+
+   ```bash
+   export IAIDO_POSTGRES_PASSWORD=local-dev-password IAIDO_S3_ACCESS_KEY=local-dev-access-key \
+          IAIDO_S3_SECRET_KEY=local-dev-secret-key IAIDO_OPERATOR_TOKEN=local-dev-operator-token
+   docker compose -p iaido-swipe-e2e up -d --build
+   tailscale serve --bg 8000           # tailnet-only HTTPS; never `tailscale funnel`
+   tailscale status --json | grep -m1 DNSName   # -> <host>.<tailnet>.ts.net
+   ```
+
+2. Boot the emulator and make the tailnet name resolve inside it (B9; repeat after every boot;
+   needs a userdebug/Google APIs image for `adb root`; `<tailscale-ip>` is `tailscale ip -4`):
+
+   ```bash
+   A=$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe
+   $LOCALAPPDATA/Android/Sdk/emulator/emulator.exe -avd IaidoApi35 -no-snapshot-save -no-boot-anim &
+   $A wait-for-device && $A root && $A wait-for-device
+   MSYS_NO_PATHCONV=1 $A shell 'cat /system/etc/hosts > /data/local/tmp/hosts;
+     echo "<tailscale-ip> <host>.<tailnet>.ts.net" >> /data/local/tmp/hosts;
+     chmod 644 /data/local/tmp/hosts; chcon u:object_r:system_file:s0 /data/local/tmp/hosts;
+     mount -o bind /data/local/tmp/hosts /system/etc/hosts'
+   ```
+
+3. Run the test from the repo root. The URL is baked into the build; the operator token goes only
+   on the command line (never commit it):
+
+   ```bash
+   ./gradlew :app:connectedDebugAndroidTest \
+     -PiaidoTelemetryBaseUrl=https://<host>.<tailnet>.ts.net \
+     -Pandroid.testInstrumentationRunnerArguments.class=com.iaido.app.SwipeTelemetryE2eTest \
+     -Pandroid.testInstrumentationRunnerArguments.iaidoOperatorToken=local-dev-operator-token
+   ```
+
+4. See the trace in the dashboard: `https://<host>.<tailnet>.ts.net/?app_version=<versionName>`
+   (Basic auth `iaido` / the operator token), then open the batch.
+
+Stop everything with `docker compose -p iaido-swipe-e2e down -v` and
+`tailscale serve --https=443 off`.
+
 ## Migrations
 
 There is no separate migration tool yet: `create_app()` calls
