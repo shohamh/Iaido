@@ -139,6 +139,27 @@ class TelemetryQueueTest {
     }
 
     @Test
+    fun `age expiry never rewrites a sealed batch and deletes it only when every event expired`() {
+        var now = 1_000L
+        withQueue(QueueLimits(maxAgeMs = 100L), clock = { now }) { queue, _ ->
+            queue.append(diagnosticEnvelope(950L))
+            queue.append(diagnosticEnvelope(990L))
+            val sealed = queue.pendingBatches().single()
+            assertEquals(2, sealed.events.size)
+
+            now = 1_060L // 950 is now expired, 990 is not
+            queue.enforceLimits()
+
+            assertEquals(sealed, queue.pendingBatches().single())
+
+            now = 1_100L // both expired
+            queue.enforceLimits()
+
+            assertTrue(queue.pendingBatches().isEmpty())
+        }
+    }
+
+    @Test
     fun `queue evicts oldest batches first using durable sequence above nine`() {
         withQueue(
             limits = QueueLimits(maxBatchEvents = 1, maxQueuedBytes = 700L),

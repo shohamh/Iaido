@@ -145,6 +145,9 @@ class TelemetryQueue(
             val freshEvents = batch.events.filter { now - it.occurredAtMs <= limits.maxAgeMs }
             when {
                 freshEvents.isEmpty() -> batchFile.file.delete()
+                // A sealed batch may be mid-upload under its id; rewriting it would change the
+                // bytes the collector deduplicates on, so it is only ever deleted whole.
+                batchFile.sealed -> Unit
                 freshEvents.size != batch.events.size -> writeBatch(batchFile.file, freshEvents)
             }
         }
