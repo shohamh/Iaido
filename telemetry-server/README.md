@@ -126,6 +126,9 @@ telemetry as "unavailable in this build" in Settings.
 2. For CI/release builds: set the GitHub repository **variable** `IAIDO_TELEMETRY_BASE_URL` to that
    URL (Settings > Secrets and variables > Actions > Variables). The workflows pass it as
    `-PiaidoTelemetryBaseUrl`; if unset, the build has telemetry unavailable.
+   This URL is baked into the public release and nightly APKs, so the collector must stay
+   tailnet-only (`tailscale serve`, never `tailscale funnel`): otherwise every opted-in user's
+   research data, from anyone who installs the APK, would land on this machine.
 3. For local builds: add `iaidoTelemetryBaseUrl=https://<your-host>.<tailnet>.ts.net` to
    `~/.gradle/gradle.properties` (not the repo's `gradle.properties`, which only carries a commented
    example).
