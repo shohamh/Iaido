@@ -363,7 +363,8 @@ def build_language(
     discount: float = DISCOUNT,
 ) -> dict[str, object]:
     dictionary_words = list(dict.fromkeys(normalize(word, language) for word in read_dictionary(dictionary_path)))
-    large_vocabulary = read_wordfreq_vocabulary(wordfreq_path, language)
+    # With --dictionary-vocabulary the dictionary itself is the vocabulary (no wordfreq filtering).
+    large_vocabulary = set(dictionary_words) if wordfreq_path is None else read_wordfreq_vocabulary(wordfreq_path, language)
     allowed = set(dictionary_words[:vocabulary_limit]) & large_vocabulary
     context_allowed = set(dictionary_words[:context_vocabulary_limit]) & allowed
     trigram_allowed = set(dictionary_words[:trigram_context_vocabulary_limit]) & context_allowed
@@ -384,6 +385,12 @@ def build_language(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--dictionary-vocabulary",
+        action="store_true",
+        help="Use the dictionary as the vocabulary and skip the wordfreq filter (valid when every dictionary "
+        "word is already in the wordfreq vocabulary, as with the shipped dictionaries).",
+    )
     parser.add_argument("--wordfreq-en", type=Path)
     parser.add_argument("--wordfreq-he", type=Path)
     parser.add_argument("--corpus-en", type=Path)
@@ -421,7 +428,10 @@ def main() -> None:
         for language in ("en", "he"):
             wordfreq_path = args.wordfreq_en if language == "en" else args.wordfreq_he
             corpus_path = args.corpus_en if language == "en" else args.corpus_he
-            if wordfreq_path is None:
+            if args.dictionary_vocabulary:
+                wordfreq_path = None
+                source_manifest[f"wordfreq_{language}"] = {"skipped": "dictionary used as vocabulary"}
+            elif wordfreq_path is None:
                 wordfreq_path = temporary_path / f"large_{language}.msgpack.gz"
                 source_manifest[f"wordfreq_{language}"] = fetch_or_verify(wordfreq_path, WORD_FREQ[language], f"wordfreq {language}")
             else:
