@@ -197,6 +197,17 @@ class ImeScenario(
         )
     }
 
+    /** Back-to-back swipes into whatever editor currently has focus; does not read the test host. */
+    fun swipeWordsIntoFocusedEditor(words: List<String>, gapMs: Long, transform: PathTransform = PathTransform()) {
+        words.forEachIndexed { index, word ->
+            check(!injectSwipeWord(word, transform)) { "Expected a completed swipe for '$word'" }
+            if (index < words.lastIndex) SystemClock.sleep(gapMs)
+        }
+        SystemClock.sleep(1_500L)
+    }
+
+    fun uiDevice(): UiDevice = device
+
     private fun injectSwipeWord(
         word: String,
         transform: PathTransform,

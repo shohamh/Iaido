@@ -251,6 +251,7 @@ class SettingsActivity : ComponentActivity() {
 
             HorizontalDivider()
             Text("App updates", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Text("Installed version: $installedVersionName (build ${remember { appVersionCode() }}), ${updateChannelFromStoredValue(null, installedVersionName).displayName.lowercase()} build")
             Text("Update channel", style = androidx.compose.material3.MaterialTheme.typography.labelLarge)
             UpdateChannelSelector(
                 selectedChannel = updateChannel,
@@ -511,6 +512,8 @@ class SettingsActivity : ComponentActivity() {
             database.close()
         }
     }
+
+    private fun appVersionCode(): Long = packageManager.getPackageInfo(packageName, 0).longVersionCode
 
     private fun appVersion(): String =
         packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"

@@ -4,6 +4,7 @@ import android.inputmethodservice.InputMethodService
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.text.InputType
+import android.os.SystemClock
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -181,6 +182,7 @@ class IaidoInputMethodService : InputMethodService() {
         override fun redo(): Boolean = redoSentenceEdit()
     }
     private var latestEditorSnapshot: EditorSnapshot? = null
+    private val recentPreEditTexts = mutableListOf<Pair<String, Long>>()
     private val showCandidateScores = mutableStateOf(false)
     // Ids of replacement options currently produced by the live SwipeTypingCoordinator
     // transaction, as opposed to history-derived joins -- used only to decide whether a
@@ -1091,11 +1093,31 @@ class IaidoInputMethodService : InputMethodService() {
         val localEnd = endExclusive - snapshot.offset
         if (localStart < 0 || localEnd < localStart || localEnd > snapshot.text.length) return
         val updatedText = snapshot.text.substring(0, localStart) + replacement + snapshot.text.substring(localEnd)
+        rememberPreEditTextForStaleEchoes(snapshot.text)
         latestEditorSnapshot = snapshot.copy(
             text = updatedText,
             selectionStart = selectionAfterStart,
             selectionEnd = selectionAfterEnd,
         )
+    }
+
+    /**
+     * Some editors (Compose text fields among them) report their extracted text asynchronously, so
+     * right after an edit of ours the monitor can still deliver the text from before it. That echo is
+     * not an external edit and must not end the inference run, or the next swipe starts a new group
+     * with no space before it ("are" + "you" -> "areyou").
+     */
+    private fun rememberPreEditTextForStaleEchoes(preEditText: String) {
+        val now = SystemClock.uptimeMillis()
+        recentPreEditTexts.removeAll { now - it.second > STALE_ECHO_WINDOW_MS }
+        recentPreEditTexts += preEditText to now
+        while (recentPreEditTexts.size > MAX_STALE_ECHO_TEXTS) recentPreEditTexts.removeAt(0)
+    }
+
+    private fun isStaleEchoOfOwnEdit(observedText: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        recentPreEditTexts.removeAll { now - it.second > STALE_ECHO_WINDOW_MS }
+        return recentPreEditTexts.any { it.first == observedText }
     }
 
     private fun isTypingCharacter(character: Char): Boolean =
@@ -1644,6 +1666,10 @@ class IaidoInputMethodService : InputMethodService() {
 
     private fun observeEditorSnapshot(snapshot: EditorSnapshot) {
         val previousSnapshot = latestEditorSnapshot
+        if (previousSnapshot != null && previousSnapshot.text != snapshot.text && isStaleEchoOfOwnEdit(snapshot.text)) {
+            return
+        }
+        if (previousSnapshot != null && previousSnapshot.text == snapshot.text) recentPreEditTexts.clear()
         if (previousSnapshot != null && previousSnapshot.text != snapshot.text) {
             swipeTypingCoordinator.onExternalEdit()
             sentenceEditHistory.markExternalEdit()
@@ -1677,6 +1703,8 @@ class IaidoInputMethodService : InputMethodService() {
         const val TEXT_MONITOR_TOKEN = 0x4E4B
         const val MAX_BACKSPACE_SWIPE_CHARS = 60
         const val INFERENCE_SELECTION_GUARD_TIMEOUT_MS = 1_000L
+        const val STALE_ECHO_WINDOW_MS = 1_500L
+        const val MAX_STALE_ECHO_TEXTS = 4
     }
 
     private fun switchLanguage() {
