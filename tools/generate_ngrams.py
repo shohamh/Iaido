@@ -47,15 +47,19 @@ CORPORA = {
     },
 }
 
-HEADER = struct.Struct("<4sBBHIIIIId")
-BIGRAM_INDEX = struct.Struct("<IIIHH")
-TRIGRAM_INDEX = struct.Struct("<IIIIHH")
-MAGIC = b"NKG1"
-VERSION = 1
-MAX_SUCCESSORS = 32
+HEADER = struct.Struct("<4sBBHIIIIId")  # same 36-byte layout as NKG1; the double slot holds the discount D
+BIGRAM_INDEX = struct.Struct("<IIIHHI")  # context, offset, length, edges, distinct, total
+TRIGRAM_INDEX = struct.Struct("<IIIIHHI")  # first, second, offset, length, edges, distinct, total
+MAGIC = b"NKG2"
+VERSION = 2
+MAX_SUCCESSORS = 128
+TRIGRAM_SUCCESSORS = 32
+TRIGRAM_CONTEXT_LIMIT = 50_000
+TRIGRAM_CONTEXT_VOCABULARY = 2_000
+DISCOUNT = 0.75
 MIN_COUNT = 2
 MAX_VOCABULARY = 10_000
-MAX_CONTEXT_VOCABULARY = 2_000
+MAX_CONTEXT_VOCABULARY = 10_000
 FLUSH_ROWS = 100_000
 TOKEN_RE = {
     "en": re.compile(r"[A-Za-z]+"),
@@ -153,8 +157,10 @@ def aggregate(
     allowed: set[str],
     db_path: Path,
     context_allowed: set[str] | None = None,
+    trigram_allowed: set[str] | None = None,
 ) -> dict[str, int]:
     context_allowed = allowed if context_allowed is None else context_allowed
+    trigram_allowed = context_allowed if trigram_allowed is None else trigram_allowed
     word_ids = {word: index for index, word in enumerate(dictionary_words)}
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA journal_mode=OFF")
@@ -188,8 +194,8 @@ def aggregate(
                 if dictionary_words[tokens[index - 1]] in context_allowed:
                     pending[(2, tokens[index - 1], -1, tokens[index])] += 1
             for index in range(2, len(tokens)):
-                if (dictionary_words[tokens[index - 2]] in context_allowed and
-                        dictionary_words[tokens[index - 1]] in context_allowed):
+                if (dictionary_words[tokens[index - 2]] in trigram_allowed and
+                        dictionary_words[tokens[index - 1]] in trigram_allowed):
                     pending[(3, tokens[index - 2], tokens[index - 1], tokens[index])] += 1
             if len(pending) >= FLUSH_ROWS:
                 flush()
@@ -201,14 +207,37 @@ def aggregate(
     return {"sentences": sentence_count, "retained_tokens": token_count, "vocabulary": len(word_ids)}
 
 
-def selected_query(kind: int, minimum: int, top_k: int) -> str:
+def selected_query(kind: int, minimum: int, top_k: int, context_limit: int = -1) -> str:
+    """Top-k successors per context joined with the context's full totals.
+
+    Columns: first, second, next_id, count, total (sum of ALL successor counts of the context, including
+    pruned ones), distinct (number of distinct successor types, including pruned ones). `context_limit`
+    keeps only the contexts with the largest totals (ties broken by id); -1 keeps all.
+    """
     return (
-        "SELECT first, second, next_id, count FROM ("
+        "SELECT s.first, s.second, s.next_id, s.count, t.total, t.distinct_types FROM ("
         "SELECT first, second, next_id, count, "
         "ROW_NUMBER() OVER (PARTITION BY first, second ORDER BY count DESC, next_id ASC) AS rank "
-        "FROM ngrams WHERE kind = ? AND count >= ?"
-        ") WHERE rank <= ? ORDER BY first, second, next_id"
+        "FROM ngrams WHERE kind = :kind AND count >= :minimum"
+        ") s JOIN ("
+        "SELECT first, second, SUM(count) AS total, COUNT(*) AS distinct_types FROM ngrams "
+        "WHERE kind = :kind GROUP BY first, second "
+        "ORDER BY total DESC, first ASC, second ASC LIMIT :context_limit"
+        ") t ON t.first = s.first AND t.second = s.second "
+        "WHERE s.rank <= :top_k ORDER BY s.first, s.second, s.next_id"
     )
+
+
+def query_params(kind: int, minimum: int, top_k: int, context_limit: int = -1) -> dict[str, int]:
+    return {"kind": kind, "minimum": minimum, "top_k": top_k, "context_limit": context_limit}
+
+
+def pack_index(kind: int, context: tuple[int, int], offset: int, length: int, edges: int, distinct: int, total: int) -> bytes:
+    distinct = min(distinct, 65535)
+    total = min(total, 0xFFFFFFFF)
+    if kind == 2:
+        return BIGRAM_INDEX.pack(context[0], offset, length, edges, distinct, total)
+    return TRIGRAM_INDEX.pack(context[0], context[1], offset, length, edges, distinct, total)
 
 
 def write_edges(
@@ -216,53 +245,46 @@ def write_edges(
     kind: int,
     minimum: int,
     top_k: int,
-    max_log_count: float,
+    context_limit: int,
     edge_path: Path,
     index_path: Path,
 ) -> tuple[int, int]:
+    """Write one order's index + edges. Edge = varint(id delta) + varint(exact count)."""
     context_count = edge_bytes = 0
     current_context: tuple[int, int] | None = None
-    current_offset = 0
-    current_edges = 0
+    current_offset = current_edges = current_total = current_distinct = 0
     previous_id = 0
     edge_handle = edge_path.open("wb")
     index_handle = index_path.open("wb")
+
+    def close_context() -> None:
+        index_handle.write(pack_index(
+            kind, current_context, current_offset, edge_bytes - current_offset,
+            current_edges, current_distinct, current_total,
+        ))
+
     try:
-        for first, second, next_id, count in connection.execute(selected_query(kind, minimum, top_k), (kind, minimum, top_k)):
+        for first, second, next_id, count, total, distinct in connection.execute(
+            selected_query(kind, minimum, top_k, context_limit), query_params(kind, minimum, top_k, context_limit),
+        ):
             context = (first, second)
             if context != current_context:
                 if current_context is not None:
-                    if kind == 2:
-                        index_handle.write(BIGRAM_INDEX.pack(
-                            current_context[0], current_offset, edge_bytes - current_offset, current_edges, 0,
-                        ))
-                    else:
-                        index_handle.write(TRIGRAM_INDEX.pack(
-                            current_context[0], current_context[1], current_offset,
-                            edge_bytes - current_offset, current_edges, 0,
-                        ))
+                    close_context()
                     context_count += 1
                 current_context = context
                 current_offset = edge_bytes
                 current_edges = 0
+                current_total = total
+                current_distinct = distinct
                 previous_id = 0
-            encoded = encode_varint(next_id - previous_id)
-            quantized = 0 if max_log_count == 0.0 else round(math.log1p(count) / max_log_count * 65535)
+            encoded = encode_varint(next_id - previous_id) + encode_varint(count)
             edge_handle.write(encoded)
-            edge_handle.write(struct.pack("<H", min(65535, quantized)))
-            edge_bytes += len(encoded) + 2
+            edge_bytes += len(encoded)
             current_edges += 1
             previous_id = next_id
         if current_context is not None:
-            if kind == 2:
-                index_handle.write(BIGRAM_INDEX.pack(
-                    current_context[0], current_offset, edge_bytes - current_offset, current_edges, 0,
-                ))
-            else:
-                index_handle.write(TRIGRAM_INDEX.pack(
-                    current_context[0], current_context[1], current_offset,
-                    edge_bytes - current_offset, current_edges, 0,
-                ))
+            close_context()
             context_count += 1
     finally:
         edge_handle.close()
@@ -270,26 +292,29 @@ def write_edges(
     return context_count, edge_bytes
 
 
-def max_selected_count(connection: sqlite3.Connection, kind: int, minimum: int, top_k: int) -> int:
-    row = connection.execute(
-        "SELECT MAX(count) FROM (" + selected_query(kind, minimum, top_k) + ")",
-        (kind, minimum, top_k),
-    ).fetchone()
-    return int(row[0] or 0)
-
-
-def build_binary(db_path: Path, output: Path, language: str, word_count: int, minimum: int, top_k: int) -> dict[str, int | str | float]:
+def build_binary(
+    db_path: Path,
+    output: Path,
+    language: str,
+    word_count: int,
+    minimum: int,
+    top_k: int,
+    trigram_top_k: int | None = None,
+    trigram_context_limit: int = -1,
+    discount: float = DISCOUNT,
+) -> dict[str, int | str | float]:
+    trigram_top_k = top_k if trigram_top_k is None else trigram_top_k
     connection = sqlite3.connect(db_path)
-    maximum = max(max_selected_count(connection, 2, minimum, top_k), max_selected_count(connection, 3, minimum, top_k))
-    max_log_count = math.log1p(maximum)
     with tempfile.TemporaryDirectory(prefix="iaido-edges-") as temporary:
         temporary_path = Path(temporary)
         bg_edges = temporary_path / "bigram.edges"
         bg_index = temporary_path / "bigram.index"
         tri_edges = temporary_path / "trigram.edges"
         tri_index = temporary_path / "trigram.index"
-        bg_contexts, bg_bytes = write_edges(connection, 2, minimum, top_k, max_log_count, bg_edges, bg_index)
-        tri_contexts, tri_bytes = write_edges(connection, 3, minimum, top_k, max_log_count, tri_edges, tri_index)
+        bg_contexts, bg_bytes = write_edges(connection, 2, minimum, top_k, -1, bg_edges, bg_index)
+        tri_contexts, tri_bytes = write_edges(
+            connection, 3, minimum, trigram_top_k, trigram_context_limit, tri_edges, tri_index,
+        )
         connection.close()
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open("wb") as destination:
@@ -304,7 +329,7 @@ def build_binary(db_path: Path, output: Path, language: str, word_count: int, mi
                     tri_contexts,
                     bg_bytes,
                     tri_bytes,
-                    max_log_count,
+                    discount,
                 )
             )
             for path in (bg_index, tri_index, bg_edges, tri_edges):
@@ -318,7 +343,7 @@ def build_binary(db_path: Path, output: Path, language: str, word_count: int, mi
         "trigram_contexts": tri_contexts,
         "bigram_edges_bytes": bg_bytes,
         "trigram_edges_bytes": tri_bytes,
-        "max_log_count": max_log_count,
+        "discount": discount,
     }
 
 
@@ -332,18 +357,27 @@ def build_language(
     top_k: int,
     vocabulary_limit: int,
     context_vocabulary_limit: int,
+    trigram_top_k: int = TRIGRAM_SUCCESSORS,
+    trigram_context_vocabulary_limit: int = TRIGRAM_CONTEXT_VOCABULARY,
+    trigram_context_limit: int = TRIGRAM_CONTEXT_LIMIT,
+    discount: float = DISCOUNT,
 ) -> dict[str, object]:
     dictionary_words = list(dict.fromkeys(normalize(word, language) for word in read_dictionary(dictionary_path)))
     large_vocabulary = read_wordfreq_vocabulary(wordfreq_path, language)
     allowed = set(dictionary_words[:vocabulary_limit]) & large_vocabulary
     context_allowed = set(dictionary_words[:context_vocabulary_limit]) & allowed
+    trigram_allowed = set(dictionary_words[:trigram_context_vocabulary_limit]) & context_allowed
     if not allowed:
         raise ValueError(f"No dictionary words survived {language} vocabulary filtering")
     with tempfile.TemporaryDirectory(prefix=f"iaido-{language}-") as temporary:
         db_path = Path(temporary) / "ngrams.sqlite3"
-        counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path, context_allowed)
+        counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path, context_allowed, trigram_allowed)
         counts["context_vocabulary"] = len(context_allowed)
-        result = build_binary(db_path, output, language, len(dictionary_words), minimum, top_k)
+        counts["trigram_context_vocabulary"] = len(trigram_allowed)
+        result = build_binary(
+            db_path, output, language, len(dictionary_words), minimum, top_k,
+            trigram_top_k, trigram_context_limit, discount,
+        )
     return {"language": language, "counts": counts, "asset": result}
 
 
@@ -359,15 +393,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-count", type=int, default=MIN_COUNT)
     parser.add_argument("--top-k", type=int, default=MAX_SUCCESSORS)
     parser.add_argument("--vocabulary-limit", type=int, default=MAX_VOCABULARY)
-    parser.add_argument("--context-vocabulary-limit", type=int, default=MAX_CONTEXT_VOCABULARY)
+    parser.add_argument("--context-vocabulary-limit", type=int, default=MAX_CONTEXT_VOCABULARY,
+                        help="bigram contexts: first N dictionary words")
+    parser.add_argument("--trigram-top-k", type=int, default=TRIGRAM_SUCCESSORS)
+    parser.add_argument("--trigram-context-vocabulary-limit", type=int, default=TRIGRAM_CONTEXT_VOCABULARY,
+                        help="both words of a trigram context must be among the first N dictionary words")
+    parser.add_argument("--trigram-context-limit", type=int, default=TRIGRAM_CONTEXT_LIMIT,
+                        help="keep only the N (first, second) contexts with the largest totals")
+    parser.add_argument("--discount", type=float, default=DISCOUNT, help="absolute discount D stored in the header")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     if (args.min_count < 1 or args.top_k < 1 or args.top_k > 65535 or
+            args.trigram_top_k < 1 or args.trigram_top_k > 65535 or
+            args.trigram_context_limit < 1 or args.trigram_context_vocabulary_limit < 1 or
             args.vocabulary_limit < 1 or args.context_vocabulary_limit < 1):
-        raise SystemExit("count and vocabulary limits must be positive; --top-k must be in 1..65535")
+        raise SystemExit("count and vocabulary limits must be positive; --top-k values must be in 1..65535")
+    if not 0.0 < args.discount < 1.0:
+        raise SystemExit("--discount must be in (0, 1)")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iaido-sources-") as temporary:
         temporary_path = Path(temporary)
@@ -404,9 +449,13 @@ def main() -> None:
                 args.top_k,
                 args.vocabulary_limit,
                 args.context_vocabulary_limit,
+                args.trigram_top_k,
+                args.trigram_context_vocabulary_limit,
+                args.trigram_context_limit,
+                args.discount,
             )
         manifest = {
-            "format": "NKG1",
+            "format": "NKG2",
             "generator": "tools/generate_ngrams.py",
             "wordfreq_version": WORD_FREQ_VERSION,
             "sequence_source": "Leipzig Corpora Collection 2020 1M news",
@@ -418,6 +467,10 @@ def main() -> None:
             "top_k": args.top_k,
             "vocabulary_limit": args.vocabulary_limit,
             "context_vocabulary_limit": args.context_vocabulary_limit,
+            "trigram_top_k": args.trigram_top_k,
+            "trigram_context_vocabulary_limit": args.trigram_context_vocabulary_limit,
+            "trigram_context_limit": args.trigram_context_limit,
+            "discount": args.discount,
             "sources": source_manifest,
             "results": results,
         }
