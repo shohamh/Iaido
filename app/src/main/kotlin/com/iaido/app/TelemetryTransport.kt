@@ -70,9 +70,9 @@ class TelemetryTransport(
         if (batch.events.any { it.installationId != installation.installationId }) {
             return UploadDisposition.DISCARD
         }
-        val body = runCatching { encodeBatch(batch).toByteArray(StandardCharsets.UTF_8) }
+        val body = runCatching { encodeTelemetryBatch(batch) }
             .getOrElse { return UploadDisposition.DISCARD }
-        if (body.size > MAX_REQUEST_BYTES) return UploadDisposition.DISCARD
+        if (body.size > TELEMETRY_MAX_REQUEST_BYTES) return UploadDisposition.DISCARD
 
         return try {
             val response = execute(
@@ -169,27 +169,6 @@ class TelemetryTransport(
         return output.toString(StandardCharsets.UTF_8)
     }
 
-    private fun encodeBatch(batch: TelemetryBatch): String = buildJsonObject {
-        put("batch_id", batch.batchId)
-        put("events", buildJsonArray {
-            batch.events.forEach { event -> add(event.toWireJson()) }
-        })
-    }.toString()
-
-    private fun TelemetryEnvelope.toWireJson(): JsonObject = buildJsonObject {
-        put("schema_version", schemaVersion)
-        put("event_id", eventId)
-        put("batch_id", batchId)
-        put("installation_id", installationId)
-        put("session_id", sessionId)
-        put("occurred_at_ms", occurredAtMs)
-        put("app_version", appVersion)
-        put("build_type", buildType)
-        put("android_api", androidApi)
-        put("event_type", eventType)
-        put("payload", payload)
-    }
-
     private fun parseInstallation(body: String?): TelemetryInstallation? = runCatching {
         val root = Json.parseToJsonElement(body ?: return null).jsonObject
         TelemetryInstallation(
@@ -216,9 +195,36 @@ class TelemetryTransport(
     private companion object {
         const val CONNECT_TIMEOUT_MS = 10_000
         const val READ_TIMEOUT_MS = 10_000
-        const val MAX_REQUEST_BYTES = 256 * 1024
         const val MAX_RESPONSE_BYTES = 64 * 1024
     }
+}
+
+/**
+ * Uncompressed request-body cap, matching the collector's IAIDO_MAX_REQUEST_BYTES default. The
+ * queue rolls batches by this same measure so every stored batch is one the transport will send.
+ */
+internal const val TELEMETRY_MAX_REQUEST_BYTES = 256 * 1024
+
+/** The exact request body [TelemetryTransport.upload] sends for [batch]. */
+internal fun encodeTelemetryBatch(batch: TelemetryBatch): ByteArray = buildJsonObject {
+    put("batch_id", batch.batchId)
+    put("events", buildJsonArray {
+        batch.events.forEach { event -> add(event.toWireJson()) }
+    })
+}.toString().toByteArray(StandardCharsets.UTF_8)
+
+private fun TelemetryEnvelope.toWireJson(): JsonObject = buildJsonObject {
+    put("schema_version", schemaVersion)
+    put("event_id", eventId)
+    put("batch_id", batchId)
+    put("installation_id", installationId)
+    put("session_id", sessionId)
+    put("occurred_at_ms", occurredAtMs)
+    put("app_version", appVersion)
+    put("build_type", buildType)
+    put("android_api", androidApi)
+    put("event_type", eventType)
+    put("payload", payload)
 }
 
 private fun TelemetryPlane.pathSegment(): String = name.lowercase(Locale.ROOT)

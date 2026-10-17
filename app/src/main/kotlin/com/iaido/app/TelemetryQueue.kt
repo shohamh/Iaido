@@ -21,13 +21,17 @@ import kotlinx.serialization.json.put
 
 data class QueueLimits(
     val maxBatchEvents: Int = 100,
+    /** Cap on a batch's compressed (on-disk) size. */
     val maxBatchBytes: Long = 256 * 1024,
     val maxAgeMs: Long = 7 * 24 * 60 * 60 * 1000L,
     val maxQueuedBytes: Long = 5 * 1024 * 1024,
+    /** Cap on a batch's uncompressed upload body, as the transport and collector measure it. */
+    val maxRequestBytes: Long = TELEMETRY_MAX_REQUEST_BYTES.toLong(),
 ) {
     init {
         require(maxBatchEvents > 0)
         require(maxBatchBytes > 0)
+        require(maxRequestBytes > 0)
         require(maxAgeMs >= 0)
         require(maxQueuedBytes >= 0)
     }
@@ -54,21 +58,13 @@ class TelemetryQueue(
                 require(storageDirectory.mkdirs() || storageDirectory.isDirectory)
 
                 val current = batchFiles().lastOrNull()?.let { readBatchOrNull(it.file) }
-                val currentEvents = current?.events.orEmpty()
-                val canAppend = current != null && currentEvents.size < limits.maxBatchEvents
-                val candidateEvents = if (canAppend) {
-                    currentEvents + event
+                val appended = current?.events.orEmpty() + event
+                if (current != null && appended.size <= limits.maxBatchEvents && fitsLimits(current.file, appended)) {
+                    writeBatch(current.file, appended)
                 } else {
-                    listOf(event)
-                }
-                if (candidateEvents.size <= limits.maxBatchEvents) {
-                    val compressed = compressBatch(candidateEvents)
-                    val appendToCurrent = canAppend && compressed.size <= limits.maxBatchBytes
-                    val eventsToWrite = if (appendToCurrent) candidateEvents else listOf(event)
-                    val bytesToWrite = if (appendToCurrent) compressed else compressBatch(eventsToWrite)
-                    if (bytesToWrite.size <= limits.maxBatchBytes) {
-                        writeBatch(if (appendToCurrent) current!!.file else newBatchFile(), eventsToWrite)
-                    }
+                    // A single event too large to ever be uploaded is dropped rather than queued.
+                    val file = newBatchFile()
+                    if (fitsLimits(file, listOf(event))) writeBatch(file, listOf(event))
                 }
             } finally {
                 enforceLimitsInternal()
@@ -124,6 +120,15 @@ class TelemetryQueue(
             batchFile.file.delete()
         }
     }
+
+    /**
+     * Whether [events] stored in [file] stay within both the on-disk (compressed) cap and the
+     * upload (uncompressed) cap. The latter is measured on the exact body the transport sends -
+     * batch id included - because the transport and the collector reject anything larger.
+     */
+    private fun fitsLimits(file: File, events: List<TelemetryEnvelope>): Boolean =
+        encodeTelemetryBatch(TelemetryBatch(file.nameWithoutExtension, events)).size <= limits.maxRequestBytes &&
+            compressBatch(events).size <= limits.maxBatchBytes
 
     private fun validateForPlane(event: TelemetryEnvelope) {
         if (plane != TelemetryPlane.DIAGNOSTICS) return

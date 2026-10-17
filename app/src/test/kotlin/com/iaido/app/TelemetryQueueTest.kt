@@ -1,8 +1,15 @@
 package com.iaido.app
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -40,6 +47,29 @@ class TelemetryQueueTest {
 
             assertEquals(2, queue.pendingBatches().size)
             assertTrue(batchFiles(root, TelemetryPlane.RESEARCH).all { it.length() <= 250L })
+        }
+    }
+
+    @Test
+    fun `every queued batch fits the uncompressed request limit the transport and server enforce`() {
+        withQueue(plane = TelemetryPlane.RESEARCH) { queue, _ ->
+            // Swipe traces compress very well, so 60 of them stay far below the 256 KiB gzip cap
+            // while their uncompressed JSON body is well over the 256 KiB request limit.
+            (0 until 60).forEach { index -> queue.append(swipeTraceEnvelope(1_000L + index)) }
+
+            val batches = queue.pendingBatches()
+            assertEquals(60, batches.sumOf { it.events.size })
+            val transport = TelemetryTransport(
+                URL("https://collector.invalid"),
+                TelemetryInstallationStore(
+                    FakeInstallationCredentialStorage(
+                        TelemetryInstallation("00000000-0000-0000-0000-000000000001", "write", "delete"),
+                    ),
+                ),
+            ) { url -> EchoAcknowledgementConnection(url) }
+            batches.forEach { batch ->
+                assertEquals(UploadDisposition.ACKNOWLEDGED, transport.upload(TelemetryPlane.RESEARCH, batch))
+            }
         }
     }
 
@@ -180,7 +210,52 @@ class TelemetryQueueTest {
             payload = buildJsonObject { put("text", JsonPrimitive(BoundedResearchText(text).value)) },
         )
 
+    private fun swipeTraceEnvelope(occurredAtMs: Long): TelemetryEnvelope =
+        diagnosticEnvelope(occurredAtMs).copy(
+            eventType = "gesture_trace",
+            payload = buildJsonObject {
+                put("trace_id", JsonPrimitive("trace-$occurredAtMs"))
+                put("layout_id", JsonPrimitive("qwerty"))
+                put(
+                    "points",
+                    buildJsonArray {
+                        (0 until 120).forEach { index ->
+                            add(
+                                buildJsonObject {
+                                    put("pointer_id", 0)
+                                    put("action", 2)
+                                    put("t_ms", index * 8L)
+                                    put("x", 0.25 + index / 1000.0)
+                                    put("y", 0.5)
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+        )
+
     private fun batchFiles(root: File, plane: TelemetryPlane): List<File> =
         File(root, plane.name.lowercase()).listFiles { file -> file.extension == "batch" }
             ?.sortedBy { it.name } ?: emptyList()
+}
+
+/** A collector that accepts every batch, echoing back the batch id the transport sent. */
+private class EchoAcknowledgementConnection(url: URL) : HttpURLConnection(url) {
+    private val body = ByteArrayOutputStream()
+
+    override fun getOutputStream(): ByteArrayOutputStream = body
+
+    override fun getResponseCode(): Int = 202
+
+    override fun getInputStream(): InputStream = ByteArrayInputStream(
+        """{"batch_id":"${getRequestProperty("X-Iaido-Batch-Id")}","accepted":true}"""
+            .toByteArray(StandardCharsets.UTF_8),
+    )
+
+    override fun disconnect() = Unit
+
+    override fun usingProxy(): Boolean = false
+
+    override fun connect() = Unit
 }
