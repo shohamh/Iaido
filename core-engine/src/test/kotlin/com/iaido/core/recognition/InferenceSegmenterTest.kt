@@ -325,6 +325,27 @@ class InferenceSegmenterTest {
         assertEquals(listOf("what"), options.first().words)
     }
 
+    @Test
+    fun `a split of one swipe does not borrow context for the next word from its own fragment`() {
+        // "day of" is a frequent bigram while "today of" is absent from the n-gram asset. A later
+        // swipe must not be able to turn the single swipe "today" into "to day" just because the
+        // fragment "day" happens to precede "of".
+        val entries = realDictionaryEntries()
+        val store = CompactNgramScoreStore.fromBytes(
+            realNgramBytes(),
+            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
+        )
+        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(windowSize = 3, scoreStore = store))
+
+        val options = segmenter.rank(
+            units = listOf(unit("today-unit", "today"), unit("of-unit", "of")),
+            previousWords = emptyList(),
+            dictionary = entries,
+        )
+
+        assertEquals(listOf("today", "of"), options.first().words)
+    }
+
     /**
      * Loads the actual shipped app/src/main/assets/dictionary/en.csv, in its stable CSV row
      * order, exactly as EnglishDictionaryRepository does in production. Real dictionary rows
