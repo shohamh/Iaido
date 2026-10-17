@@ -171,4 +171,16 @@ class TelemetrySettingsSectionTest {
         assertEquals(telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS), telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS))
         assertTrue(telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS) != telemetryPolicyDigest(TelemetryPlane.RESEARCH))
     }
+
+    @Test
+    fun `blankBaseUrlShowsUnavailableAndDisablesToggles`() {
+        assertFalse(isTelemetryConfigured(""))
+        assertFalse(isTelemetryConfigured("   "))
+        assertTrue(TELEMETRY_UNAVAILABLE_MESSAGE.contains("unavailable in this build"))
+    }
+
+    @Test
+    fun `configuredBaseUrlShowsToggles`() {
+        assertTrue(isTelemetryConfigured("https://host.tailnet.ts.net"))
+    }
 }

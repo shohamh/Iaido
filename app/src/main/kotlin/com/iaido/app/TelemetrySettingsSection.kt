@@ -61,6 +61,13 @@ internal fun telemetryPolicyDigest(plane: TelemetryPlane): String =
         .digest(telemetryDisclosure(plane).toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
 
+/** True when a collector base URL was baked into this build; blank means telemetry cannot work. */
+internal fun isTelemetryConfigured(baseUrl: String): Boolean = baseUrl.isNotBlank()
+
+internal const val TELEMETRY_UNAVAILABLE_MESSAGE =
+    "Telemetry is unavailable in this build: no collector address was configured, so nothing " +
+        "can be shared."
+
 internal fun TelemetryPlane.settingsLabel(): String = when (this) {
     TelemetryPlane.DIAGNOSTICS -> "Diagnostics"
     TelemetryPlane.RESEARCH -> "Research"
@@ -289,15 +296,20 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         scope.launch { withContext(Dispatchers.IO) { setResearchWifiOnly(context, wifiOnly) } }
     }
 
+    val telemetryConfigured = isTelemetryConfigured(BuildConfig.IAIDO_TELEMETRY_BASE_URL)
+
     HorizontalDivider()
     Text("Privacy & diagnostics", style = MaterialTheme.typography.titleMedium)
     Text("Both kinds of telemetry are off by default. You can turn either one off, or delete its data, at any time.")
+    if (!telemetryConfigured) {
+        Text(TELEMETRY_UNAVAILABLE_MESSAGE, color = MaterialTheme.colorScheme.error)
+    }
 
     TelemetryPlaneToggle(
         title = "Share anonymous diagnostics",
         disclosure = telemetryDisclosure(TelemetryPlane.DIAGNOSTICS),
         enabled = diagnosticsRecord.enabled,
-        busy = diagnosticsBusy,
+        busy = diagnosticsBusy || !telemetryConfigured,
         statusText = diagnosticsStatus,
         onCheckedChange = { enabled -> applyChange(TelemetryPlane.DIAGNOSTICS, enabled) },
         onDeletePending = { deletePending(TelemetryPlane.DIAGNOSTICS) },
@@ -308,7 +320,7 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         title = "Contribute typing research data",
         disclosure = telemetryDisclosure(TelemetryPlane.RESEARCH),
         enabled = researchRecord.enabled,
-        busy = researchBusy,
+        busy = researchBusy || !telemetryConfigured,
         statusText = researchStatus,
         onCheckedChange = { enabled ->
             if (enabled) showResearchConfirmation = true else applyChange(TelemetryPlane.RESEARCH, false)
@@ -325,7 +337,7 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text("Upload research data on Wi-Fi only", style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = researchWifiOnlyEnabled, onCheckedChange = ::setWifiOnly)
+        Switch(checked = researchWifiOnlyEnabled, onCheckedChange = ::setWifiOnly, enabled = telemetryConfigured)
     }
 
     if (showResearchConfirmation) {

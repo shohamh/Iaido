@@ -117,6 +117,22 @@ Two details make this work and are easy to get wrong:
   with an authenticated operator route such as `GET /v1/operator/diagnostics/batches`, or by
   provisioning an installation.
 
+### Pointing the app at the collector (owner, one-time)
+
+The app only uploads when a collector URL is baked into the build; a build without one shows
+telemetry as "unavailable in this build" in Settings.
+
+1. Run `tailscale serve --bg 8000` (above) and note the `https://<your-host>.<tailnet>.ts.net` URL.
+2. For CI/release builds: set the GitHub repository **variable** `IAIDO_TELEMETRY_BASE_URL` to that
+   URL (Settings > Secrets and variables > Actions > Variables). The workflows pass it as
+   `-PiaidoTelemetryBaseUrl`; if unset, the build has telemetry unavailable.
+3. For local builds: add `iaidoTelemetryBaseUrl=https://<your-host>.<tailnet>.ts.net` to
+   `~/.gradle/gradle.properties` (not the repo's `gradle.properties`, which only carries a commented
+   example).
+4. Android emulators may not resolve the tailnet name; see B9 in
+   `docs/superpowers/diagnosis/2026-10-17-swipe-telemetry.md` for the hosts-file workaround. Real
+   phones just need the Tailscale app running.
+
 ## Migrations
 
 There is no separate migration tool yet: `create_app()` calls

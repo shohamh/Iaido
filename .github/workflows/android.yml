@@ -16,7 +16,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - run: ./gradlew :core-engine:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon
+      - run: ./gradlew :core-engine:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease -PiaidoTelemetryBaseUrl="${{ vars.IAIDO_TELEMETRY_BASE_URL }}" --no-daemon
 
   # The emulator job is the flaky one. Notes from the failures it has had:
   #  - a cold AVD boot took 887 s (14.8 min) on a hosted runner, because the system image and the
