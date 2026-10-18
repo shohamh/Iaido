@@ -17,3 +17,8 @@ secrets/
 
 # Local output of the opt-in accuracy benchmarks
 acc_*.log
+
+# Local environment files (may hold secrets)
+.env
+.env.*
+!.env.example
