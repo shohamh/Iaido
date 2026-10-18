@@ -29,6 +29,140 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
+    fun `manual mode revises an earlier swipe when later context favors its alternate`() {
+        val editor = FakeEditor()
+        val segmenter = InferenceSegmenter(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("into" to "the") to 4.0)),
+            confidenceMargin = 0.0,
+        )
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.MANUAL,
+            dictionary = listOf(WordEntry("in", 100.0), WordEntry("into", 1.0), WordEntry("the", 100.0)),
+            segmenter = segmenter,
+            recognize = { path, _ ->
+                when (path.points.firstOrNull()?.x?.toInt()) {
+                    41 -> listOf(
+                        ScoredCandidate(WordEntry("in", 100.0), 2.0),
+                        ScoredCandidate(WordEntry("into", 1.0), 1.9),
+                    )
+                    42 -> listOf(ScoredCandidate(WordEntry("the", 100.0), 2.0))
+                    else -> emptyList()
+                }
+            },
+        )
+
+        coordinator.onSingleSwipe(path(41), layout)
+        assertEquals("in", editor.text)
+
+        coordinator.onSingleSwipe(path(42), layout)
+
+        assertEquals("intothe", editor.text)
+        assertEquals(
+            listOf(HostTextSpan(0, 0) to "in", HostTextSpan(0, 2) to "intothe"),
+            editor.replacements,
+        )
+    }
+
+    @Test
+    fun `manual sequence preserves one dictionary word per gesture`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.MANUAL,
+            dictionary = dictionary("some", "thing", "something"),
+            onFinalized = finalized::add,
+        )
+
+        coordinator.onSingleSwipe(path(6), layout)
+        coordinator.onSingleSwipe(path(7), layout)
+        coordinator.onNonSwipeInput()
+
+        assertEquals("something", editor.text)
+        assertEquals(listOf(listOf("some", "thing")), finalized)
+    }
+
+    @Test
+    fun `manual sequence does not split one gesture into dictionary fragments`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.MANUAL,
+            dictionary = dictionary("inthe", "in", "the"),
+            onFinalized = finalized::add,
+        )
+
+        coordinator.onSingleSwipe(path(5), layout)
+        coordinator.onNonSwipeInput()
+
+        assertEquals("inthe", editor.text)
+        assertEquals(listOf(listOf("inthe")), finalized)
+    }
+
+    @Test
+    fun `after swipe mode revises earlier words and retains one trailing space`() {
+        val editor = FakeEditor()
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.AFTER_SWIPE,
+            dictionary = listOf(WordEntry("in", 100.0), WordEntry("into", 1.0), WordEntry("the", 100.0)),
+            segmenter = InferenceSegmenter(
+                contextScorer = NgramContextScorer(bigrams = mapOf(("into" to "the") to 4.0)),
+                confidenceMargin = 0.0,
+            ),
+            recognize = { path, _ ->
+                when (path.points.firstOrNull()?.x?.toInt()) {
+                    41 -> listOf(
+                        ScoredCandidate(WordEntry("in", 100.0), 2.0),
+                        ScoredCandidate(WordEntry("into", 1.0), 1.9),
+                    )
+                    42 -> listOf(ScoredCandidate(WordEntry("the", 100.0), 2.0))
+                    else -> emptyList()
+                }
+            },
+        )
+
+        coordinator.onSingleSwipe(path(41), layout)
+        coordinator.onSingleSwipe(path(42), layout)
+
+        assertEquals("into the ", editor.text)
+        assertEquals(
+            listOf(HostTextSpan(0, 0) to "in ", HostTextSpan(0, 3) to "into the "),
+            editor.replacements,
+        )
+    }
+
+    @Test
+    fun `normal sequence finalizes only the oldest gesture when the six unit window slides`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val words = listOf("a", "b", "c", "d", "e", "f", "g")
+        val coordinator = coordinator(
+            editor = editor,
+            mode = SpacingMode.MANUAL,
+            dictionary = dictionary(*words.toTypedArray()),
+            onFinalized = finalized::add,
+            recognize = { path, _ ->
+                val index = path.points.firstOrNull()?.x?.toInt()?.minus(50) ?: -1
+                words.getOrNull(index)?.let { listOf(candidate(it)) } ?: emptyList()
+            },
+        )
+
+        (50..55).forEach { coordinator.onSingleSwipe(path(it), layout) }
+        assertEquals(emptyList<List<String>>(), finalized)
+
+        coordinator.onSingleSwipe(path(56), layout)
+        assertEquals(listOf(listOf("a")), finalized)
+
+        coordinator.onNonSwipeInput()
+
+        assertEquals(listOf(listOf("a"), words.drop(1)), finalized)
+        assertEquals("abcdefg", editor.text)
+    }
+
+    @Test
     fun `space after swipe adds one trailing space for each complete gesture unit`() {
         val editor = FakeEditor()
         val coordinator = coordinator(editor, SpacingMode.AFTER_SWIPE, dictionary("in", "there"))
@@ -325,18 +459,45 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
-    fun `non swipe cursor and external edits finalize and invalidate inference`() {
+    fun `non swipe input finalizes and clears inference`() {
         val editor = FakeEditor()
         val finalized = mutableListOf<List<String>>()
         val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in"), finalized::add)
 
         coordinator.onSingleSwipe(path(1), layout)
         coordinator.onNonSwipeInput()
-        coordinator.onCursorMoved()
-        coordinator.onExternalEdit()
 
         assertEquals(listOf(listOf("in")), finalized)
         assertEquals("in", editor.text)
+    }
+
+    @Test
+    fun `cursor movement finalizes the active sequence once`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.MANUAL, dictionary("in"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        coordinator.onCursorMoved()
+        coordinator.onCursorMoved()
+
+        assertEquals(listOf(listOf("in")), finalized)
+        assertTrue(coordinator.replacementOptions().isEmpty())
+    }
+
+    @Test
+    fun `external editor change abandons an active run without finalizing stale words`() {
+        val editor = FakeEditor()
+        val finalized = mutableListOf<List<String>>()
+        val coordinator = coordinator(editor, SpacingMode.MANUAL, dictionary("in"), finalized::add)
+
+        coordinator.onSingleSwipe(path(1), layout)
+        editor.text = "changed externally"
+        coordinator.onExternalEdit()
+
+        assertEquals("changed externally", editor.text)
+        assertEquals(emptyList<List<String>>(), finalized)
+        assertTrue(coordinator.replacementOptions().isEmpty())
     }
 
     @Test
@@ -352,7 +513,7 @@ class SwipeTypingCoordinatorTest {
     }
 
     @Test
-    fun `failed inferred host replacement finalizes then clears the active run`() {
+    fun `failed inferred host replacement abandons the active run`() {
         val editor = FakeEditor()
         val finalized = mutableListOf<List<String>>()
         val coordinator = coordinator(editor, SpacingMode.INFER_SPACES, dictionary("in", "the"), finalized::add)
@@ -362,7 +523,7 @@ class SwipeTypingCoordinatorTest {
         coordinator.onSingleSwipe(path(2), layout)
 
         assertEquals("in", editor.text)
-        assertEquals(listOf(listOf("in")), finalized)
+        assertEquals(emptyList<List<String>>(), finalized)
     }
 
     @Test
@@ -518,6 +679,7 @@ class SwipeTypingCoordinatorTest {
         previousWords = { emptyList() },
         cursorPosition = editor::cursor,
         replaceHostSpan = editor::replace,
+        replaceOwnedHostSpan = editor::replaceOwned,
         onFinalizedWords = { _, words, _ -> onFinalized(words) },
         textBeforeCursor = textBeforeCursor,
         hasFollowingWhitespace = hasFollowingWhitespace,
@@ -570,6 +732,11 @@ class SwipeTypingCoordinatorTest {
             text = text.replaceRange(span.start, span.end, replacement)
             cursorPosition = span.start + replacement.length
             return true
+        }
+
+        fun replaceOwned(span: HostTextSpan, expectedText: String, replacement: String): Boolean {
+            if (span.end > text.length || text.substring(span.start, span.end) != expectedText) return false
+            return replace(span, replacement)
         }
     }
 }

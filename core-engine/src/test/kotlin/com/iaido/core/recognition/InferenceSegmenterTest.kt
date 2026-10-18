@@ -200,6 +200,77 @@ class InferenceSegmenterTest {
     }
 
     @Test
+    fun `trigram ranking retains prefixes outside the global top sixteen`() {
+        val firstWords = listOf("aa", "ab", "ac", "ad", "ae", "af", "ag", "ah")
+        val secondWords = listOf("ba", "bb", "bc", "bd", "be", "bf", "bg", "bh")
+        val expected = listOf("ah", "bh", "ca")
+        val options = InferenceSegmenter(
+            contextScorer = NgramContextScorer(
+                trigrams = mapOf(Triple("ah", "bh", "ca") to 20.0),
+            ),
+            confidenceMargin = 0.0,
+            maxWordsPerGroup = 1,
+        ).rank(
+            units = listOf(
+                unit("first", *firstWords.toTypedArray()),
+                unit("second", *secondWords.toTypedArray()),
+                unit("third", "ca"),
+            ),
+            previousWords = emptyList(),
+            dictionary = dictionary(*(firstWords + secondWords + "ca").toTypedArray()),
+            policy = InferenceDecodingPolicy.ONE_WORD_PER_GESTURE,
+        )
+
+        assertEquals(expected, options.first().words)
+    }
+
+    @Test
+    fun `one word policy keeps each gesture whole and never joins adjacent gestures`() {
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(unit("some", "some"), unit("thing", "thing")),
+            previousWords = emptyList(),
+            dictionary = dictionary("some", "thing", "something"),
+            policy = InferenceDecodingPolicy.ONE_WORD_PER_GESTURE,
+        )
+
+        assertEquals(listOf("some", "thing"), options.first().words)
+        assertTrue(options.none { it.words == listOf("something") })
+    }
+
+    @Test
+    fun `one word policy never splits a gesture into dictionary fragments`() {
+        val options = InferenceSegmenter().rank(
+            units = listOf(unit("joined", "inthe")),
+            previousWords = emptyList(),
+            dictionary = dictionary("inthe", "in", "the"),
+            policy = InferenceDecodingPolicy.ONE_WORD_PER_GESTURE,
+        )
+
+        assertEquals(listOf("inthe"), options.first().words)
+        assertTrue(options.none { it.words == listOf("in", "the") })
+    }
+
+    @Test
+    fun `one word policy keeps whole-word candidates ahead of pruned split options`() {
+        val wholeWords = ('c'..'j').map { suffix -> "ab$suffix" }
+        val fragments = listOf("a", "ab") + ('c'..'j').flatMap { suffix ->
+            listOf("b$suffix", suffix.toString())
+        }
+        val dictionary = fragments
+            .map { WordEntry(it, 0.03) } + wholeWords.map { WordEntry(it, 1e-8) }
+
+        val options = InferenceSegmenter(confidenceMargin = 0.0).rank(
+            units = listOf(scoredUnit("whole", *wholeWords.map { it to 10.0 }.toTypedArray())),
+            previousWords = emptyList(),
+            dictionary = dictionary,
+            policy = InferenceDecodingPolicy.ONE_WORD_PER_GESTURE,
+        )
+
+        assertEquals(wholeWords.first(), options.first().words.single())
+        assertTrue(options.any { it.words.single() in wholeWords })
+    }
+
+    @Test
     fun `low context gain leaves the current interpretation first`() {
         val options = InferenceSegmenter(
             contextScorer = NgramContextScorer(bigrams = mapOf(("good" to "to") to 0.5)),
@@ -292,11 +363,8 @@ class InferenceSegmenterTest {
     @Test
     fun `a confident whole-word swipe does not fragment against the real shipped dictionary and ngram data`() {
         val entries = realDictionaryEntries()
-        val store = CompactNgramScoreStore.fromBytes(
-            realNgramBytes(),
-            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
-        )
-        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(scoreStore = store))
+        val store = realStore(entries)
+        val segmenter = InferenceSegmenter(contextScorer = appContextScorer(store))
 
         val options = segmenter.rank(
             units = listOf(unit("swipe-1", "hello")),
@@ -310,11 +378,8 @@ class InferenceSegmenterTest {
     @Test
     fun `sequential gestures join into a common word over a rare-word split against real dictionary data`() {
         val entries = realDictionaryEntries()
-        val store = CompactNgramScoreStore.fromBytes(
-            realNgramBytes(),
-            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
-        )
-        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(scoreStore = store))
+        val store = realStore(entries)
+        val segmenter = InferenceSegmenter(contextScorer = appContextScorer(store))
 
         val options = segmenter.rank(
             units = listOf(unit("wh-unit", "wh"), unit("at-unit", "at")),
@@ -331,11 +396,8 @@ class InferenceSegmenterTest {
         // swipe must not be able to turn the single swipe "today" into "to day" just because the
         // fragment "day" happens to precede "of".
         val entries = realDictionaryEntries()
-        val store = CompactNgramScoreStore.fromBytes(
-            realNgramBytes(),
-            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
-        )
-        val segmenter = InferenceSegmenter(contextScorer = NgramContextScorer(windowSize = 3, scoreStore = store))
+        val store = realStore(entries)
+        val segmenter = InferenceSegmenter(contextScorer = appContextScorer(store))
 
         val options = segmenter.rank(
             units = listOf(unit("today-unit", "today"), unit("of-unit", "of")),
@@ -344,6 +406,33 @@ class InferenceSegmenterTest {
         )
 
         assertEquals(listOf("today", "of"), options.first().words)
+    }
+
+    /** The scorer IaidoInputMethodService builds the segmenter with: window of 3 and the tuned segmenter weights. */
+    private fun appContextScorer(store: CompactNgramScoreStore) = NgramContextScorer(
+        windowSize = 3,
+        bigramWeight = ScoringConstants.SEGMENTER_BIGRAM_WEIGHT,
+        trigramWeight = ScoringConstants.SEGMENTER_TRIGRAM_WEIGHT,
+        scoreStore = store,
+    )
+
+    @Test
+    fun `common phrases keep their word boundaries against the real shipped dictionary and ngram data`() {
+        val entries = realDictionaryEntries()
+        val segmenter = InferenceSegmenter(contextScorer = appContextScorer(realStore(entries)))
+
+        fun words(previous: List<String>, vararg swipes: String) = segmenter.rank(
+            units = swipes.mapIndexed { index, word -> unit("swipe-$index", word) },
+            previousWords = previous,
+            dictionary = entries,
+        ).first().words
+
+        assertEquals(listOf("today"), words(listOf("see", "you"), "today"))
+        assertEquals(listOf("today", "of", "all", "days"), words(emptyList(), "today", "of", "all", "days"))
+        assertEquals(listOf("into", "the"), words(emptyList(), "into", "the"))
+        assertEquals(listOf("in", "the"), words(emptyList(), "in", "the"))
+        assertEquals(listOf("of", "course"), words(emptyList(), "of", "course"))
+        assertEquals(listOf("today"), words(listOf("see", "you"), "to", "day"))
     }
 
     /**
@@ -364,6 +453,15 @@ class InferenceSegmenterTest {
                 if (word.isEmpty() || frequency == null || frequency <= 0.0) null
                 else WordEntry(word, frequency)
             }
+
+    /** The shipped NKG2 asset with the dictionary's unigram prior, wired exactly like AssetNgramScoreStoreRepository. */
+    private fun realStore(entries: List<WordEntry>): CompactNgramScoreStore {
+        val frequencies = entries.associate { it.word to it.frequency }
+        return CompactNgramScoreStore.fromBytes(
+            realNgramBytes(),
+            entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
+        ) { frequencies[it] ?: 0.0 }
+    }
 
     /** Loads the actual shipped app/src/main/assets/context-ngrams/en.ngram.bin bytes. */
     private fun realNgramBytes(): ByteArray =

@@ -86,6 +86,28 @@ class SwipeInferenceTransactionTest {
     }
 
     @Test
+    fun `stale owned text rejects a rerank without changing transaction state`() {
+        val editor = FakeEditor()
+        val transaction = SwipeInferenceTransaction(
+            cursorPosition = editor::cursor,
+            replaceHostSpan = editor::replace,
+        )
+        transaction.append(unit("first", "in"))
+        assertTrue(transaction.replaceCurrent(listOf("in"), listOf(option(listOf("in")))))
+        val previousSpan = transaction.sourceSpan
+        val previousWords = transaction.currentWords
+        val previousAlternatives = transaction.alternatives
+
+        editor.text = "on"
+        assertFalse(transaction.replaceCurrent(listOf("into"), listOf(option(listOf("into")))))
+
+        assertEquals("on", editor.text)
+        assertEquals(previousSpan, transaction.sourceSpan)
+        assertEquals(previousWords, transaction.currentWords)
+        assertEquals(previousAlternatives, transaction.alternatives)
+    }
+
+    @Test
     fun `finalization retains only same-shaped ranked candidates for each inferred word`() {
         val editor = FakeEditor()
         val alternatives = listOf(
@@ -156,6 +178,11 @@ class SwipeInferenceTransactionTest {
             text = text.replaceRange(span.start, span.end, replacement)
             cursorPosition = span.start + replacement.length
             return true
+        }
+
+        fun replace(span: HostTextSpan, expectedText: String, replacement: String): Boolean {
+            if (span.end > text.length || text.substring(span.start, span.end) != expectedText) return false
+            return replace(span, replacement)
         }
     }
 }

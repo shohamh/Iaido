@@ -5,6 +5,7 @@ import com.iaido.core.dictionary.WordEntry
 import com.iaido.core.gesture.GesturePath
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureUnit
+import com.iaido.core.recognition.InferenceDecodingPolicy
 import com.iaido.core.recognition.InferenceSegmenter
 import com.iaido.core.recognition.ReplacementOption
 import com.iaido.core.recognition.ScoredCandidate
@@ -26,11 +27,10 @@ class SwipeTypingCoordinator(
     private val previousWords: () -> List<String>,
     cursorPosition: () -> Int,
     replaceHostSpan: (HostTextSpan, String) -> Boolean,
-    private val commitCompletedText: (String) -> Unit = { text ->
-        val cursor = cursorPosition()
-        replaceHostSpan(HostTextSpan(cursor, cursor), text)
+    replaceOwnedHostSpan: (HostTextSpan, String, String) -> Boolean = { span, _, replacement ->
+        replaceHostSpan(span, replacement)
     },
-    onFinalizedWords: (HostTextSpan, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
+    onFinalizedWords: (List<HostTextSpan>, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
     private val textBeforeCursor: () -> String = { "" },
     private val hasFollowingWhitespace: () -> Boolean = { false },
     private val pollSplitParts: (Long) -> SplitWordParts? = { null },
@@ -38,14 +38,18 @@ class SwipeTypingCoordinator(
     private val segmenter: InferenceSegmenter = InferenceSegmenter(),
     private val onReplacementOptionsChanged: (List<ReplacementOption>) -> Unit = {},
     private val onInferenceTransactionFinished: () -> Unit = {},
+    private val onSwipeAccepted: () -> Unit = {},
 ) {
     private val transaction = SwipeInferenceTransaction(
         cursorPosition = cursorPosition,
-        replaceHostSpan = replaceHostSpan,
+        replaceHostSpan = replaceOwnedHostSpan,
         onFinalized = onFinalizedWords,
     )
     private var nextUnitId = 0L
     private var replacementSelection: ReplacementSelection? = null
+    private var activeSpacingMode: SpacingMode? = null
+    private var activeWordSeparator = " "
+    private var activeTrailingSeparator = ""
 
     /**
      * Whether the transaction currently in progress still owes a
@@ -115,7 +119,7 @@ class SwipeTypingCoordinator(
 
     fun onCursorMoved() = finalizeAndClear()
 
-    fun onExternalEdit() = finalizeAndClear()
+    fun onExternalEdit() = abandonAndClear()
 
     fun onRecognitionFailed() = finalizeAndClear()
 
@@ -144,8 +148,16 @@ class SwipeTypingCoordinator(
         val selection = replacementSelection ?: activeReplacementSelection() ?: return false
         val selected = replacementOption(selection, option) ?: return false
         if (transaction.currentWords != selected.words &&
-            !transaction.replaceCurrent(selected.words, selection.alternatives)
-        ) return false
+            !transaction.replaceCurrent(
+                words = selected.words,
+                alternatives = selection.alternatives,
+                separator = activeWordSeparator,
+                trailing = activeTrailingSeparator,
+            )
+        ) {
+            abandonAndClear()
+            return false
+        }
         finalizeAndClear()
         return true
     }
@@ -163,9 +175,11 @@ class SwipeTypingCoordinator(
         ?: if (isSplitPending()) SplitPollOutcome.Pending else SplitPollOutcome.Cancelled
 
     private fun accept(unit: GestureUnit) {
-        when (spacingMode()) {
-            SpacingMode.MANUAL -> commitCompletedText(unit.topWord())
-            SpacingMode.AFTER_SWIPE -> commitCompletedText(unit.topWord() + if (hasFollowingWhitespace()) "" else " ")
+        val mode = spacingMode()
+        if (transaction.sourceSpan != null && activeSpacingMode != mode) finalizeAndClear()
+        onSwipeAccepted()
+        when (mode) {
+            SpacingMode.MANUAL, SpacingMode.AFTER_SWIPE -> acceptWholeWord(unit, mode)
             SpacingMode.INFER_SPACES -> acceptInference(unit)
         }
     }
@@ -176,6 +190,9 @@ class SwipeTypingCoordinator(
             return
         }
         if (transaction.sourceSpan == null) {
+            activeSpacingMode = SpacingMode.INFER_SPACES
+            activeWordSeparator = " "
+            activeTrailingSeparator = ""
             capitalizeFirstWord = SentenceCapitalization.needsCapitalization(textBeforeCursor())
         }
         check(transaction.append(unit))
@@ -185,8 +202,87 @@ class SwipeTypingCoordinator(
         )
         val words = applyPendingCapitalization(alternatives.firstOrNull()?.words ?: unit.topWords())
         replacementSelection = null
-        if (!transaction.replaceCurrent(words, alternatives)) finalizeAndClear()
+        if (!transaction.replaceCurrent(words, alternatives, separator = " ")) abandonAndClear()
         else notifyReplacementOptionsChanged()
+    }
+
+    private fun acceptWholeWord(unit: GestureUnit, mode: SpacingMode) {
+        if (transaction.units.size == SwipeInferenceTransaction.MAX_GESTURE_UNITS) {
+            slideWholeWordWindow(unit)
+            return
+        }
+        if (transaction.sourceSpan == null) {
+            activeSpacingMode = mode
+            activeWordSeparator = if (mode == SpacingMode.MANUAL) "" else " "
+            activeTrailingSeparator = if (mode == SpacingMode.AFTER_SWIPE && !hasFollowingWhitespace()) " " else ""
+            capitalizeFirstWord = SentenceCapitalization.needsCapitalization(textBeforeCursor())
+        }
+        check(transaction.append(unit))
+        val alternatives = rankWholeWordUnits(transaction.units, previousWords())
+        val words = applyPendingCapitalization(alternatives.first().words)
+        val displayedAlternatives = alternatives.map { option ->
+            option.copy(words = applyPendingCapitalization(option.words))
+        }
+        replacementSelection = null
+        if (!transaction.replaceCurrent(
+                words = words,
+                alternatives = displayedAlternatives,
+                separator = activeWordSeparator,
+                trailing = activeTrailingSeparator,
+            )
+        ) {
+            abandonAndClear()
+        } else {
+            notifyReplacementOptionsChanged()
+        }
+    }
+
+    private fun slideWholeWordWindow(nextUnit: GestureUnit) {
+        val oldestUnit = transaction.units.first()
+        val finalizedWords = transaction.currentWords.take(1).ifEmpty { listOf(oldestUnit.topWord()) }
+        val finalizedAlternatives = transaction.alternatives.mapNotNull { option ->
+            option.words.firstOrNull()?.let { word ->
+                option.copy(words = listOf(word), sourceGestureIds = listOf(oldestUnit.id))
+            }
+        }.distinctBy { it.words }.ifEmpty {
+            listOf(SegmentationOption(finalizedWords, 0.0, listOf(oldestUnit.id)))
+        }
+        val retainedUnits = transaction.units.drop(1) + nextUnit
+        val retainedAlternatives = rankWholeWordUnits(retainedUnits, previousWords() + finalizedWords)
+        val retainedWords = retainedAlternatives.first().words
+        capitalizeFirstWord = false
+        replacementSelection = null
+        if (!transaction.slideWindow(
+                finalizedWords = finalizedWords,
+                finalizedAlternatives = finalizedAlternatives,
+                retainedUnits = retainedUnits,
+                retainedWords = retainedWords,
+                retainedAlternatives = retainedAlternatives,
+                separator = activeWordSeparator,
+                trailing = activeTrailingSeparator,
+            )
+        ) {
+            abandonAndClear()
+        } else {
+            notifyReplacementOptionsChanged()
+        }
+    }
+
+    private fun rankWholeWordUnits(units: List<GestureUnit>, context: List<String>): List<SegmentationOption> {
+        val ranked = segmenter.rank(
+            units = units,
+            previousWords = context,
+            dictionary = dictionary(),
+            policy = InferenceDecodingPolicy.ONE_WORD_PER_GESTURE,
+        )
+        if (ranked.isNotEmpty()) return ranked
+        return listOf(
+            SegmentationOption(
+                words = units.map { it.topWord() },
+                score = units.sumOf { unit -> unit.candidates.sumOf { path -> path.firstOrNull()?.score ?: 0.0 } },
+                sourceGestureIds = units.map(GestureUnit::id),
+            ),
+        )
     }
 
     private fun slideInferenceWindow(nextUnit: GestureUnit) {
@@ -208,17 +304,30 @@ class SwipeTypingCoordinator(
                 retainedUnits,
                 retainedWords,
                 alternatives,
+                separator = " ",
+                trailing = "",
             )
         ) {
-            finalizeAndClear()
+            abandonAndClear()
         } else notifyReplacementOptionsChanged()
     }
 
     private fun finalizeAndClear() {
+        clearTransaction(finalize = true)
+    }
+
+    private fun abandonAndClear() {
+        clearTransaction(finalize = false)
+    }
+
+    private fun clearTransaction(finalize: Boolean) {
         val hadActiveTransaction = transaction.sourceSpan != null || transaction.units.isNotEmpty()
         replacementSelection = null
         capitalizeFirstWord = false
-        transaction.finalize()
+        activeSpacingMode = null
+        activeWordSeparator = " "
+        activeTrailingSeparator = ""
+        if (finalize) transaction.finalize()
         transaction.clear()
         if (hadActiveTransaction) onInferenceTransactionFinished()
         notifyReplacementOptionsChanged()

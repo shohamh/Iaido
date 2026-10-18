@@ -16,8 +16,10 @@ import tarfile
 import tempfile
 import unicodedata
 import urllib.request
+import zipfile
 from collections import Counter
 from pathlib import Path
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "app/src/main/assets/context-ngrams"
@@ -46,6 +48,20 @@ CORPORA = {
         "sha256": "E81BB0B4F2F13BC343DA8B732768582075257634600C359E55283774690B3213",
     },
 }
+CONVERSATIONAL_CORPORA = [
+    {
+        "name": "OpenSubtitles-v2018",
+        "url": "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/moses/en-he.txt.zip",
+        "size_kib": 927_978,  # OPUS API reports whole KiB, so verify at that precision.
+        "sha256": None,  # The API provides archive size but no digest; each generated manifest records the observed hash.
+    },
+    {
+        "name": "QED-v2.0a",
+        "url": "https://object.pouta.csc.fi/OPUS-QED/v2.0a/moses/en-he.txt.zip",
+        "size_kib": 26_442,
+        "sha256": None,
+    },
+]
 
 HEADER = struct.Struct("<4sBBHIIIIId")  # same 36-byte layout as NKG1; the double slot holds the discount D
 BIGRAM_INDEX = struct.Struct("<IIIHHI")  # context, offset, length, edges, distinct, total
@@ -92,6 +108,9 @@ def fetch_or_verify(path: Path, metadata: dict[str, object], label: str) -> dict
     expected_size = metadata.get("size")
     if expected_size is not None and actual_size != expected_size:
         raise ValueError(f"{label} size mismatch: expected {expected_size}, got {actual_size}")
+    expected_size_kib = metadata.get("size_kib")
+    if expected_size_kib is not None and actual_size // 1024 != expected_size_kib:
+        raise ValueError(f"{label} size mismatch: expected {expected_size_kib} KiB, got {actual_size // 1024} KiB")
     actual_hash = sha256(path)
     expected_hash = metadata.get("sha256")
     if expected_hash is not None and actual_hash != expected_hash:
@@ -123,20 +142,38 @@ def read_wordfreq_vocabulary(path: Path, language: str) -> set[str]:
     return words
 
 
-def iter_sentences(path: Path):
-    with tarfile.open(path, mode="r:gz") as archive:
-        members = [member for member in archive.getmembers() if Path(member.name).name.endswith("sentences.txt")]
-        if len(members) != 1:
-            raise ValueError(f"Expected one *_sentences.txt member in {path}, found {len(members)}")
-        extracted = archive.extractfile(members[0])
-        if extracted is None:
-            raise ValueError(f"Could not extract {members[0].name} from {path}")
-        with extracted:
-            for raw_line in extracted:
-                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-                _, separator, sentence = line.partition("\t")
-                if separator:
-                    yield sentence
+def iter_sentences(path: Path, language: str):
+    """Read Leipzig sentence tables, OPUS Moses ZIP sides, or plain one-sentence-per-line text."""
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            suffix = f".{language}"
+            members = [name for name in archive.namelist() if Path(name).name.endswith(suffix)]
+            if len(members) != 1:
+                raise ValueError(f"Expected one OPUS Moses .{language} member in {path}, found {len(members)}")
+            with archive.open(members[0]) as extracted:
+                for raw_line in extracted:
+                    yield raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+        return
+
+    if tarfile.is_tarfile(path):
+        with tarfile.open(path, mode="r:gz") as archive:
+            members = [member for member in archive.getmembers() if Path(member.name).name.endswith("sentences.txt")]
+            if len(members) != 1:
+                raise ValueError(f"Expected one *_sentences.txt member in {path}, found {len(members)}")
+            extracted = archive.extractfile(members[0])
+            if extracted is None:
+                raise ValueError(f"Could not extract {members[0].name} from {path}")
+            with extracted:
+                for raw_line in extracted:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    _, separator, sentence = line.partition("\t")
+                    if separator:
+                        yield sentence
+        return
+
+    with path.open("rb") as source:
+        for raw_line in source:
+            yield raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 
 
 def encode_varint(value: int) -> bytes:
@@ -151,13 +188,16 @@ def encode_varint(value: int) -> bytes:
 
 
 def aggregate(
-    path: Path,
+    paths: Path | Sequence[Path],
     language: str,
     dictionary_words: list[str],
     allowed: set[str],
     db_path: Path,
     context_allowed: set[str] | None = None,
     trigram_allowed: set[str] | None = None,
+    max_sentences_per_source: int = 0,
+    conversation_paths: Sequence[Path] = (),
+    conversation_train_parity: int | None = None,
 ) -> dict[str, int]:
     context_allowed = allowed if context_allowed is None else context_allowed
     trigram_allowed = context_allowed if trigram_allowed is None else trigram_allowed
@@ -185,22 +225,32 @@ def aggregate(
         pending.clear()
 
     try:
-        for sentence in iter_sentences(path):
-            tokens = [word_ids[token] for raw_token in TOKEN_RE[language].findall(sentence)
-                      if (token := normalize(raw_token, language)) in allowed]
-            sentence_count += 1
-            token_count += len(tokens)
-            for index in range(1, len(tokens)):
-                if dictionary_words[tokens[index - 1]] in context_allowed:
-                    pending[(2, tokens[index - 1], -1, tokens[index])] += 1
-            for index in range(2, len(tokens)):
-                if (dictionary_words[tokens[index - 2]] in trigram_allowed and
-                        dictionary_words[tokens[index - 1]] in trigram_allowed):
-                    pending[(3, tokens[index - 2], tokens[index - 1], tokens[index])] += 1
-            if len(pending) >= FLUSH_ROWS:
-                flush()
-            if sentence_count % 100_000 == 0:
-                print(f"{language}: {sentence_count:,} sentences, {token_count:,} retained tokens")
+        corpus_paths = [paths] if isinstance(paths, Path) else list(paths)
+        conversation_source_paths = {path.resolve() for path in conversation_paths}
+        for path in corpus_paths:
+            source_sentences = 0
+            is_conversation = path.resolve() in conversation_source_paths
+            for source_index, sentence in enumerate(iter_sentences(path, language)):
+                if max_sentences_per_source > 0 and source_sentences >= max_sentences_per_source:
+                    break
+                source_sentences += 1
+                if is_conversation and conversation_train_parity is not None and source_index % 2 != conversation_train_parity:
+                    continue
+                tokens = [word_ids[token] for raw_token in TOKEN_RE[language].findall(sentence)
+                          if (token := normalize(raw_token, language)) in allowed]
+                sentence_count += 1
+                token_count += len(tokens)
+                for index in range(1, len(tokens)):
+                    if dictionary_words[tokens[index - 1]] in context_allowed:
+                        pending[(2, tokens[index - 1], -1, tokens[index])] += 1
+                for index in range(2, len(tokens)):
+                    if (dictionary_words[tokens[index - 2]] in trigram_allowed and
+                            dictionary_words[tokens[index - 1]] in trigram_allowed):
+                        pending[(3, tokens[index - 2], tokens[index - 1], tokens[index])] += 1
+                if len(pending) >= FLUSH_ROWS:
+                    flush()
+                if sentence_count % 100_000 == 0:
+                    print(f"{language}: {sentence_count:,} sentences, {token_count:,} retained tokens")
         flush()
     finally:
         connection.close()
@@ -350,7 +400,7 @@ def build_binary(
 def build_language(
     language: str,
     wordfreq_path: Path,
-    corpus_path: Path,
+    corpus_paths: Sequence[Path],
     dictionary_path: Path,
     output: Path,
     minimum: int,
@@ -361,6 +411,10 @@ def build_language(
     trigram_context_vocabulary_limit: int = TRIGRAM_CONTEXT_VOCABULARY,
     trigram_context_limit: int = TRIGRAM_CONTEXT_LIMIT,
     discount: float = DISCOUNT,
+    max_sentences_per_source: int = 0,
+    conversation_paths: Sequence[Path] = (),
+    conversation_train_parity: int | None = None,
+    db_dir: Path | None = None,
 ) -> dict[str, object]:
     dictionary_words = list(dict.fromkeys(normalize(word, language) for word in read_dictionary(dictionary_path)))
     # With --dictionary-vocabulary the dictionary itself is the vocabulary (no wordfreq filtering).
@@ -371,10 +425,49 @@ def build_language(
     if not allowed:
         raise ValueError(f"No dictionary words survived {language} vocabulary filtering")
     with tempfile.TemporaryDirectory(prefix=f"iaido-{language}-") as temporary:
-        db_path = Path(temporary) / "ngrams.sqlite3"
-        counts = aggregate(corpus_path, language, dictionary_words, allowed, db_path, context_allowed, trigram_allowed)
-        counts["context_vocabulary"] = len(context_allowed)
-        counts["trigram_context_vocabulary"] = len(trigram_allowed)
+        # --db-dir keeps the aggregated counts so asset variants (top-k, context limits, discount) can be built
+        # without re-reading the corpus. A kept database is only reused when its aggregation settings match.
+        settings = {
+            "max_sentences_per_source": max_sentences_per_source,
+            "corpus_sources": [
+                {"path": str(path.resolve()), "bytes": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns}
+                for path in corpus_paths
+            ],
+            "conversation_sources": [
+                {"path": str(path.resolve()), "bytes": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns}
+                for path in conversation_paths
+            ],
+            "conversation_train_parity": conversation_train_parity,
+            "vocabulary": len(allowed), "context_vocabulary": len(context_allowed),
+            "trigram_context_vocabulary": len(trigram_allowed), "dictionary_words": len(dictionary_words),
+            "dictionary_words_sha256": hashlib.sha256("\0".join(dictionary_words).encode("utf-8")).hexdigest(),
+            "allowed_words_sha256": hashlib.sha256("\0".join(sorted(allowed)).encode("utf-8")).hexdigest(),
+            "context_words_sha256": hashlib.sha256("\0".join(sorted(context_allowed)).encode("utf-8")).hexdigest(),
+            "trigram_words_sha256": hashlib.sha256("\0".join(sorted(trigram_allowed)).encode("utf-8")).hexdigest(),
+        }
+        if db_dir is not None:
+            db_dir.mkdir(parents=True, exist_ok=True)
+            db_path = db_dir / f"{language}.sqlite3"
+            sidecar = db_dir / f"{language}.counts.json"
+        else:
+            db_path = Path(temporary) / "ngrams.sqlite3"
+            sidecar = None
+        if sidecar is not None and sidecar.exists() and db_path.exists():
+            saved = json.loads(sidecar.read_text(encoding="utf-8"))
+            if saved["settings"] != settings:
+                raise SystemExit(f"{db_path} was aggregated with different settings: {saved['settings']} != {settings}")
+            counts = saved["counts"]
+        else:
+            if db_path.exists():
+                db_path.unlink()
+            counts = aggregate(
+                corpus_paths, language, dictionary_words, allowed, db_path, context_allowed, trigram_allowed,
+                max_sentences_per_source, conversation_paths, conversation_train_parity,
+            )
+            counts["context_vocabulary"] = len(context_allowed)
+            counts["trigram_context_vocabulary"] = len(trigram_allowed)
+            if sidecar is not None:
+                sidecar.write_text(json.dumps({"settings": settings, "counts": counts}), encoding="utf-8")
         result = build_binary(
             db_path, output, language, len(dictionary_words), minimum, top_k,
             trigram_top_k, trigram_context_limit, discount,
@@ -407,6 +500,17 @@ def parse_args() -> argparse.Namespace:
                         help="both words of a trigram context must be among the first N dictionary words")
     parser.add_argument("--trigram-context-limit", type=int, default=TRIGRAM_CONTEXT_LIMIT,
                         help="keep only the N (first, second) contexts with the largest totals")
+    parser.add_argument("--languages", default="en,he", help="comma separated subset of en,he (experiments only)")
+    parser.add_argument("--max-sentences", type=int, default=0,
+                        help="read only the first N sentences from each source (0 = all)")
+    parser.add_argument("--conversation-corpus", type=Path, action="append", default=[],
+                        help="local bilingual OPUS Moses ZIP to add to both language models; repeatable, overrides downloads")
+    parser.add_argument("--exclude-conversation", action="store_true",
+                        help="build from Leipzig news only instead of adding OpenSubtitles v2018 and QED")
+    parser.add_argument("--conversation-train-parity", type=int, choices=(0, 1),
+                        help="train only on matching even/odd conversation lines; reserve the other half for evaluation")
+    parser.add_argument("--db-dir", type=Path,
+                        help="keep/reuse the aggregated count databases here (experiments with asset variants)")
     parser.add_argument("--discount", type=float, default=DISCOUNT, help="absolute discount D stored in the header")
     return parser.parse_args()
 
@@ -420,12 +524,32 @@ def main() -> None:
         raise SystemExit("count and vocabulary limits must be positive; --top-k values must be in 1..65535")
     if not 0.0 < args.discount < 1.0:
         raise SystemExit("--discount must be in (0, 1)")
+    if args.exclude_conversation and args.conversation_corpus:
+        raise SystemExit("--exclude-conversation cannot be combined with --conversation-corpus")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iaido-sources-") as temporary:
         temporary_path = Path(temporary)
         paths = {}
         source_manifest = {}
-        for language in ("en", "he"):
+        conversation_paths = list(args.conversation_corpus)
+        if args.conversation_corpus:
+            for index, path in enumerate(conversation_paths):
+                if not path.is_file():
+                    raise SystemExit(f"conversation corpus does not exist: {path}")
+                source_manifest[f"conversation_local_{index + 1}"] = {
+                    "path": str(path), "bytes": path.stat().st_size, "sha256": sha256(path),
+                }
+        elif not args.exclude_conversation:
+            for corpus in CONVERSATIONAL_CORPORA:
+                corpus_path = temporary_path / f"{corpus['name']}.en-he.txt.zip"
+                source_manifest[f"conversation_{corpus['name']}"] = fetch_or_verify(
+                    corpus_path, corpus, corpus["name"],
+                )
+                conversation_paths.append(corpus_path)
+        languages = [language for language in args.languages.split(",") if language]
+        if not languages or any(language not in ("en", "he") for language in languages):
+            raise SystemExit("--languages must be a comma separated subset of en,he")
+        for language in languages:
             wordfreq_path = args.wordfreq_en if language == "en" else args.wordfreq_he
             corpus_path = args.corpus_en if language == "en" else args.corpus_he
             if args.dictionary_vocabulary:
@@ -441,18 +565,20 @@ def main() -> None:
                 source_manifest[f"corpus_{language}"] = fetch_or_verify(corpus_path, CORPORA[language], f"Leipzig corpus {language}")
             else:
                 source_manifest[f"corpus_{language}"] = fetch_or_verify(corpus_path, CORPORA[language], f"Leipzig corpus {language}")
-            paths[language] = (wordfreq_path, corpus_path)
+            paths[language] = (wordfreq_path, [corpus_path, *conversation_paths], conversation_paths)
         results = {}
         for language, dictionary_path in (("en", args.dictionary_en), ("he", args.dictionary_he)):
+            if language not in languages:
+                continue
             source_manifest[f"dictionary_{language}"] = {
                 "bytes": dictionary_path.stat().st_size,
                 "sha256": sha256(dictionary_path),
             }
-            wordfreq_path, corpus_path = paths[language]
+            wordfreq_path, corpus_paths, language_conversation_paths = paths[language]
             results[language] = build_language(
                 language,
                 wordfreq_path,
-                corpus_path,
+                corpus_paths,
                 dictionary_path,
                 args.output_dir / f"{language}.ngram.bin",
                 args.min_count,
@@ -463,12 +589,16 @@ def main() -> None:
                 args.trigram_context_vocabulary_limit,
                 args.trigram_context_limit,
                 args.discount,
+                args.max_sentences,
+                language_conversation_paths,
+                args.conversation_train_parity,
+                args.db_dir,
             )
         manifest = {
             "format": "NKG2",
             "generator": "tools/generate_ngrams.py",
             "wordfreq_version": WORD_FREQ_VERSION,
-            "sequence_source": "Leipzig Corpora Collection 2020 1M news",
+            "sequence_source": "Leipzig Corpora Collection 2020 1M news plus optional OPUS Moses corpora",
             "normalization": {
                 "en": "NFC, case-fold, ASCII letters only",
                 "he": "NFKC, case-fold, remove combining marks, Hebrew letters only",
@@ -481,6 +611,8 @@ def main() -> None:
             "trigram_context_vocabulary_limit": args.trigram_context_vocabulary_limit,
             "trigram_context_limit": args.trigram_context_limit,
             "discount": args.discount,
+            "max_sentences_per_source": args.max_sentences,
+            "conversation_train_parity": args.conversation_train_parity,
             "sources": source_manifest,
             "results": results,
         }

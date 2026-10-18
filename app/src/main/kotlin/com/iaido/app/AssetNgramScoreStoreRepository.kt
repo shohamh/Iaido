@@ -18,10 +18,12 @@ class AssetNgramScoreStoreRepository(
         cached.getOrPut(language) {
             try {
                 val entries = dictionary(language)
+                // NKG2 scores are log-ratios against the unigram prior; feed it the dictionary frequencies.
+                val frequencies = entries.associate { it.word to it.frequency }
                 CompactNgramScoreStore.fromBytes(
                     loadAsset("context-ngrams/${language.assetName}.ngram.bin"),
                     entries.mapIndexed { index, entry -> entry.word to index }.toMap(),
-                )
+                ) { frequencies[it] ?: 0.0 }
             } catch (_: IOException) {
                 EmptyNgramScoreStore
             }

@@ -61,6 +61,22 @@ object ScoringConstants {
     const val SEGMENTER_FREQUENCY_WEIGHT: Double = 0.1
 
     /**
+     * Frequency weight [InferenceSegmenter] gives the 2nd and later word of a split. NKG2 n-gram scores are
+     * log-ratios against the unigram prior, so every extra word earns context credit; the split has to pay its
+     * unigram cost at a comparable scale to the bigram and trigram weights below, otherwise splits earn more credit
+     * than they cost and common words fragment ("today of" -> "to day of"). The first/only word keeps
+     * [SEGMENTER_FREQUENCY_WEIGHT] because the recognizer already scored the whole swipe. Tuned with the context
+     * weights on SegmentationBenchmarkTest.
+     */
+    const val SEGMENTER_EXTRA_WORD_FREQUENCY_WEIGHT: Double = 0.3
+
+    /** Bigram weight of the context scorer [InferenceSegmenter] is built with in the app. */
+    const val SEGMENTER_BIGRAM_WEIGHT: Double = 0.3
+
+    /** Trigram weight of the context scorer [InferenceSegmenter] is built with in the app. */
+    const val SEGMENTER_TRIGRAM_WEIGHT: Double = 0.3
+
+    /**
      * Trimmed readings are only tried for candidates whose untrimmed score is within this of the best one
      * (a pure speed bound: on the synthetic benchmark a gate of 6 already changes no ranking).
      */

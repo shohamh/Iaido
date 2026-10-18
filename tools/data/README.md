@@ -29,14 +29,47 @@ comparison only; it is not used by the Android dictionary build.
 ## Offline context model
 
 `tools/generate_ngrams.py` builds `app/src/main/assets/context-ngrams/` from
-the pinned large `wordfreq` vocabularies and the Leipzig 2020 1M English and
-Hebrew news sentence corpora. It keeps the top 10,000 dictionary words as
-possible successors, limits preceding-word contexts to the top 2,000, keeps
-up to 32 successors per context, and stores delta-varint IDs with UInt16
-log-count scores in the NKG1 binary format. The generated manifest records
-source/output hashes and normalization details.
+the dictionary vocabularies and Leipzig 2020 1M English/Hebrew news corpora.
+By default it also adds the English–Hebrew OPUS Moses sentence pairs from
+[OpenSubtitles v2018](https://opus.nlpl.eu/opusapi?corpus=OpenSubtitles&source=en&target=he&preprocessing=moses&version=v2018)
+and [QED v2.0a](https://opus.nlpl.eu/opusapi?corpus=QED&source=en&target=he&preprocessing=moses&version=latest).
+The generation manifest records each source URL, downloaded byte count,
+observed SHA-256, and the output hashes. OPUS's API supplies archive sizes but
+not an expected SHA-256; the generator checks the byte count and records the
+observed hash. Use `--exclude-conversation` for the news-only build, or repeat
+`--conversation-corpus <local-moses-zip>` to use local archives instead of
+downloading the defaults.
 
-The generated context assets are approximately 6.2 MiB (English) and 3.8 MiB
-(Hebrew). The Leipzig corpora are build-time inputs only and are not bundled.
-The wordfreq data is CC BY-SA 4.0; Leipzig corpus downloads are CC BY. Keep
-the corresponding upstream attribution when redistributing the APK.
+The conversational archives are build-time inputs and are not bundled. To
+measure them without phrase leakage, generate a tuning asset with
+`--conversation-train-parity 0`, then sample tuning and held-out phrases from
+the disjoint conversation line groups with `tools/sample_phrases.py` using
+`--first-sentence 0 --modulus 4 --parity 1` and
+`--first-sentence 0 --modulus 4 --parity 3`, respectively. Pass each source
+archive with a repeated `--conversation-corpus` option. For weight tuning, point the benchmark at the
+sampled files with `IAIDO_SEG_TUNE_FILE` and `IAIDO_SEG_HELDOUT_FILE`, and set
+`IAIDO_SEG=seq-grid`; this tunes word choice on separated synthetic swipes and
+reports the held-out set separately. The parity split follows aligned sentence
+lines, so both languages reserve the same examples.
+
+The NKG2 assets store exact n-gram counts, context totals, and smoothed scores.
+They keep up to 128 successors per bigram context, 32 per trigram context, and
+up to 50,000 trigram contexts. The assets generated on 2026-10-18 use Leipzig
+news, the Tatoeba linked-sentence exports, and the training half of a filtered
+Hugging Face OpenSubtitles English-Hebrew shard. The shard is an alternate
+hosting of OPUS-derived subtitle data, not an independent corpus. Its Parquet
+file is pinned to dataset commit
+`d86a387587ab6f2fd9ec7453b2765cec68111c87` (file last changed at
+`f35743d5d25b564da46eb13db1ba9dd99cd23476`) and SHA-256
+`b4558b11b37532c068bb92b8f65572d1a182e8d9c01602e00e4aae7bd98a3427`.
+Filtering retained 3,203,514 bilingual pairs; the processed, balanced ZIP has
+1,601,048 train and 1,601,048 held-out pairs. The generated asset manifest
+records source and output hashes. These corpora are build-time inputs and are
+not bundled in the APK.
+
+The combined assets are 4,411,776 bytes (English) and 3,936,789 bytes
+(Hebrew). Source hashes, filters, split details, and held-out benchmark results
+are in [`docs/research/2026-10-18-conversational-corpus-sources.md`](../../docs/research/2026-10-18-conversational-corpus-sources.md).
+
+Source facts and direct OPUS metadata queries are in
+[`docs/research/2026-10-18-conversational-corpus-sources.md`](../../docs/research/2026-10-18-conversational-corpus-sources.md).

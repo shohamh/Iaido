@@ -2,7 +2,7 @@
   "format": "NKG2",
   "generator": "tools/generate_ngrams.py",
   "wordfreq_version": "v3.0.2",
-  "sequence_source": "Leipzig Corpora Collection 2020 1M news",
+  "sequence_source": "Leipzig Corpora Collection 2020 1M news plus Tatoeba linked sentences and filtered Hugging Face OpenSubtitles-derived parallel sentences",
   "normalization": {
     "en": "NFC, case-fold, ASCII letters only",
     "he": "NFKC, case-fold, remove combining marks, Hebrew letters only"
@@ -15,7 +15,52 @@
   "trigram_context_vocabulary_limit": 2000,
   "trigram_context_limit": 50000,
   "discount": 0.75,
+  "max_sentences_per_source": 0,
+  "conversation_train_parity": 0,
   "sources": {
+    "conversation_local_1": {
+      "bytes": 3806061,
+      "sha256": "A447303CF5C02F3224497A9CBFE65934755D2940B64FB85B5D441F1A0348C549",
+      "dataset": "Tatoeba weekly per-language exports",
+      "export_date": "2026-10-17",
+      "source_files": {
+        "eng_sentences.tsv.bz2": {
+          "bytes": 24908986,
+          "sha256": "bb3dcc28a8984a26dc466ee14eb53c4210b0dd9bb111b9d686d1efc83ecf091c"
+        },
+        "heb_sentences.tsv.bz2": {
+          "bytes": 2402346,
+          "sha256": "c7a7e66309d58ba47d7a61653df62ffe847fc3a0674c6b52351da28f145d2799"
+        },
+        "eng-heb_links.tsv.bz2": {
+          "bytes": 1093057,
+          "sha256": "b2d475bb86c3706a6424993e25476f332f943b775c7d3d1a1c1071c286755d98"
+        }
+      },
+      "valid_links": 185162,
+      "dangling_links_excluded": 48
+    },
+    "conversation_local_2": {
+      "bytes": 109703351,
+      "sha256": "FB636DBE5EF496C78C996FC8D5609271F6C5054CC31FA5BBF0200EE4F2F3155C",
+      "dataset": "sentence-transformers/parallel-sentences-opensubtitles",
+      "dataset_revision": "d86a387587ab6f2fd9ec7453b2765cec68111c87",
+      "file_last_changed_revision": "f35743d5d25b564da46eb13db1ba9dd99cd23476",
+      "source_url": "https://huggingface.co/datasets/sentence-transformers/parallel-sentences-opensubtitles/resolve/d86a387587ab6f2fd9ec7453b2765cec68111c87/en-he/train-00000-of-00001.parquet",
+      "source_bytes": 249157443,
+      "source_sha256": "b4558b11b37532c068bb92b8f65572d1a182e8d9c01602e00e4aae7bd98a3427",
+      "source_filter": "Both sides >=3 lexical tokens and >=3 dictionary tokens; at least 50% of lexical tokens in current app dictionary",
+      "source_split": "SHA-256 of English + NUL + Hebrew; parity train/eval, interleaved, equalized",
+      "source_counts": {
+        "input_rows": 4454835,
+        "kept_pairs": 3203514,
+        "empty_or_short": 1249721,
+        "low_dictionary_coverage": 1600,
+        "train_pairs": 1601048,
+        "eval_pairs": 1602466,
+        "pairs_per_partition_in_processed_zip": 1601048
+      }
+    },
     "wordfreq_en": {
       "skipped": "dictionary used as vocabulary"
     },
@@ -45,42 +90,43 @@
     "en": {
       "language": "en",
       "counts": {
-        "sentences": 1000000,
-        "retained_tokens": 18112016,
+        "sentences": 2687644,
+        "retained_tokens": 31613828,
         "vocabulary": 28001,
         "context_vocabulary": 10000,
         "trigram_context_vocabulary": 2000
       },
       "asset": {
-        "bytes": 3730827,
-        "sha256": "51871736C176762DA76C7364CFF1490D90A550D2D8D852CE2ADFAB63A9C93569",
+        "bytes": 4411776,
+        "sha256": "D86A18FBAB856A01A78687E45394922A2EC9C3E9524727BE448A9E1C33CAD477",
         "word_count": 28001,
-        "bigram_contexts": 9987,
-        "trigram_contexts": 49886,
-        "bigram_edges_bytes": 1073016,
-        "trigram_edges_bytes": 1260771,
+        "bigram_contexts": 9997,
+        "trigram_contexts": 49995,
+        "bigram_edges_bytes": 1299637,
+        "trigram_edges_bytes": 1712283,
         "discount": 0.75
       }
     },
     "he": {
       "language": "he",
       "counts": {
-        "sentences": 1000000,
-        "retained_tokens": 11393695,
+        "sentences": 2687644,
+        "retained_tokens": 20257094,
         "vocabulary": 56469,
         "context_vocabulary": 10000,
         "trigram_context_vocabulary": 2000
       },
       "asset": {
-        "bytes": 3210908,
-        "sha256": "BDC787607FCDB6F0C8BE36E67DDC3C7980E60D8A98BD5F2043701D552B77A76B",
+        "bytes": 3936789,
+        "sha256": "6053EF246319EEAD83B1158F99EBB3226273CD24B4109075AE1F966656FFDBCF",
         "word_count": 56469,
-        "bigram_contexts": 9973,
-        "trigram_contexts": 46486,
-        "bigram_edges_bytes": 1231612,
-        "trigram_edges_bytes": 664136,
+        "bigram_contexts": 9997,
+        "trigram_contexts": 49302,
+        "bigram_edges_bytes": 1521617,
+        "trigram_edges_bytes": 1031948,
         "discount": 0.75
       }
     }
-  }
+  },
+  "generation_date": "2026-10-18"
 }

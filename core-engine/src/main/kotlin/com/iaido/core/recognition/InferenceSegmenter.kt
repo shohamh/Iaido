@@ -3,6 +3,11 @@ package com.iaido.core.recognition
 import com.iaido.core.dictionary.WordEntry
 import kotlin.math.ln
 
+enum class InferenceDecodingPolicy {
+    INFER_SPACES,
+    ONE_WORD_PER_GESTURE,
+}
+
 /**
  * Ranks dictionary-valid spacing interpretations for the latest swipe units.
  *
@@ -16,6 +21,8 @@ class InferenceSegmenter(
     private val maxWordsPerGroup: Int = MAX_WORDS_PER_GROUP,
     private val maxAlternatives: Int = MAX_ALTERNATIVES,
     private val maxCandidatesPerPath: Int = MAX_CANDIDATES_PER_PATH,
+    private val frequencyWeight: Double = FREQUENCY_WEIGHT,
+    private val extraWordFrequencyWeight: Double = EXTRA_WORD_FREQUENCY_WEIGHT,
 ) {
     init {
         require(confidenceMargin >= 0.0)
@@ -23,6 +30,8 @@ class InferenceSegmenter(
         require(maxWordsPerGroup > 0)
         require(maxAlternatives > 0)
         require(maxCandidatesPerPath > 0)
+        require(frequencyWeight >= 0.0)
+        require(extraWordFrequencyWeight >= 0.0)
     }
 
     @Synchronized
@@ -30,6 +39,7 @@ class InferenceSegmenter(
         units: List<GestureUnit>,
         previousWords: List<String>,
         dictionary: List<WordEntry>,
+        policy: InferenceDecodingPolicy = InferenceDecodingPolicy.INFER_SPACES,
     ): List<SegmentationOption> {
         val boundedUnits = units.takeLast(maxUnits)
         if (boundedUnits.isEmpty() || dictionary.isEmpty()) return emptyList()
@@ -37,7 +47,7 @@ class InferenceSegmenter(
         val view = dictionaryViewFor(dictionary)
         view.trimCaches()
         val run = Run(view)
-        val allOptions = rankOptions(boundedUnits, previousWords, run, contextScorer)
+        val allOptions = rankOptions(boundedUnits, previousWords, run, contextScorer, policy)
         if (allOptions.isEmpty()) return emptyList()
 
         val currentInterpretation = rankOptions(
@@ -45,6 +55,7 @@ class InferenceSegmenter(
             previousWords,
             run,
             NgramContextScorer(),
+            policy,
         ).firstOrNull()?.let { baseline ->
             allOptions.firstOrNull { option ->
                 option.words == baseline.words &&
@@ -82,7 +93,7 @@ class InferenceSegmenter(
         // Group options and per-unit raw candidates depend only on the units and this dictionary, so
         // they carry over between swipes: a new swipe only has to derive the spans ending at it.
         val raw = java.util.IdentityHashMap<GestureUnit, List<RawCandidate>>()
-        val groups = HashMap<UnitsKey, List<GroupOption>>()
+        val groups = HashMap<GroupOptionsKey, List<GroupOption>>()
 
         fun trimCaches() {
             if (raw.size > MAX_CACHED_UNITS) raw.clear()
@@ -119,23 +130,30 @@ class InferenceSegmenter(
         previousWords: List<String>,
         run: Run,
         scorer: NgramContextScorer,
+        policy: InferenceDecodingPolicy,
     ): List<SegmentationOption> {
         val states = MutableList(units.size + 1) { mutableListOf<Partial>() }
         states[0] += Partial.empty(previousWords)
 
         for (start in units.indices) {
             if (states[start].isEmpty()) continue
-            for (endExclusive in start + 1..units.size) {
+            val maxEndExclusive = if (policy == InferenceDecodingPolicy.ONE_WORD_PER_GESTURE) {
+                start + 1
+            } else {
+                units.size
+            }
+            for (endExclusive in start + 1..maxEndExclusive) {
                 val span = units.subList(start, endExclusive)
                 val spanKey = UnitsKey(span.toList())
-                val groups = run.dictionary.groups.getOrPut(spanKey) { groupOptions(span, run) }
+                val groupKey = GroupOptionsKey(spanKey, policy)
+                val groups = run.dictionary.groups.getOrPut(groupKey) { groupOptions(span, run, policy) }
                 if (groups.isEmpty()) continue
                 for (prefix in states[start]) {
                     for (group in groups) {
                         states[endExclusive] += prefix.append(group, previousWords, scorer)
                     }
                 }
-                retainTop(states[endExclusive])
+                retainTop(states[endExclusive], policy)
             }
         }
 
@@ -155,6 +173,7 @@ class InferenceSegmenter(
     private fun groupOptions(
         units: List<GestureUnit>,
         run: Run,
+        policy: InferenceDecodingPolicy,
     ): List<GroupOption> {
         val dictionary = run.dictionary.byWord
         val maxWordLength = run.dictionary.maxWordLength
@@ -192,7 +211,11 @@ class InferenceSegmenter(
         // InferenceSegmenterTest's real-asset regression coverage for "hello", "there is", and
         // "wh"+"at".
         val realTouchPathCount = units.sumOf { unit -> unit.paths.size }
-        val wordLimit = maxOf(maxWordsPerGroup, units.maxOf { unit -> unit.paths.size })
+        val wordLimit = if (policy == InferenceDecodingPolicy.ONE_WORD_PER_GESTURE) {
+            1
+        } else {
+            maxOf(maxWordsPerGroup, units.maxOf { unit -> unit.paths.size })
+        }
 
         return rawCandidates.flatMap { candidate ->
             run.dictionary.cachedSegmentations(candidate.text, wordLimit) {
@@ -201,7 +224,7 @@ class InferenceSegmenter(
                 GroupOption(
                     words = words,
                     score = candidate.score + candidate.languageWeight *
-                        words.sumOf { word -> frequencyScore(dictionary.getValue(word)) },
+                        words.withIndex().sumOf { (index, word) -> frequencyScore(dictionary.getValue(word), index) },
                     sourceGestureIds = units.map { it.id },
                     hypothesisMetadata = candidate.hypothesisMetadata,
                     languageEvidenceWeight = candidate.languageWeight,
@@ -310,18 +333,24 @@ class InferenceSegmenter(
             .sortedWith(wordsComparator)
     }
 
-    private fun retainTop(options: MutableList<Partial>) {
-        val retained = options.sortedWith(partialComparator)
-            .asSequence()
-            .distinctBy { it.words }
-            .take(maxAlternatives)
-            .toList()
+    private fun retainTop(options: MutableList<Partial>, policy: InferenceDecodingPolicy) {
+        val ordered = options.sortedWith(partialComparator)
+        val retained = if (policy == InferenceDecodingPolicy.ONE_WORD_PER_GESTURE) {
+            // Future context depends only on the previous two output words. Keep the best
+            // prefix for each suffix instead of a global beam that can discard the path a
+            // later trigram needs. With at most 16 group candidates per gesture this remains
+            // bounded at 256 suffix states.
+            ordered.distinctBy { it.contextState() }
+        } else {
+            ordered.distinctBy { it.words }.take(maxAlternatives)
+        }
         options.clear()
         options += retained
     }
 
-    private fun frequencyScore(entry: WordEntry): Double =
-        FREQUENCY_WEIGHT * ln(entry.frequency.coerceAtLeast(MIN_FREQUENCY))
+    private fun frequencyScore(entry: WordEntry, indexInGroup: Int): Double =
+        (if (indexInGroup == 0) frequencyWeight else extraWordFrequencyWeight) *
+            ln(entry.frequency.coerceAtLeast(MIN_FREQUENCY))
 
     private data class RawCandidate(
         val text: String,
@@ -373,6 +402,11 @@ class InferenceSegmenter(
         val hypothesisMetadata: List<HypothesisMetadata>,
     )
 
+    private data class GroupOptionsKey(
+        val units: UnitsKey,
+        val policy: InferenceDecodingPolicy,
+    )
+
     /**
      * A DP state. The word/id/metadata lists are materialized only when a state is compared on a
      * tie or retained, because most prefix x group products are discarded by [retainTop] on score.
@@ -394,6 +428,8 @@ class InferenceSegmenter(
         private val contextTail: List<String> by lazy(LazyThreadSafetyMode.NONE) {
             if (group == null) rootContext else (parent!!.contextTail + group.words).takeLast(CONTEXT_TAIL_WORDS)
         }
+
+        fun contextState(): List<String> = contextTail.takeLast(CONTEXT_TAIL_WORDS - 1)
 
         val words: List<String> by lazy(LazyThreadSafetyMode.NONE) {
             if (group == null) emptyList() else parent!!.words + group.words
@@ -462,6 +498,7 @@ class InferenceSegmenter(
         // the historical 0.1 so that adding it on top of the stronger recognizer weight does not double-count
         // frequency and let the segmentation pass overturn a geometrically stronger swipe candidate.
         private const val FREQUENCY_WEIGHT = ScoringConstants.SEGMENTER_FREQUENCY_WEIGHT
+        private const val EXTRA_WORD_FREQUENCY_WEIGHT = ScoringConstants.SEGMENTER_EXTRA_WORD_FREQUENCY_WEIGHT
 
         // The shipped dictionary stores frequency as a probability (all entries are well below
         // 1.0; the most common English word, "the", is ~0.054). A floor of 1.0 clamps every real

@@ -191,6 +191,23 @@ class SessionCorrectionHistoryTest {
     }
 
     @Test
+    fun `multi-word replacement supports contiguous words without an inserted separator`() {
+        val history = SessionCorrectionHistory()
+
+        history.replaceRange(
+            start = 0,
+            end = 5,
+            replacementWords = listOf("in", "the"),
+            candidatesByWord = listOf(emptyList(), emptyList()),
+            composite = true,
+            wordSeparator = "",
+        )
+
+        assertEquals(listOf(0 to 2, 2 to 5), history.words().map { it.start to it.end })
+        assertEquals(5, history.groups().single().sourceEnd)
+    }
+
+    @Test
     fun `editing a split member breaks its composite group but preserves independent reels`() {
         val history = SessionCorrectionHistory()
         val ids = history.replaceRange(0, 6, listOf("in", "the"))

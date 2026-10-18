@@ -84,6 +84,7 @@ class SessionCorrectionHistory {
         replacementWords: List<String>,
         candidatesByWord: List<List<String>> = replacementWords.map { emptyList() },
         composite: Boolean = replacementWords.size > 1,
+        wordSeparator: String = " ",
     ): List<Int> {
         require(start >= 0 && end >= start) { "replacement range must be non-negative and ordered" }
         require(replacementWords.isNotEmpty()) { "replacement must contain at least one word" }
@@ -95,7 +96,7 @@ class SessionCorrectionHistory {
         entries.removeAll(affected.toSet())
         reelGroups.removeAll { group -> group.sourceStart < end && group.sourceEnd > start }
 
-        val replacementTextLength = replacementWords.joinToString(" ").length
+        val replacementTextLength = replacementWords.joinToString(wordSeparator).length
         val delta = replacementTextLength - oldLength
         val insertionIndex = entries.indexOfFirst { it.start >= end }.let { if (it < 0) entries.size else it }
         if (delta != 0) {
@@ -109,8 +110,8 @@ class SessionCorrectionHistory {
             val id = if (index == 0 && anchor != null) anchor.id else nextId++
             entries += SessionWord(
                 id = id,
-                start = start + replacementWords.take(index).sumOf { it.length + 1 },
-                end = start + replacementWords.take(index).sumOf { it.length + 1 } + word.length,
+                start = start + replacementWords.take(index).sumOf { it.length + wordSeparator.length },
+                end = start + replacementWords.take(index).sumOf { it.length + wordSeparator.length } + word.length,
                 original = if (index == 0 && anchor != null) anchor.original else word,
                 current = word,
                 candidates = (listOf(word) + candidatesByWord[index]).distinct(),
