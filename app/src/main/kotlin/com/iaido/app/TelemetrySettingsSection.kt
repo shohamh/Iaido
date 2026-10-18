@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.MutablePreferences
@@ -250,6 +251,15 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
     var showResearchConfirmation by remember { mutableStateOf(false) }
     var researchWifiOnlyEnabled by remember { mutableStateOf(true) }
     val controller = remember(context) { buildTelemetryConsentController(context) }
+    val reachabilityProbe = remember { CollectorReachabilityProbe(BuildConfig.IAIDO_TELEMETRY_BASE_URL) }
+    // null while a check is in flight; the first check starts on first composition.
+    var collectorReachability by remember { mutableStateOf<CollectorReachability?>(null) }
+    var reachabilityCheckId by remember { mutableStateOf(0) }
+
+    LaunchedEffect(reachabilityCheckId) {
+        collectorReachability = null
+        collectorReachability = reachabilityProbe.checkReachability()
+    }
 
     LaunchedEffect(Unit) {
         val preferences = context.settingsStore.data.first()
@@ -322,8 +332,24 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
     HorizontalDivider()
     Text("Privacy & diagnostics", style = MaterialTheme.typography.titleMedium)
     Text("Both kinds of telemetry are off by default. You can turn either one off, or delete its data, at any time.")
-    if (!telemetryConfigured) {
-        Text(TELEMETRY_UNAVAILABLE_MESSAGE, color = MaterialTheme.colorScheme.error)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            collectorStatusText(collectorReachability),
+            modifier = Modifier.weight(1f),
+            color = if (collectorStatusIsError(collectorReachability)) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+        TextButton(
+            onClick = { reachabilityCheckId++ },
+            enabled = telemetryConfigured && collectorReachability != null,
+        ) { Text("Check now") }
     }
 
     TelemetryPlaneToggle(

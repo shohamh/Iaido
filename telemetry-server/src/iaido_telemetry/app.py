@@ -271,6 +271,11 @@ def create_app(
         if not credentials_match(credential, active_settings.operator_token):
             raise HTTPException(status_code=401, detail="Invalid operator credential")
 
+    @app.get("/v1/health")
+    def health() -> dict[str, str]:
+        # Reachability probe for the app's Settings indicator: no auth, no data, no side effects.
+        return {"status": "ok"}
+
     @app.post(
         "/v1/installations",
         response_model=InstallationResponse,

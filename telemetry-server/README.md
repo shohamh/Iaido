@@ -184,6 +184,20 @@ URL and an operator token every test returns early (passes without doing anythin
 Stop everything with `docker compose -p iaido-swipe-e2e down -v` and
 `tailscale serve --https=443 off`.
 
+## Health endpoint and the app's collector indicator
+
+`GET /v1/health` is unauthenticated and returns exactly `{"status":"ok"}`. It
+reads no data, creates no installation and needs no credential, but it still
+goes through the HTTPS boundary (plain HTTP gets `426`). The Iaido app's
+Settings > Privacy & diagnostics section probes it when the section opens and
+when "Check now" is tapped, sending no credentials or user data:
+
+- `Collector: reachable` - HTTP 200 with `{"status":"ok"}`.
+- `Collector: can't reach (...)` - no network/DNS failure, connection failed or
+  timed out (5 s), TLS/network error, or an unexpected response such as a
+  captive portal's `302` (redirects are never followed).
+- `unavailable in this build` - the build has no collector URL.
+
 ## Migrations
 
 There is no separate migration tool yet: `create_app()` calls
