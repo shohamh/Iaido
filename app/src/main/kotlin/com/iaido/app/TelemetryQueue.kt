@@ -12,6 +12,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -21,13 +22,17 @@ import kotlinx.serialization.json.put
 
 data class QueueLimits(
     val maxBatchEvents: Int = 100,
+    /** Cap on a batch's compressed (on-disk) size. */
     val maxBatchBytes: Long = 256 * 1024,
     val maxAgeMs: Long = 7 * 24 * 60 * 60 * 1000L,
     val maxQueuedBytes: Long = 5 * 1024 * 1024,
+    /** Cap on a batch's uncompressed upload body, as the transport and collector measure it. */
+    val maxRequestBytes: Long = TELEMETRY_MAX_REQUEST_BYTES.toLong(),
 ) {
     init {
         require(maxBatchEvents > 0)
         require(maxBatchBytes > 0)
+        require(maxRequestBytes > 0)
         require(maxAgeMs >= 0)
         require(maxQueuedBytes >= 0)
     }
@@ -47,28 +52,32 @@ class TelemetryQueue(
     private val storageDirectory = File(directory, plane.name.lowercase(Locale.ROOT))
     private var nextBatchSequence: Long? = null
 
-    fun append(event: TelemetryEnvelope) {
+    /**
+     * Appends to the newest batch only while it is still open; once [pendingBatches] has sealed a
+     * batch (it may be mid-upload), new events start a fresh batch so acknowledging the sealed one
+     * can never delete them.
+     */
+    fun append(event: TelemetryEnvelope) = locked {
         runSafely {
             try {
                 validateForPlane(event)
                 require(storageDirectory.mkdirs() || storageDirectory.isDirectory)
 
-                val current = batchFiles().lastOrNull()?.let { readBatchOrNull(it.file) }
-                val currentEvents = current?.events.orEmpty()
-                val canAppend = current != null && currentEvents.size < limits.maxBatchEvents
-                val candidateEvents = if (canAppend) {
-                    currentEvents + event
+                val current = batchFiles().lastOrNull()
+                    ?.takeUnless { it.sealed }
+                    ?.let { readBatchOrNull(it.file) }
+                val appended = current?.events.orEmpty() + event
+                // A batch carries one installation: after re-provisioning, new events start a new
+                // batch, so the old-installation batch is rejected alone and never takes them along.
+                val sameInstallation = current?.events?.all { it.installationId == event.installationId } == true
+                if (current != null && sameInstallation && appended.size <= limits.maxBatchEvents &&
+                    fitsLimits(current.file, appended)
+                ) {
+                    writeBatch(current.file, appended)
                 } else {
-                    listOf(event)
-                }
-                if (candidateEvents.size <= limits.maxBatchEvents) {
-                    val compressed = compressBatch(candidateEvents)
-                    val appendToCurrent = canAppend && compressed.size <= limits.maxBatchBytes
-                    val eventsToWrite = if (appendToCurrent) candidateEvents else listOf(event)
-                    val bytesToWrite = if (appendToCurrent) compressed else compressBatch(eventsToWrite)
-                    if (bytesToWrite.size <= limits.maxBatchBytes) {
-                        writeBatch(if (appendToCurrent) current!!.file else newBatchFile(), eventsToWrite)
-                    }
+                    // A single event too large to ever be uploaded is dropped rather than queued.
+                    val file = newBatchFile()
+                    if (fitsLimits(file, listOf(event))) writeBatch(file, listOf(event))
                 }
             } finally {
                 enforceLimitsInternal()
@@ -76,28 +85,52 @@ class TelemetryQueue(
         }
     }
 
-    fun pendingBatches(): List<TelemetryBatch> = try {
-        batchFiles().mapNotNull { batchFile ->
-            readBatchOrNull(batchFile.file)?.takeIf { it.events.isNotEmpty() }?.toPublicBatch()
+    /**
+     * Seals every batch, then returns them oldest first. A returned batch's contents never change
+     * afterwards (later appends go to a new batch), so it is safe to upload, retry with identical
+     * bytes, and acknowledge by id.
+     */
+    fun pendingBatches(): List<TelemetryBatch> = locked {
+        try {
+            batchFiles().map { batchFile -> if (batchFile.sealed) batchFile.file else seal(batchFile.file) }
+                .mapNotNull { file -> readBatchOrNull(file)?.takeIf { it.events.isNotEmpty() }?.toPublicBatch() }
+        } catch (_: Exception) {
+            emptyList()
         }
-    } catch (_: Exception) {
-        emptyList()
     }
 
-    fun acknowledge(batchId: String) {
+    fun acknowledge(batchId: String) = locked {
         runSafely {
             batchFiles().firstOrNull { it.file.nameWithoutExtension == batchId }?.file?.delete()
         }
     }
 
-    fun deleteAll() {
+    fun deleteAll() = locked {
         runSafely {
             storageDirectory.listFiles()?.filter { it.isFile && isQueueFile(it) }?.forEach { it.delete() }
         }
     }
 
-    fun enforceLimits() {
+    fun enforceLimits() = locked {
         runSafely { enforceLimitsInternal() }
+    }
+
+    /**
+     * Serialises append against read/seal/acknowledge across every [TelemetryQueue] instance for
+     * the same directory: the IME and the upload worker each build their own instance, in the
+     * same (main) process.
+     */
+    private fun <T> locked(block: () -> T): T =
+        synchronized(directoryLocks.getOrPut(storageDirectory.absolutePath) { Any() }) { block() }
+
+    private fun seal(file: File): File {
+        val sealed = File(storageDirectory, "${file.nameWithoutExtension}.$SEALED_EXTENSION")
+        try {
+            Files.move(file.toPath(), sealed.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(file.toPath(), sealed.toPath())
+        }
+        return sealed
     }
 
     private fun enforceLimitsInternal() {
@@ -113,6 +146,9 @@ class TelemetryQueue(
             val freshEvents = batch.events.filter { now - it.occurredAtMs <= limits.maxAgeMs }
             when {
                 freshEvents.isEmpty() -> batchFile.file.delete()
+                // A sealed batch may be mid-upload under its id; rewriting it would change the
+                // bytes the collector deduplicates on, so it is only ever deleted whole.
+                batchFile.sealed -> Unit
                 freshEvents.size != batch.events.size -> writeBatch(batchFile.file, freshEvents)
             }
         }
@@ -124,6 +160,15 @@ class TelemetryQueue(
             batchFile.file.delete()
         }
     }
+
+    /**
+     * Whether [events] stored in [file] stay within both the on-disk (compressed) cap and the
+     * upload (uncompressed) cap. The latter is measured on the exact body the transport sends -
+     * batch id included - because the transport and the collector reject anything larger.
+     */
+    private fun fitsLimits(file: File, events: List<TelemetryEnvelope>): Boolean =
+        encodeTelemetryBatch(TelemetryBatch(file.nameWithoutExtension, events)).size <= limits.maxRequestBytes &&
+            compressBatch(events).size <= limits.maxBatchBytes
 
     private fun validateForPlane(event: TelemetryEnvelope) {
         if (plane != TelemetryPlane.DIAGNOSTICS) return
@@ -138,7 +183,7 @@ class TelemetryQueue(
     }
 
     private fun batchFiles(): List<BatchFile> = storageDirectory.listFiles { file ->
-        file.isFile && file.extension == "batch"
+        file.isFile && (file.extension == OPEN_EXTENSION || file.extension == SEALED_EXTENSION)
     }?.mapNotNull { file ->
         parseBatchFile(file)
     }?.sortedWith(compareBy<BatchFile> { it.sequence }.thenBy { it.createdAt }.thenBy { it.file.name }
@@ -152,6 +197,7 @@ class TelemetryQueue(
                 file = file,
                 sequence = parts[1].toLong(),
                 createdAt = parts[2].toLong(),
+                sealed = file.extension == SEALED_EXTENSION,
             )
         } catch (_: NumberFormatException) {
             null
@@ -160,7 +206,7 @@ class TelemetryQueue(
 
     private fun newBatchFile(): File {
         val sequence = nextSequence()
-        return File(storageDirectory, "batch-$sequence-${clock()}-${UUID.randomUUID()}.batch")
+        return File(storageDirectory, "batch-$sequence-${clock()}-${UUID.randomUUID()}.$OPEN_EXTENSION")
     }
 
     private fun nextSequence(): Long {
@@ -265,7 +311,8 @@ class TelemetryQueue(
         storageDirectory.listFiles()?.filter { it.isFile && it.extension == "tmp" }?.forEach { it.delete() }
     }
 
-    private fun isQueueFile(file: File): Boolean = file.extension == "batch" || file.extension == "tmp"
+    private fun isQueueFile(file: File): Boolean =
+        file.extension == OPEN_EXTENSION || file.extension == SEALED_EXTENSION || file.extension == "tmp"
 
     private fun runSafely(block: () -> Unit) {
         try {
@@ -275,7 +322,17 @@ class TelemetryQueue(
         }
     }
 
-    private data class BatchFile(val file: File, val sequence: Long, val createdAt: Long)
+    private data class BatchFile(val file: File, val sequence: Long, val createdAt: Long, val sealed: Boolean)
+
+    private companion object {
+        /** A batch that may still receive appends. */
+        const val OPEN_EXTENSION = "batch"
+
+        /** A batch handed out for upload: immutable until acknowledged or evicted. */
+        const val SEALED_EXTENSION = "sealed"
+
+        val directoryLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    }
 
     private data class StoredBatch(val file: File, val events: List<TelemetryEnvelope>) {
         fun toPublicBatch() = TelemetryBatch(file.nameWithoutExtension, events)
@@ -288,3 +345,63 @@ private fun JsonObject.requiredString(name: String): String =
 private fun JsonObject.requiredInt(name: String): Int = requiredString(name).toInt()
 
 private fun JsonObject.requiredLong(name: String): Long = requiredString(name).toLong()
+
+/**
+ * Runs [task] for the telemetry queue on [executor]. Callers on the IME main thread use it so
+ * the queue read, JSON encode, gzip, write and Keystore read never block typing; a single serial
+ * thread keeps an append ordered before the upload scheduling that follows it. Never throws.
+ */
+internal fun telemetryOffMainThread(executor: java.util.concurrent.Executor = TelemetryWriteExecutor, task: () -> Unit) {
+    try {
+        executor.execute {
+            try {
+                task()
+            } catch (_: Exception) {
+                // Telemetry is best effort and must never affect keyboard behavior.
+            }
+        }
+    } catch (_: Exception) {
+        // A rejected submission just drops this telemetry write.
+    }
+}
+
+/** Runs [block] on [executor] after everything already posted there, and waits for it. */
+internal suspend fun <T> onTelemetryThread(
+    executor: java.util.concurrent.Executor = TelemetryWriteExecutor,
+    block: () -> T,
+): T = kotlinx.coroutines.withContext(executor.asCoroutineDispatcher()) { block() }
+
+/**
+ * One plane's background queue writer: every append and upload scheduling for the plane runs on
+ * the shared serial telemetry thread. [consentEnabled] is re-read on that thread right before each
+ * append or schedule, so work posted before consent was revoked never lands afterwards; pending
+ * queue deletion goes through [onTelemetryThread] on the same executor, so it runs after any
+ * append already in flight.
+ */
+internal class TelemetryBackgroundWriter(
+    private val executor: java.util.concurrent.Executor,
+    private val consentEnabled: () -> Boolean,
+    private val queue: () -> TelemetryQueue,
+    private val scheduleUpload: () -> Unit,
+) {
+    /** Builds and appends one envelope on the telemetry thread; a null envelope is dropped. */
+    fun record(buildEnvelope: () -> TelemetryEnvelope?) = telemetryOffMainThread(executor) {
+        if (!consentEnabled()) return@telemetryOffMainThread
+        val envelope = buildEnvelope() ?: return@telemetryOffMainThread
+        if (consentEnabled()) queue().append(envelope)
+    }
+
+    /** Appends an already built envelope on the telemetry thread. */
+    fun append(envelope: TelemetryEnvelope) = record { envelope }
+
+    fun schedule() = telemetryOffMainThread(executor) {
+        if (consentEnabled()) scheduleUpload()
+    }
+}
+
+/** The single background thread shared by every telemetry queue writer. */
+internal val TelemetryWriteExecutor: java.util.concurrent.Executor by lazy {
+    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "iaido-telemetry-writer").apply { isDaemon = true }
+    }
+}

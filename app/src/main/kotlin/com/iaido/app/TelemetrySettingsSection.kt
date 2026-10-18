@@ -61,6 +61,24 @@ internal fun telemetryPolicyDigest(plane: TelemetryPlane): String =
         .digest(telemetryDisclosure(plane).toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
 
+/** True when a collector base URL was baked into this build; blank means telemetry cannot work. */
+internal fun isTelemetryConfigured(baseUrl: String): Boolean = baseUrl.isNotBlank()
+
+/** Server-side deletion needs a collector; without one the action could only report a false retry hint. */
+internal fun isDeleteUploadedAvailable(baseUrl: String): Boolean = isTelemetryConfigured(baseUrl)
+
+internal const val TELEMETRY_UNAVAILABLE_MESSAGE =
+    "Telemetry is unavailable in this build: no collector address was configured, so nothing " +
+        "can be shared."
+
+internal const val TELEMETRY_REPAIR_MESSAGE =
+    "The collector no longer recognises this device. Re-registering automatically; pending " +
+        "data will upload once that succeeds."
+
+/** Status text for a plane whose upload credentials were rejected, or null when none is needed. */
+internal fun telemetryRepairStatus(consentEnabled: Boolean, needsReprovisioning: Boolean): String? =
+    TELEMETRY_REPAIR_MESSAGE.takeIf { consentEnabled && needsReprovisioning }
+
 internal fun TelemetryPlane.settingsLabel(): String = when (this) {
     TelemetryPlane.DIAGNOSTICS -> "Diagnostics"
     TelemetryPlane.RESEARCH -> "Research"
@@ -128,10 +146,14 @@ internal class TelemetryConsentController(
         }
     }
 
-    /** Deletes this plane's pending local queue before persisting the disabled consent state. */
+    /**
+     * Persists the disabled consent state, then deletes this plane's pending local queue. In that
+     * order, background appends (which re-check consent right before writing) cannot re-fill the
+     * queue after it was deleted.
+     */
     private suspend fun disable(plane: TelemetryPlane, currentRecord: ConsentRecord): TelemetryConsentOutcome {
-        deletePendingQueue(plane)
         persistConsent(plane, currentRecord.copy(enabled = false, revokedAtMs = now()))
+        deletePendingQueue(plane)
         return TelemetryConsentOutcome(
             TelemetryConsentStatus.DISABLED,
             "${plane.settingsLabel()} telemetry disabled and pending data deleted.",
@@ -166,7 +188,8 @@ internal fun buildTelemetryConsentController(context: Context): TelemetryConsent
 
     return TelemetryConsentController(
         persistConsent = { plane, record -> persistConsentRecord(appContext, plane, record) },
-        deletePendingQueue = { plane -> withContext(Dispatchers.IO) { queueFor(plane).deleteAll() } },
+        // On the telemetry thread, so it runs after any append already posted there.
+        deletePendingQueue = { plane -> onTelemetryThread { queueFor(plane).deleteAll() } },
         deleteUploadedData = { plane ->
             withContext(Dispatchers.IO) { transport?.delete(plane) ?: UploadDisposition.DISCARD }
         },
@@ -233,6 +256,11 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         diagnosticsRecord = diagnosticsConsentFromPreferences(preferences)
         researchRecord = researchConsentFromPreferences(preferences)
         researchWifiOnlyEnabled = withContext(Dispatchers.IO) { researchWifiOnly(context) }
+        val needsReprovisioning = withContext(Dispatchers.IO) {
+            runCatching { TelemetryInstallationStore(context).needsReprovisioning() }.getOrDefault(false)
+        }
+        telemetryRepairStatus(diagnosticsRecord.enabled, needsReprovisioning)?.let { diagnosticsStatus = it }
+        telemetryRepairStatus(researchRecord.enabled, needsReprovisioning)?.let { researchStatus = it }
     }
 
     suspend fun refresh() {
@@ -289,32 +317,39 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         scope.launch { withContext(Dispatchers.IO) { setResearchWifiOnly(context, wifiOnly) } }
     }
 
+    val telemetryConfigured = isTelemetryConfigured(BuildConfig.IAIDO_TELEMETRY_BASE_URL)
+
     HorizontalDivider()
     Text("Privacy & diagnostics", style = MaterialTheme.typography.titleMedium)
     Text("Both kinds of telemetry are off by default. You can turn either one off, or delete its data, at any time.")
+    if (!telemetryConfigured) {
+        Text(TELEMETRY_UNAVAILABLE_MESSAGE, color = MaterialTheme.colorScheme.error)
+    }
 
     TelemetryPlaneToggle(
         title = "Share anonymous diagnostics",
         disclosure = telemetryDisclosure(TelemetryPlane.DIAGNOSTICS),
         enabled = diagnosticsRecord.enabled,
-        busy = diagnosticsBusy,
+        busy = diagnosticsBusy || !telemetryConfigured,
         statusText = diagnosticsStatus,
         onCheckedChange = { enabled -> applyChange(TelemetryPlane.DIAGNOSTICS, enabled) },
         onDeletePending = { deletePending(TelemetryPlane.DIAGNOSTICS) },
         onDeleteUploaded = { deleteUploaded(TelemetryPlane.DIAGNOSTICS) },
+        deleteUploadedEnabled = isDeleteUploadedAvailable(BuildConfig.IAIDO_TELEMETRY_BASE_URL),
     )
 
     TelemetryPlaneToggle(
         title = "Contribute typing research data",
         disclosure = telemetryDisclosure(TelemetryPlane.RESEARCH),
         enabled = researchRecord.enabled,
-        busy = researchBusy,
+        busy = researchBusy || !telemetryConfigured,
         statusText = researchStatus,
         onCheckedChange = { enabled ->
             if (enabled) showResearchConfirmation = true else applyChange(TelemetryPlane.RESEARCH, false)
         },
         onDeletePending = { deletePending(TelemetryPlane.RESEARCH) },
         onDeleteUploaded = { deleteUploaded(TelemetryPlane.RESEARCH) },
+        deleteUploadedEnabled = isDeleteUploadedAvailable(BuildConfig.IAIDO_TELEMETRY_BASE_URL),
     )
 
     // Independent of research consent itself (Task 6's plane-isolation pattern): this only ever
@@ -325,7 +360,7 @@ internal fun TelemetrySettingsSection(context: Context, scope: CoroutineScope) {
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text("Upload research data on Wi-Fi only", style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = researchWifiOnlyEnabled, onCheckedChange = ::setWifiOnly)
+        Switch(checked = researchWifiOnlyEnabled, onCheckedChange = ::setWifiOnly, enabled = telemetryConfigured)
     }
 
     if (showResearchConfirmation) {
@@ -356,6 +391,7 @@ private fun TelemetryPlaneToggle(
     onCheckedChange: (Boolean) -> Unit,
     onDeletePending: () -> Unit,
     onDeleteUploaded: () -> Unit,
+    deleteUploadedEnabled: Boolean,
 ) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
@@ -370,7 +406,7 @@ private fun TelemetryPlaneToggle(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onDeletePending) { Text("Delete pending data") }
-            TextButton(onClick = onDeleteUploaded) { Text("Delete uploaded data") }
+            TextButton(onClick = onDeleteUploaded, enabled = deleteUploadedEnabled) { Text("Delete uploaded data") }
         }
         if (statusText.isNotBlank()) {
             Text(statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)

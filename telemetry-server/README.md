@@ -22,7 +22,7 @@ in code -- everything below is read from the process environment at startup
 | `IAIDO_OPERATOR_TOKEN` | yes | -- | Bearer token operators use for `/v1/operator/*` routes (batch listing, deletion, export, aggregates). Rotate by redeploying with a new value; there is no in-band rotation endpoint. |
 | `IAIDO_DASHBOARD_USERNAME` | no | `iaido` | Username for the operator dashboard's browser login. |
 | `IAIDO_DASHBOARD_PASSWORD` | no | `""` (reuses `IAIDO_OPERATOR_TOKEN`) | Password for the operator dashboard's browser login; at least 12 characters when set. Leave empty to reuse the operator token rather than introduce a second, possibly weaker, secret. Bearer access to `/v1/operator/*` always uses `IAIDO_OPERATOR_TOKEN` regardless of this value. |
-| `IAIDO_S3_ENDPOINT_URL` | yes (prod) | `""` | S3-compatible endpoint (MinIO locally) for the `diagnostics/` and `research/` object prefixes. |
+| `IAIDO_S3_ENDPOINT_URL` | yes (prod) | `""` | S3-compatible endpoint (SeaweedFS locally) for the `diagnostics/` and `research/` object prefixes. |
 | `IAIDO_S3_BUCKET` | yes (prod) | `""` | Bucket that holds both prefixes. |
 | `IAIDO_S3_ACCESS_KEY` | yes (prod) | `""` | S3 access key. |
 | `IAIDO_S3_SECRET_KEY` | yes (prod) | `""` | S3 secret key. |
@@ -49,8 +49,8 @@ talks to this deployment's `/v1/...` routes.
 
 ## Local Docker Compose startup
 
-`docker-compose.yml` runs Postgres, MinIO (S3-compatible object storage), a
-one-shot MinIO bucket initializer, and the telemetry service itself.
+`docker-compose.yml` runs Postgres, SeaweedFS (a local stand-in for S3; MinIO's public
+images can no longer be pulled), a one-shot bucket initializer, and the telemetry service itself.
 
 ```bash
 export IAIDO_POSTGRES_PASSWORD=local-dev-password
@@ -60,54 +60,50 @@ export IAIDO_OPERATOR_TOKEN=local-dev-operator-token
 docker compose up --build
 ```
 
-The `telemetry` service installs the package (`pip install -e .`) and runs
-`uvicorn iaido_telemetry.app:create_app --factory` on port 8000 (only
-exposed to other compose services via `expose`, not published to the host,
-by design -- put a TLS-terminating proxy in front for anything beyond a
-laptop). Optional overrides: `IAIDO_S3_REGION`, `IAIDO_MAX_REQUEST_BYTES`,
+The `telemetry` service is built from `Dockerfile` (source baked into the image, so no bind mount
+is needed) and runs `uvicorn iaido_telemetry.app:create_app --factory` on port 8000, published to
+**loopback only** (`127.0.0.1:8000`, or `IAIDO_TELEMETRY_PORT` to pick another host port). The
+local object store accepts any credentials, so never publish it. Plain HTTP is refused with 426
+by design; put a TLS-terminating proxy in front (see below). Optional overrides:
+`IAIDO_S3_REGION`, `IAIDO_MAX_REQUEST_BYTES`,
 `IAIDO_RATE_LIMIT_REQUESTS`, `IAIDO_RATE_LIMIT_WINDOW_SECONDS`,
 `IAIDO_RATE_LIMIT_MAX_BUCKETS`, `IAIDO_DIAGNOSTICS_RETENTION_DAYS`,
 `IAIDO_RESEARCH_RETENTION_DAYS` (see the table above for defaults).
 
-### Local development: hot reload
+Smoke test without a proxy (the header stands in for the proxy's TLS termination):
 
-The compose stack runs uvicorn with `--reload` scoped to the mounted source
-(`--reload-dir /service/src`), so editing any module under `telemetry-server/src/` restarts the
-worker within a second or two - no `docker compose restart` needed. The container log shows it:
-
-```
-Will watch for changes in these directories: ['/service/src']
-Started reloader process [26] using WatchFiles
-...
-Started server process [31]
+```bash
+curl -X POST -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/v1/installations   # 201
 ```
 
-Two consequences worth knowing:
+### Local development: hot reload (optional)
 
-- The source mount must stay writable, and `pip install -e .` means the running process imports
-  from `/service/src` - that is what makes a reload pick up the new code.
-- `--reload` is a development affordance: a production deployment runs uvicorn without it, so
-  changing code there takes an explicit rollout.
-- `docker compose up -d` does **not** reload anything by itself: it only recreates containers
-  when the compose configuration changes. Code changes are handled by the reloader; environment
-  changes still need a recreate (`docker compose up -d` after editing the env file).
+The default stack bakes the source into the image, so code changes need
+`docker compose up -d --build`. To get hot reload instead, add the override file, which mounts the
+source and runs uvicorn with `--reload --reload-dir /service/src`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.hotreload.yml up -d --build
+```
+
+This needs a writable bind mount of this folder (`pip install -e .` writes `*.egg-info`), which
+Docker Desktop on Windows may refuse ("path is not shared from the host"); in that case stay on
+the default stack. `--reload` is a development affordance; production runs without it.
 
 ### Behind a TLS-terminating proxy on the same host
 
-Publish the port to loopback only, then point the proxy at it:
-
-```yaml
-# docker-compose.override.yml
-services:
-  telemetry:
-    ports:
-      - "127.0.0.1:8000:8000"
-```
+The compose file already publishes the port on loopback only; point the proxy at it. For a phone
+or emulator on your own tailnet, use `tailscale serve`, which is **tailnet-only** HTTPS:
 
 ```bash
-tailscale funnel --bg 8000          # or: caddy reverse-proxy / nginx
-curl -X POST https://<your-host>/v1/installations   # 201
+tailscale serve --bg 8000           # or: caddy reverse-proxy / nginx
+curl -X POST https://<your-host>.<tailnet>.ts.net/v1/installations   # 201
+tailscale serve --https=443 off     # remove it again
 ```
+
+Never use `tailscale funnel` for this: Funnel publishes the service to the **public internet**,
+and this server holds user telemetry. Only devices on your tailnet (the Tailscale app running on
+the phone) can reach a `serve` URL.
 
 Two details make this work and are easy to get wrong:
 
@@ -115,15 +111,78 @@ Two details make this work and are easy to get wrong:
   because the proxy connects from the Docker gateway rather than `127.0.0.1`.
   Without that, uvicorn drops the proxy's `X-Forwarded-Proto: https`, the app
   sees an `http` scheme, and `IngestionBoundaryMiddleware` answers **426**
-  for every `/v1/` route. The port mapping above is host-local, so only the
+  for every `/v1/` route. The port mapping is host-local, so only the
   local proxy can reach the container to spoof that header.
-- `/` returns 404 and there is no `/health` route; probe the service with an
-  authenticated operator route such as
-  `GET /v1/operator/diagnostics/batches`, or by provisioning an installation.
+- `/` is the operator dashboard (Basic auth) and there is no `/health` route; probe the service
+  with an authenticated operator route such as `GET /v1/operator/diagnostics/batches`, or by
+  provisioning an installation.
 
-Plain `docker compose up --build` is enough when the service is reached from
-another compose service; it is not reachable from the host without the port
-mapping above.
+### Pointing the app at the collector (owner, one-time)
+
+The app only uploads when a collector URL is baked into the build; a build without one shows
+telemetry as "unavailable in this build" in Settings.
+
+1. Run `tailscale serve --bg 8000` (above) and note the `https://<your-host>.<tailnet>.ts.net` URL.
+2. For CI/release builds: set the GitHub repository **variable** `IAIDO_TELEMETRY_BASE_URL` to that
+   URL (Settings > Secrets and variables > Actions > Variables). The workflows pass it as
+   `-PiaidoTelemetryBaseUrl`; if unset, the build has telemetry unavailable.
+   This URL is baked into the public release and nightly APKs, so the collector must stay
+   tailnet-only (`tailscale serve`, never `tailscale funnel`): otherwise every opted-in user's
+   research data, from anyone who installs the APK, would land on this machine.
+3. For local builds: add `iaidoTelemetryBaseUrl=https://<your-host>.<tailnet>.ts.net` to
+   `~/.gradle/gradle.properties` (not the repo's `gradle.properties`, which only carries a commented
+   example).
+4. Android emulators may not resolve the tailnet name; see B9 in
+   `docs/superpowers/diagnosis/2026-10-17-swipe-telemetry.md` for the hosts-file workaround. Real
+   phones just need the Tailscale app running.
+
+### Run the emulator end-to-end test
+
+`app/src/androidTest/kotlin/com/iaido/app/SwipeTelemetryE2eTest.kt` enables research consent
+through the real consent controller, swipes "hello" on the real Iaido keyboard, and polls
+`GET /v1/operator/research/batches?app_version=<installed version>` (plus the export) until the
+swipe `gesture_trace` arrives; it also checks the batch is absent under another version, that
+nothing is sent with consent off, and that lost credentials are re-provisioned. Without a baked
+URL and an operator token every test returns early (passes without doing anything).
+
+1. Start the collector with throwaway dev credentials (Git Bash, from `telemetry-server/`):
+
+   ```bash
+   export IAIDO_POSTGRES_PASSWORD=local-dev-password IAIDO_S3_ACCESS_KEY=local-dev-access-key \
+          IAIDO_S3_SECRET_KEY=local-dev-secret-key IAIDO_OPERATOR_TOKEN=local-dev-operator-token
+   docker compose -p iaido-swipe-e2e up -d --build
+   tailscale serve --bg 8000           # tailnet-only HTTPS; never `tailscale funnel`
+   tailscale status --json | grep -m1 DNSName   # -> <host>.<tailnet>.ts.net
+   ```
+
+2. Boot the emulator and make the tailnet name resolve inside it (B9; repeat after every boot;
+   needs a userdebug/Google APIs image for `adb root`; `<tailscale-ip>` is `tailscale ip -4`):
+
+   ```bash
+   A=$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe
+   $LOCALAPPDATA/Android/Sdk/emulator/emulator.exe -avd IaidoApi35 -no-snapshot-save -no-boot-anim &
+   $A wait-for-device && $A root && $A wait-for-device
+   MSYS_NO_PATHCONV=1 $A shell 'cat /system/etc/hosts > /data/local/tmp/hosts;
+     echo "<tailscale-ip> <host>.<tailnet>.ts.net" >> /data/local/tmp/hosts;
+     chmod 644 /data/local/tmp/hosts; chcon u:object_r:system_file:s0 /data/local/tmp/hosts;
+     mount -o bind /data/local/tmp/hosts /system/etc/hosts'
+   ```
+
+3. Run the test from the repo root. The URL is baked into the build; the operator token goes only
+   on the command line (never commit it):
+
+   ```bash
+   ./gradlew :app:connectedDebugAndroidTest \
+     -PiaidoTelemetryBaseUrl=https://<host>.<tailnet>.ts.net \
+     -Pandroid.testInstrumentationRunnerArguments.class=com.iaido.app.SwipeTelemetryE2eTest \
+     -Pandroid.testInstrumentationRunnerArguments.iaidoOperatorToken=local-dev-operator-token
+   ```
+
+4. See the trace in the dashboard: `https://<host>.<tailnet>.ts.net/?app_version=<versionName>`
+   (Basic auth `iaido` / the operator token), then open the batch.
+
+Stop everything with `docker compose -p iaido-swipe-e2e down -v` and
+`tailscale serve --https=443 off`.
 
 ## Migrations
 
@@ -134,9 +193,32 @@ NOT EXISTS`-equivalent DDL for every table declared in
 `src/iaido_telemetry/db.py` (`installations`, `diagnostics_batches`,
 `research_batches`, `diagnostics_event_facts`, `research_event_facts`,
 `audit_records`). Restarting the service is therefore always safe to pick
-up newly added tables. If a future change needs a real column-level
-migration (renaming/dropping a column, backfilling data), introduce
-Alembic at that point rather than hand-editing tables in production.
+up newly added tables.
+
+Columns added later are handled by a small additive step in the same call: `create_schema()` adds
+`app_version` and `algorithm_version` (indexed, default `unknown`) to both batch tables when they
+are missing, and startup then backfills every still-`unknown` batch from its stored payload
+(batches whose payload cannot be read stay `unknown`). If a future change needs a destructive
+migration (renaming/dropping a column), introduce Alembic at that point rather than
+hand-editing tables in production.
+
+## Versions
+
+Every batch is tagged at ingest with the `app_version` and `algorithm_version` of its newest
+event (`unknown` when the batch is empty or has none; only research gesture and correction
+payloads carry an algorithm version). `app_version` is a release such as `0.1.20` or a nightly
+such as `0.1.20-nightly.123`.
+
+- `GET /v1/operator/{plane}/batches?app_version=0.1.20` lists one version's batches (each row also
+  shows its `app_version` and `algorithm_version`).
+- `GET /v1/operator/{plane}/versions` returns `[{app_version, batches, events}]`, newest first.
+- Exports are per version: `app_version` is required (see below). Versions never mix in an export.
+- A retried batch is acknowledged without being stored twice, so it counts once.
+- A batch can hold events of two versions (an upgrade mid-queue). The tag, the `?app_version=`
+  filter and the `/versions` counts follow the batch tag (its newest event), so such a batch is
+  listed and counted under the newer version only. Exports do not depend on the tag: they scan
+  every batch in the time range and keep events whose own `app_version` matches, so the older
+  events are exported under their own version and versions never mix.
 
 ## Retention
 
@@ -203,11 +285,12 @@ tagged with `actor="device"` or `actor="operator"`).
 `src/iaido_telemetry/exports.py` exposes:
 
 ```python
-export_plane(database, storage, settings, plane, start_ms, end_ms, output, *, operator_token) -> int
+export_plane(database, storage, settings, plane, start_ms, end_ms, output, *, operator_token, app_version) -> int
 ```
 
 It requires an explicit plane, an explicit `[start_ms, end_ms)` time range
-(by `received_at_ms`), and a valid operator token -- it raises
+(by `received_at_ms`), exactly one `app_version` (`ValueError`, or HTTP 422, when absent), and a
+valid operator token -- it raises
 `ExportAuthError` on a bad token, independent of any HTTP-layer check, so
 it is also safe to call from a standalone operator script. It writes
 newline-delimited JSON (NDJSON), one line per event, to `output`, and never
@@ -222,7 +305,7 @@ Over HTTP:
 curl -G \
   -H "Authorization: Bearer $IAIDO_OPERATOR_TOKEN" \
   --data-urlencode "start_ms=1750000000000" \
-  --data-urlencode "end_ms=1750086400000" \
+  --data-urlencode "end_ms=1750086400000"   --data-urlencode "app_version=0.1.20" \
   "https://telemetry.example.com/v1/operator/research/export" \
   -o research-export.ndjson
 ```
@@ -231,7 +314,9 @@ curl -G \
 
 `GET /` renders a read-only HTML view of both planes from the same repository and object storage:
 per-plane batch and event counts, the newest batches (each linking to its own page), the
-diagnostics aggregate facts, research trace/correction counts, and the audit log.
+diagnostics aggregate facts, research trace/correction counts, and the audit log. A version picker
+(`/?app_version=...`) scopes the batch lists and counts to one app version, defaulting to the
+latest; the aggregate tables are not versioned.
 
 | Route | Contents |
 |---|---|
@@ -284,10 +369,10 @@ Notes:
 deterministic, de-identified fixture bundle for core-engine and connected-IME regression tests:
 
 ```python
-export_research_fixtures(database, storage, settings, start_ms, end_ms, review_manifest, output_dir, *, operator_token) -> Path
+export_research_fixtures(database, storage, settings, start_ms, end_ms, review_manifest, output_dir, *, operator_token, app_version) -> Path
 ```
 
-`review_manifest` is required (a mapping of approved content hashes, or a path to a JSON manifest
+`app_version` is required (one version per bundle). `review_manifest` is required (a mapping of approved content hashes, or a path to a JSON manifest
 shaped `{"approved": {"<sha256>": "<note>"}}`); a missing or empty manifest raises `ValueError`, so
 unreviewed research data can never reach a fixture file. Approved records are revalidated against
 the current research bounds, stripped of installation/session/batch ids and receive timestamps,
@@ -383,7 +468,7 @@ created above, and are discarded with it.
 
 ```bash
 python -m pytest tests/test_deletion_retention_export.py -q
-python -m pytest tests -q          # full suite: 102 tests
+python -m pytest tests -q          # full suite: 118 tests
 ```
 
 Runs deletion (metadata + object removal, idempotency, plane isolation,
@@ -396,5 +481,5 @@ aggregate-view (plane separation) coverage.
 
 `tests/test_fixture_export.py` covers only the local export functions and
 the HTTP routes through `TestClient`; nothing here has been run against a
-deployed staging collector, and the `IAIDO_S3_*` MinIO path-style addressing
+deployed staging collector, and the `IAIDO_S3_*` real-S3 (non-SeaweedFS) addressing
 noted above is still unverified outside the `LocalObjectStorage` test double.

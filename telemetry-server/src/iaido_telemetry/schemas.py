@@ -29,9 +29,14 @@ QueueBatchIdentifier = Annotated[
         ),
     ),
 ]
+# `0.1.20` for releases, `0.1.20-nightly.123` for nightly builds (`<base>-nightly.<CI run number>`).
 AppVersion = Annotated[
     str,
-    Field(min_length=5, max_length=14, pattern=r"^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$"),
+    Field(
+        min_length=5,
+        max_length=32,
+        pattern=r"^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:-nightly\.[0-9]{1,9})?$",
+    ),
 ]
 SchemaVersion = Literal[1]
 
@@ -269,6 +274,14 @@ class OperatorBatch(StrictModel):
     checksum: str
     object_key: str
     received_at_ms: int
+    app_version: str = "unknown"
+    algorithm_version: str = "unknown"
+
+
+class VersionSummary(StrictModel):
+    app_version: str
+    batches: int
+    events: int
 
 
 class OperatorBatchList(StrictModel):

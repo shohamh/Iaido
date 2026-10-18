@@ -28,6 +28,7 @@ from .db import (
     InstallationRecord,
     PostgresRepository,
     TelemetryRepository,
+    derive_versions,
 )
 from .exports import ExportAuthError, export_plane
 from .schemas import (
@@ -38,6 +39,7 @@ from .schemas import (
     OperatorBatch,
     OperatorBatchList,
     ResearchBatch,
+    VersionSummary,
 )
 from .storage import ObjectConflictError, ObjectStorage, S3ObjectStorage
 
@@ -230,6 +232,7 @@ def create_app(
         )
     assert storage is not None
     database.create_schema()
+    database.backfill_versions(storage)
     limiter = RateLimiter(
         active_settings.rate_limit_requests,
         active_settings.rate_limit_window_seconds,
@@ -305,6 +308,9 @@ def create_app(
             separators=(",", ":"),
         ).encode("utf-8")
         checksum = hashlib.sha256(raw).hexdigest()
+        app_version, algorithm_version = derive_versions(
+            batch.model_dump(mode="json")["events"]
+        )
         existing = database.batch(plane, installation.installation_id, batch.batch_id)
         if existing is not None:
             if not credentials_match(checksum, existing.checksum):
@@ -329,6 +335,8 @@ def create_app(
                 batch.batch_id,
                 checksum,
                 object_key,
+                app_version,
+                algorithm_version,
             )
         except BatchIdentityConflict as error:
             raise HTTPException(
@@ -418,8 +426,10 @@ def create_app(
         response_model=OperatorBatchList,
         dependencies=[Depends(require_operator)],
     )
-    def operator_batches(plane: Plane) -> OperatorBatchList:
-        records = database.list_batches(plane)
+    def operator_batches(
+        plane: Plane, app_version: str | None = None
+    ) -> OperatorBatchList:
+        records = database.list_batches(plane, app_version)
         return OperatorBatchList(
             plane=plane,
             batches=[
@@ -429,13 +439,29 @@ def create_app(
                     checksum=record.checksum,
                     object_key=record.object_key,
                     received_at_ms=record.received_at_ms,
+                    app_version=record.app_version,
+                    algorithm_version=record.algorithm_version,
                 )
                 for record in records
             ],
         )
 
+    @app.get(
+        "/v1/operator/{plane}/versions",
+        response_model=list[VersionSummary],
+        dependencies=[Depends(require_operator)],
+    )
+    def operator_versions(plane: Plane) -> list[VersionSummary]:
+        return [VersionSummary(**row) for row in database.version_summaries(plane)]
+
     @app.get("/v1/operator/{plane}/export")
-    def operator_export(plane: Plane, start_ms: int, end_ms: int, request: Request):
+    def operator_export(
+        plane: Plane,
+        start_ms: int,
+        end_ms: int,
+        request: Request,
+        app_version: str | None = None,
+    ):
         token = bearer_credential(request)
         buffer = io.StringIO()
         try:
@@ -448,6 +474,7 @@ def create_app(
                 end_ms,
                 buffer,
                 operator_token=token,
+                app_version=app_version,
             )
         except ExportAuthError as error:
             raise HTTPException(

@@ -73,7 +73,7 @@ class TelemetrySettingsSectionTest {
     }
 
     @Test
-    fun `disabling a plane deletes its pending queue before persisting the disabled state`() = runBlocking {
+    fun `disabling a plane persists the disabled state before deleting its pending queue`() = runBlocking {
         val events = mutableListOf<String>()
         val controller = TelemetryConsentController(
             now = { 2_000L },
@@ -88,7 +88,9 @@ class TelemetrySettingsSectionTest {
         val outcome = controller.setEnabled(TelemetryPlane.DIAGNOSTICS, false, enabledRecord)
 
         assertEquals(TelemetryConsentStatus.DISABLED, outcome.status)
-        assertEquals(listOf("delete", "persist:false:2000"), events)
+        // Consent off first, so an append re-checking consent on the telemetry thread after the
+        // deletion can never re-fill the queue.
+        assertEquals(listOf("persist:false:2000", "delete"), events)
     }
 
     @Test
@@ -170,5 +172,30 @@ class TelemetrySettingsSectionTest {
     fun `policy digests differ between planes and are stable for the same plane`() {
         assertEquals(telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS), telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS))
         assertTrue(telemetryPolicyDigest(TelemetryPlane.DIAGNOSTICS) != telemetryPolicyDigest(TelemetryPlane.RESEARCH))
+    }
+
+    @Test
+    fun `blankBaseUrlShowsUnavailableAndDisablesToggles`() {
+        assertFalse(isTelemetryConfigured(""))
+        assertFalse(isTelemetryConfigured("   "))
+        assertTrue(TELEMETRY_UNAVAILABLE_MESSAGE.contains("unavailable in this build"))
+    }
+
+    @Test
+    fun `configuredBaseUrlShowsToggles`() {
+        assertTrue(isTelemetryConfigured("https://host.tailnet.ts.net"))
+    }
+
+    @Test
+    fun `deleteUploadedIsUnavailableWithoutBaseUrl`() {
+        assertFalse(isDeleteUploadedAvailable(""))
+        assertTrue(isDeleteUploadedAvailable("https://host.tailnet.ts.net"))
+    }
+
+    @Test
+    fun `settings says honestly that a rejected registration is being repaired`() {
+        assertEquals(TELEMETRY_REPAIR_MESSAGE, telemetryRepairStatus(consentEnabled = true, needsReprovisioning = true))
+        assertEquals(null, telemetryRepairStatus(consentEnabled = false, needsReprovisioning = true))
+        assertEquals(null, telemetryRepairStatus(consentEnabled = true, needsReprovisioning = false))
     }
 }

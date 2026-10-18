@@ -70,6 +70,7 @@ def envelope(
     event_id: str = DEFAULT_EVENT_ID,
     event_type: str = "gesture_outcome",
     payload: dict | None = None,
+    app_version: str = "0.1.4",
 ) -> dict:
     return {
         "schema_version": 1,
@@ -78,7 +79,7 @@ def envelope(
         "installation_id": installation_id,
         "session_id": DEFAULT_SESSION_ID,
         "occurred_at_ms": 1_750_000_000_000,
-        "app_version": "0.1.4",
+        "app_version": app_version,
         "build_type": "release",
         "android_api": 36,
         "event_type": event_type,

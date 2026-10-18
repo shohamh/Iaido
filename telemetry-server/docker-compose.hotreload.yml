@@ -1,0 +1,13 @@
+# Optional: mount the source and run uvicorn with --reload, so editing src/ restarts the worker.
+#   docker compose -f docker-compose.yml -f docker-compose.hotreload.yml up -d --build
+# Needs the telemetry-server folder to be shareable with Docker (on Windows Docker Desktop may
+# refuse the bind mount; the default stack bakes the source into the image instead).
+services:
+  telemetry:
+    command:
+      - /bin/sh
+      - -ec
+      - pip install --no-cache-dir -e . && uvicorn iaido_telemetry.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=* --reload --reload-dir /service/src
+    volumes:
+      # Writable: `pip install -e .` writes *.egg-info into the mounted tree.
+      - .:/service

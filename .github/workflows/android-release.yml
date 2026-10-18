@@ -65,6 +65,7 @@ jobs:
           ./gradlew :app:assembleRelease \
             -PiaidoVersion="$IAIDO_VERSION" \
             -PiaidoVersionCode="$IAIDO_VERSION_CODE" \
+            -PiaidoTelemetryBaseUrl="${{ vars.IAIDO_TELEMETRY_BASE_URL }}" \
             --no-daemon --console=plain
       - name: Verify release APK identity and signature
         run: |

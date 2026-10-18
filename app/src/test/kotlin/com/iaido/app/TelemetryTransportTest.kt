@@ -33,11 +33,43 @@ class TelemetryTransportTest {
     }
 
     @Test
-    fun `server 429 and 503 retry while schema and auth rejection discard`() {
-        assertEquals(UploadDisposition.RETRY, dispositionForResponse(429))
-        assertEquals(UploadDisposition.RETRY, dispositionForResponse(503))
-        assertEquals(UploadDisposition.DISCARD, dispositionForResponse(401))
-        assertEquals(UploadDisposition.DISCARD, dispositionForResponse(422))
+    fun `only 401 is an auth failure and only explicit permanent rejections discard`() {
+        assertEquals(UploadDisposition.UNAUTHORIZED, dispositionForResponse(401))
+        // The collector's permanent client rejections: bad request, conflicting batch content,
+        // body too large, schema invalid.
+        listOf(400, 409, 413, 422).forEach { code ->
+            assertEquals(UploadDisposition.DISCARD, dispositionForResponse(code), "status $code")
+        }
+        // Everything else may succeed later and must keep the batch: redirects (not followed; a
+        // captive portal answers 302), 403 (never sent by the collector), timeouts, HTTPS
+        // required, rate limits, server errors and any unknown status.
+        listOf(301, 302, 307, 403, 404, 408, 418, 425, 426, 429, 500, 503, 599, 600, 199).forEach { code ->
+            assertEquals(UploadDisposition.RETRY, dispositionForResponse(code), "status $code")
+        }
+    }
+
+    @Test
+    fun `a local non IO failure while uploading keeps the batch for retry`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            storeWithCredentials(),
+        ) { error("unexpected local failure") }
+
+        assertEquals(UploadDisposition.RETRY, transport.upload(TelemetryPlane.RESEARCH, sampleBatch()))
+    }
+
+    @Test
+    fun `upload without stored credentials is unauthorized and opens no connection`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(FakeInstallationCredentialStorage()),
+            ::unexpectedConnection,
+        )
+
+        assertEquals(
+            UploadDisposition.UNAUTHORIZED,
+            transport.upload(TelemetryPlane.RESEARCH, sampleBatch()),
+        )
     }
 
     @Test
@@ -55,7 +87,7 @@ class TelemetryTransportTest {
         )
 
         assertEquals(
-            UploadDisposition.DISCARD,
+            UploadDisposition.UNAUTHORIZED,
             transport.upload(TelemetryPlane.DIAGNOSTICS, sampleBatch()),
         )
     }
@@ -140,6 +172,41 @@ class TelemetryTransportTest {
         assertEquals("DELETE", connection.requestMethod)
         assertEquals("/v1/research", connection.url.path)
         assertEquals("Bearer delete-secret", connection.getRequestProperty("Authorization"))
+    }
+
+    @Test
+    fun `delete still reaches data uploaded under a retired installation`() {
+        val requests = mutableListOf<RecordingConnection>()
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(
+                FakeInstallationCredentialStorage(
+                    installation = TelemetryInstallation("installation-2", "write-2", "delete-2"),
+                    retired = RetiredInstallation("installation-1", "delete-1"),
+                ),
+            ),
+        ) { url ->
+            RecordingConnection(url, responseCode = 200, responseBody = """{"deleted":true}""").also { requests += it }
+        }
+
+        assertEquals(UploadDisposition.ACKNOWLEDGED, transport.delete(TelemetryPlane.RESEARCH))
+        assertEquals(
+            setOf("Bearer delete-2", "Bearer delete-1"),
+            requests.map { it.getRequestProperty("Authorization") }.toSet(),
+        )
+        assertTrue(requests.all { it.url.path == "/v1/research" })
+    }
+
+    @Test
+    fun `delete with only a retired installation the collector no longer knows succeeds`() {
+        val transport = TelemetryTransport(
+            URL("https://collector.invalid"),
+            TelemetryInstallationStore(
+                FakeInstallationCredentialStorage(retired = RetiredInstallation("installation-1", "delete-1")),
+            ),
+        ) { url -> RecordingConnection(url, responseCode = 401, responseBody = "{}") }
+
+        assertEquals(UploadDisposition.ACKNOWLEDGED, transport.delete(TelemetryPlane.RESEARCH))
     }
 
     @Test
@@ -268,6 +335,7 @@ class TelemetryTransportTest {
 
 internal class FakeInstallationCredentialStorage(
     private var installation: TelemetryInstallation? = null,
+    private var retired: RetiredInstallation? = null,
 ) : InstallationCredentialStorage {
     override fun read(): TelemetryInstallation? = installation
 
@@ -275,8 +343,19 @@ internal class FakeInstallationCredentialStorage(
         this.installation = installation
     }
 
+    override fun clearActive() {
+        installation = null
+    }
+
+    override fun readRetired(): RetiredInstallation? = retired
+
+    override fun writeRetired(retired: RetiredInstallation) {
+        this.retired = retired
+    }
+
     override fun clear() {
         installation = null
+        retired = null
     }
 }
 

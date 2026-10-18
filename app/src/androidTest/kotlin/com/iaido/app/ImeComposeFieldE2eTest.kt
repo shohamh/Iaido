@@ -29,8 +29,13 @@ class ImeComposeFieldE2eTest {
             context.startActivity(Intent(context, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             val device = uiDevice()
             device.wait(Until.hasObject(By.textContains("Settings")), 8_000L)
+            // The Settings page keeps growing, so start from the top and scroll down until found.
+            repeat(8) {
+                device.swipe(device.displayWidth / 2, device.displayHeight / 4, device.displayWidth / 2, device.displayHeight * 3 / 4, 25)
+            }
+            device.waitForIdle()
             var scrolls = 0
-            while (!device.hasObject(By.text("Live preview")) && scrolls++ < 12) {
+            while (!device.hasObject(By.text("Live preview")) && scrolls++ < 40) {
                 device.swipe(device.displayWidth / 2, device.displayHeight * 3 / 4, device.displayWidth / 2, device.displayHeight / 4, 25)
                 device.waitForIdle()
             }

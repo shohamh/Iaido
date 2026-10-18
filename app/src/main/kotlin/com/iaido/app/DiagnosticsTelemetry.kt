@@ -11,7 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
@@ -143,7 +145,9 @@ class DiagnosticsTelemetry(
         val events = pendingEvents.toList()
         if (events.isEmpty()) return
         pendingEvents.clear()
-        events.forEach { event -> appendToQueue(envelopeFactory(event)) }
+        // One event that cannot be enveloped (e.g. not provisioned yet) must not skip the rest or
+        // the upload scheduling, which is what triggers provisioning.
+        events.forEach { event -> runCatching { appendToQueue(envelopeFactory(event)) } }
         scheduleUpload()
     }
 
@@ -210,11 +214,23 @@ object DiagnosticsTelemetryProvider {
     fun initialize(context: Context) {
         if (telemetry != null) return
         val appContext = context.applicationContext
+        val writer = TelemetryBackgroundWriter(
+            executor = TelemetryWriteExecutor,
+            consentEnabled = {
+                runCatching {
+                    runBlocking { diagnosticsConsentFromPreferences(appContext.settingsStore.data.first()).enabled }
+                }.getOrDefault(false)
+            },
+            queue = { telemetryQueue(appContext) },
+            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) },
+        )
 
         telemetry = DiagnosticsTelemetry(
             diagnosticsEnabled = ::isEnabled,
-            appendToQueue = { envelope -> telemetryQueue(appContext).append(envelope) },
-            scheduleUpload = { TelemetryUploadScheduler.schedule(appContext, TelemetryPlane.DIAGNOSTICS) },
+            // flush() runs on the IME main thread (onFinishInputView): queue IO and scheduling go to
+            // the serial telemetry thread, appends first, each re-checking the stored consent.
+            appendToQueue = { envelope -> writer.append(envelope) },
+            scheduleUpload = { writer.schedule() },
             envelopeFactory = { event -> buildEnvelope(appContext, event) },
         )
 
@@ -274,22 +290,19 @@ object DiagnosticsTelemetryProvider {
         }
     }
 
+    /**
+     * Throws when no server-issued installation exists yet, so the event is dropped (never stamped
+     * with invented credentials); [DiagnosticsTelemetry] still schedules upload, which provisions.
+     */
     private fun buildEnvelope(context: Context, event: DiagnosticsEvent): TelemetryEnvelope {
-        val installation = runCatching {
-            TelemetryInstallationStore(context).getOrCreateInstallation {
-                TelemetryInstallation(
-                    installationId = UUID.randomUUID().toString(),
-                    writeCredential = UUID.randomUUID().toString(),
-                    deletionCredential = UUID.randomUUID().toString(),
-                )
-            }
-        }.getOrNull()
+        val installation = runCatching { TelemetryInstallationStore(context).envelopeInstallation() }
+            .getOrNull() ?: throw IllegalStateException("Telemetry installation is not provisioned")
         val payload = Json.parseToJsonElement(DiagnosticsEventCodec.encode(event)) as JsonObject
         return TelemetryEnvelope(
             schemaVersion = TelemetryEnvelope.CURRENT_SCHEMA_VERSION,
             eventId = UUID.randomUUID().toString(),
             batchId = UUID.randomUUID().toString(),
-            installationId = installation?.installationId ?: UUID.randomUUID().toString(),
+            installationId = installation.installationId,
             sessionId = sessionId,
             occurredAtMs = System.currentTimeMillis(),
             appVersion = BuildConfig.VERSION_NAME,

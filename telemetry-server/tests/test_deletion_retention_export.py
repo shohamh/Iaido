@@ -246,6 +246,7 @@ def test_export_plane_never_leaks_other_plane_data_and_requires_operator_token(
             2_000_000_000_000,
             io.StringIO(),
             operator_token="wrong-token",
+            app_version="0.1.4",
         )
 
     buffer = io.StringIO()
@@ -258,6 +259,7 @@ def test_export_plane_never_leaks_other_plane_data_and_requires_operator_token(
         2_000_000_000_000,
         buffer,
         operator_token=OPERATOR_TOKEN,
+        app_version="0.1.4",
     )
 
     assert exported == 1
@@ -286,6 +288,7 @@ def test_export_plane_writes_operator_audit_record(
         2_000_000_000_000,
         io.StringIO(),
         operator_token=OPERATOR_TOKEN,
+        app_version="0.1.4",
     )
 
     with sqlite3.connect(_sqlite_path(settings)) as connection:
@@ -305,7 +308,7 @@ def test_export_route_requires_operator_token_and_returns_ndjson(
     )
     authorized = client.get(
         "/v1/operator/research/export",
-        params={"start_ms": 0, "end_ms": 2_000_000_000_000},
+        params={"start_ms": 0, "end_ms": 2_000_000_000_000, "app_version": "0.1.4"},
         headers=operator_headers(),
     )
 

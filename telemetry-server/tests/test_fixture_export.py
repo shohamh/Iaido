@@ -96,6 +96,7 @@ def export(settings: Settings, object_root: Path, manifest, output_dir: Path, to
         manifest,
         output_dir,
         operator_token=token,
+        app_version="0.1.4",
     )
 
 
@@ -269,7 +270,7 @@ def test_approved_record_outside_the_current_bounds_fails_the_export(
             key,
             json.dumps({"schema_version": 1, "batch_id": batch_id, "events": [event]}).encode(),
         )
-        repo.add_batch("research", installation_id, batch_id, f"checksum-{index}", key)
+        repo.add_batch("research", installation_id, batch_id, f"checksum-{index}", key, "0.1.4")
 
     with pytest.raises(ValueError, match="bounds"):
         export(settings, object_root, {event_hash(out_of_bounds): "reviewed"}, tmp_path / "a")
