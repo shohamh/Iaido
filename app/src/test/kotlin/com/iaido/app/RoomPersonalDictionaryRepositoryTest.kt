@@ -2,6 +2,7 @@ package com.iaido.app
 
 import com.iaido.core.dictionary.WordEntry
 import com.iaido.core.dictionary.LearningSignal
+import com.iaido.core.dictionary.PersonalDictionary
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -63,6 +64,25 @@ class RoomPersonalDictionaryRepositoryTest {
         assertTrue(frequency > 1e-6 && frequency < 1e-4, "frequency $frequency")
         assertTrue(repository.ngramBoost("write", "ninjacode") > 1.0)
         assertTrue(repository.ngramBoost("ninjacode", "today") > 1.0)
+    }
+
+    @Test
+    fun `explicit correction pairs persist and can be restored into the live dictionary`() {
+        val dao = FakeDao()
+        val repository = RoomPersonalDictionaryRepository(dao, realBase)
+
+        repository.record(
+            signal = LearningSignal.SUGGESTION_PICK,
+            original = "happens",
+            replacement = "hello",
+            previousWord = "say",
+            nextWord = "today",
+        )
+
+        val live = PersonalDictionary(realBase)
+        live.restoreNgramOverrides(repository.ngramOverrides())
+        assertTrue(repository.ngramBoost("say", "hello") > 1.0)
+        assertEquals(repository.ngramBoost("say", "hello"), live.ngramBoost("say", "hello"))
     }
 
     private val realBase = listOf(

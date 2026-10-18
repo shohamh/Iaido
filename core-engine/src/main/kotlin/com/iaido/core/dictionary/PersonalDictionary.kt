@@ -93,7 +93,7 @@ class PersonalDictionary(
         ) {
             penalize(normalizedOriginal)
         }
-        if (learnable && signal == LearningSignal.DELETE_RETYPE) {
+        if (learnable && signal in CONTEXTUAL_LEARNING_SIGNALS) {
             previousWord?.let { reinforceNgram(normalizeWord(it), normalizedReplacement) }
             nextWord?.let { reinforceNgram(normalizedReplacement, normalizeWord(it)) }
         }
@@ -155,6 +155,17 @@ class PersonalDictionary(
         cachedEntries = null
     }
 
+    fun restoreNgramOverrides(overrides: List<NgramOverrideSnapshot>) {
+        require(overrides.all { it.boost <= maxBoost }) {
+            "Dictionary snapshot contains an n-gram boost above this dictionary's maximum"
+        }
+        ngramOverrides.clear()
+        overrides.forEach { override ->
+            ngramOverrides[override.previousWord to override.nextWord] =
+                OverrideState(override.boost, override.uses)
+        }
+    }
+
     fun restore(entries: List<WordEntry>) {
         cachedEntries = null
         entries.forEach { entry ->
@@ -211,5 +222,13 @@ class PersonalDictionary(
             wordOverrides.remove(word)
             ngramOverrides.keys.removeAll { it.first == word || it.second == word }
         }
+    }
+
+    private companion object {
+        val CONTEXTUAL_LEARNING_SIGNALS = setOf(
+            LearningSignal.DELETE_RETYPE,
+            LearningSignal.SUGGESTION_PICK,
+            LearningSignal.MANUAL_EDIT,
+        )
     }
 }

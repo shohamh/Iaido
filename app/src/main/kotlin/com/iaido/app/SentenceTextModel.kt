@@ -226,18 +226,39 @@ internal object SentenceTextModel {
     ): List<SentenceStripWord> {
         val result = words.toMutableList()
         replacements.forEach { replacement ->
-            val candidate = replacement.option.replacementWords.joinToString(" ")
-            replacement.sourceWordIds.forEach wordLoop@{ wordId ->
+            val sourceIds = replacement.sourceWordIds
+            val outputWords = replacement.option.replacementWords
+            val displayed = if (sourceIds.size == outputWords.size) {
+                sourceIds.zip(outputWords)
+            } else if (outputWords.size == 1) {
+                // A join produces one replacement token across several source slots; leave the
+                // same single-token affordance on each source so a swipe anywhere in the group works.
+                sourceIds.map { it to outputWords.single() }
+            } else {
+                // Keep split edits atomic without putting a phrase in a single word lane. The
+                // compact marker previews the full group when selected.
+                listOf(sourceIds.first() to "${outputWords.first()}…")
+            }
+            displayed.forEach wordLoop@{ (wordId, candidate) ->
                 val index = result.indexOfFirst { it.id == wordId }
                 if (index < 0) return@wordLoop
                 val word = result[index]
-                if (candidate.equals(word.text, ignoreCase = true) ||
-                    candidate.equals(word.above, ignoreCase = true) ||
-                    candidate.equals(word.below, ignoreCase = true)
-                ) return@wordLoop
+                if (candidate.equals(word.text, ignoreCase = true)) return@wordLoop
                 result[index] = when {
-                    word.above == null -> word.copy(above = candidate)
-                    word.below == null -> word.copy(below = candidate)
+                    candidate.equals(word.above, ignoreCase = true) -> word.copy(
+                        aboveReplacementOptionId = word.aboveReplacementOptionId ?: replacement.option.id,
+                    )
+                    candidate.equals(word.below, ignoreCase = true) -> word.copy(
+                        belowReplacementOptionId = word.belowReplacementOptionId ?: replacement.option.id,
+                    )
+                    word.above == null -> word.copy(
+                        above = candidate,
+                        aboveReplacementOptionId = replacement.option.id,
+                    )
+                    word.below == null -> word.copy(
+                        below = candidate,
+                        belowReplacementOptionId = replacement.option.id,
+                    )
                     else -> word
                 }
             }

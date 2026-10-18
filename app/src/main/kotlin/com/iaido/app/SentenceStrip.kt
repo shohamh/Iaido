@@ -182,6 +182,7 @@ internal fun SentenceStrip(
     }
     val measuredLanes = remember(
         displayWords,
+        state.replacementOptions,
         currentStyle,
         alternativeStyle,
         textMeasurer,
@@ -214,7 +215,27 @@ internal fun SentenceStrip(
                     layoutDirection = layoutDirection,
                 )
             }
-            val maxWidth = max(currentLayout.size.width, max(upperLayout?.size?.width ?: 0, lowerLayout?.size?.width ?: 0))
+            val splitPreviewText = sequenceOf(
+                word.aboveReplacementOptionId,
+                word.belowReplacementOptionId,
+            ).filterNotNull().firstNotNullOfOrNull { optionId ->
+                state.replacementOptions.firstOrNull { it.option.id == optionId }
+                    ?.takeIf { it.sourceWordIds.size == 1 && it.option.replacementWords.size > 1 }
+                    ?.option?.replacementWords?.joinToString(" ")
+            }
+            val splitPreviewLayout = splitPreviewText?.let {
+                textMeasurer.measure(
+                    it,
+                    currentStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    layoutDirection = layoutDirection,
+                )
+            }
+            val maxWidth = max(
+                max(currentLayout.size.width, max(upperLayout?.size?.width ?: 0, lowerLayout?.size?.width ?: 0)),
+                splitPreviewLayout?.size?.width ?: 0,
+            )
             val anchors = (0..word.text.length).map { offset ->
                 currentLayout.getHorizontalPosition(offset, usePrimaryDirection = true)
             }
@@ -462,6 +483,9 @@ internal fun SentenceStrip(
                             val split = replacementPreview?.takeIf {
                                 it.isSplit && it.sourceWordIndices.singleOrNull() == index
                             }
+                            val alignedReplacement = replacementPreview?.takeIf {
+                                it.replacementWords.size == it.sourceWordIndices.size && index in it.sourceWordIndices
+                            }
                             val deleting = deletionPreview?.sourceWordIds?.contains(word.id) == true
                             SentenceWordLane(
                                 word = renderedLaneWords[index],
@@ -470,10 +494,13 @@ internal fun SentenceStrip(
                                 currentStyle = currentStyle,
                                 alternativeStyle = alternativeStyle,
                                 cursorOffset = (state.selectionStart - word.start)
-                                    .takeIf { split == null && !deleting && it in 0..(word.endExclusive - word.start) },
+                                    .takeIf {
+                                        split == null && alignedReplacement == null && !deleting &&
+                                            it in 0..(word.endExclusive - word.start)
+                                    },
                                 onSelect = { actions?.setSelection(word.endExclusive) },
-                                isPreviewing = selected != null || split != null,
-                                previewSide = selected?.side ?: split?.side,
+                                isPreviewing = selected != null || split != null || alignedReplacement != null,
+                                previewSide = selected?.side ?: split?.side ?: alignedReplacement?.side,
                                 onCurrentTextLayout = { currentLayouts[word.id] = it },
                                 onPositioned = { wordCoordinates[word.id] = it },
                                 splitPreviewWords = split?.replacementWords,
@@ -536,9 +563,9 @@ internal fun SentenceStrip(
                         .graphicsLayer { alpha = edgeFade }
                         .align(edgeAlignment),
                 )
-                replacementPreview?.takeIf(SentenceReplacementPreview::isJoin)?.let { join ->
-                    JoinPreviewOverlay(
-                        preview = join,
+                replacementPreview?.takeIf(SentenceReplacementPreview::isGroupReplacement)?.let { group ->
+                    SequenceReplacementPreviewOverlay(
+                        preview = group,
                         state = state,
                         geometry = metrics,
                         scrollValue = scrollState.value,
@@ -570,7 +597,7 @@ internal fun SentenceStrip(
 }
 
 @Composable
-private fun JoinPreviewOverlay(
+private fun SequenceReplacementPreviewOverlay(
     preview: SentenceReplacementPreview,
     state: SentenceStripState,
     geometry: SentenceStripGeometry,
@@ -631,7 +658,7 @@ private fun JoinPreviewOverlay(
                 .background(KeyboardPalette.Screen, shape)
                 .border(1.2.dp, KeyboardPalette.Accent, shape)
                 .semantics {
-                    contentDescription = "Iaido join preview text=${preview.replacementText} " +
+                    contentDescription = "Iaido grouped replacement preview text=${preview.replacementText} " +
                         "sourceStart=${preview.sourceStart} sourceEnd=${preview.sourceEndExclusive}"
                 },
             contentAlignment = Alignment.Center,
@@ -648,7 +675,7 @@ private fun JoinPreviewOverlay(
                         .padding(horizontal = 7.dp, vertical = 1.dp),
                 ) {
                     Text(
-                        "JOIN",
+                        if (preview.isJoin) "JOIN" else "WORDS",
                         color = KeyboardPalette.Page,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
@@ -862,8 +889,19 @@ private fun sentenceStripRenderedWord(
     val split = replacementPreview?.takeIf {
         it.isSplit && it.sourceWordIndices.singleOrNull() == wordIndex
     }
+    val alignedReplacement = replacementPreview?.takeIf {
+        it.replacementWords.size == it.sourceWordIndices.size && wordIndex in it.sourceWordIndices
+    }
     val deleting = deletionPreview?.sourceWordIds?.contains(word.id) == true
-    return selected?.let {
+    return alignedReplacement?.let { replacement ->
+        val outputIndex = replacement.sourceWordIndices.indexOf(wordIndex)
+        val candidate = replacement.replacementWords.getOrNull(outputIndex) ?: return@let word
+        word.copy(
+            text = candidate,
+            above = if (replacement.side == SentenceAlternativeSide.ABOVE) word.text else word.above,
+            below = if (replacement.side == SentenceAlternativeSide.BELOW) word.text else word.below,
+        )
+    } ?: selected?.let {
         word.copy(
             text = it.replacement,
             above = if (it.side == SentenceAlternativeSide.ABOVE) word.text else word.above,

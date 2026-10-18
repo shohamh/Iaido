@@ -26,6 +26,8 @@ internal data class SentenceReplacementPreview(
     val replacementText: String get() = replacementWords.joinToString(" ")
     val isJoin: Boolean get() = sourceWordIndices.size > 1 && replacementWords.size == 1
     val isSplit: Boolean get() = sourceWordIndices.size == 1 && replacementWords.size > 1
+    val isGroupReplacement: Boolean get() = sourceWordIndices.size > 1 &&
+        replacementWords.size != sourceWordIndices.size
 }
 
 internal data class SentenceDeletionPreview(
@@ -107,13 +109,20 @@ internal object SentenceStripPreviewMath {
         side: SentenceAlternativeSide,
     ): SentenceStripPreview? {
         val word = state.words.getOrNull(wordIndex) ?: return null
+        val replacementOptionId = when (side) {
+            SentenceAlternativeSide.ABOVE -> word.aboveReplacementOptionId
+            SentenceAlternativeSide.BELOW -> word.belowReplacementOptionId
+        }
         val candidate = when (side) {
             SentenceAlternativeSide.ABOVE -> word.above
             SentenceAlternativeSide.BELOW -> word.below
         }?.takeIf(String::isNotBlank) ?: return null
         state.replacementOptions.firstOrNull { replacement ->
-            word.id in replacement.sourceWordIds &&
-                replacement.option.replacementWords.joinToString(" ").equals(candidate, ignoreCase = true)
+            word.id in replacement.sourceWordIds && (
+                replacement.option.id == replacementOptionId ||
+                    replacementOptionId == null && replacement.option.replacementWords
+                        .joinToString(" ").equals(candidate, ignoreCase = true)
+                )
         }?.let { replacement ->
             replacement(state, replacement, wordIndex, side)?.let { return it }
         }

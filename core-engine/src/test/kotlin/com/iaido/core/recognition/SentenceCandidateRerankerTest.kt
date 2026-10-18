@@ -31,4 +31,35 @@ class SentenceCandidateRerankerTest {
         assertTrue(result.words.single().candidates.contains("hey"))
         assertEquals("hey", result.words.single().candidates.first())
     }
+
+    @Test
+    fun `right context can promote an alternative across the confidence margin`() {
+        val words = listOf(
+            SessionWord(1, 0, 4, "here", "here", listOf("here", "there"), false),
+            SessionWord(2, 5, 9, "home", "home", listOf("home"), false),
+        )
+        val reranker = SentenceCandidateReranker(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("there" to "home") to 3.0)),
+            neighborWindow = 1,
+        )
+
+        val result = reranker.rerank(words, changedId = 1)
+
+        assertEquals(listOf("there", "here"), result.words[0].candidates)
+    }
+
+    @Test
+    fun `weak alternatives stay behind current word`() {
+        val words = listOf(
+            SessionWord(1, 0, 4, "here", "here", listOf("here", "there"), false),
+            SessionWord(2, 5, 9, "home", "home", listOf("home"), false),
+        )
+        val reranker = SentenceCandidateReranker(
+            contextScorer = NgramContextScorer(bigrams = mapOf(("there" to "home") to 0.8)),
+        )
+
+        val result = reranker.rerank(words, changedId = 1)
+
+        assertEquals("here", result.words[0].candidates.first())
+    }
 }

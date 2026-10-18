@@ -21,9 +21,13 @@ class FlowCorrectionEngine(
         for (index in start until corrected.size) {
             if (changes.size >= maxCascadeDepth) break
             val context = previousWords + corrected.take(index)
+            val following = corrected.drop(index + 1).take(contextScorer.windowSize - 1)
             val current = corrected[index]
-            val best = words[index].candidates.maxByOrNull { contextScorer.score(context, it) } ?: current
-            val gain = contextScorer.score(context, best) - contextScorer.score(context, current)
+            val best = words[index].candidates.maxByOrNull {
+                contextScorer.scoreInContext(context, it, following)
+            } ?: current
+            val gain = contextScorer.scoreInContext(context, best, following) -
+                contextScorer.scoreInContext(context, current, following)
             if (best != current && gain >= margin) {
                 corrected[index] = best
                 changes += WordCorrection(index, current, best)

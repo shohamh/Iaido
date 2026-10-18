@@ -59,6 +59,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * How many nearby words are considered when deriving cursor-local join candidates. All recorded
@@ -245,7 +246,12 @@ class IaidoInputMethodService : InputMethodService() {
             debugAutoSpaceFixture()?.trigram(first, second, next)
                 ?: ngramStores.store(activeLanguage).trigram(first, second, next)
     }
-    private val contextScorer = NgramContextScorer(windowSize = 3, scoreStore = contextScoreStore)
+    private val personalNgramBoosts = AtomicReference<Map<Pair<String, String>, Double>>(emptyMap())
+    private val contextScorer = NgramContextScorer(
+        windowSize = 3,
+        scoreStore = contextScoreStore,
+        personalBigramBoost = { previous, next -> personalNgramBoosts.get()[previous to next] ?: 1.0 },
+    )
 
     // NKG2 scores are log-ratios; the segmenter's tuned bigram/trigram weights (see ScoringConstants) are lower
     // than the unit weights the flow corrector and reranker use, so it gets its own scorer over the same store.
@@ -254,6 +260,7 @@ class IaidoInputMethodService : InputMethodService() {
         bigramWeight = ScoringConstants.SEGMENTER_BIGRAM_WEIGHT,
         trigramWeight = ScoringConstants.SEGMENTER_TRIGRAM_WEIGHT,
         scoreStore = contextScoreStore,
+        personalBigramBoost = { previous, next -> personalNgramBoosts.get()[previous to next] ?: 1.0 },
     )
     private val sentenceCandidateReranker = SentenceCandidateReranker(contextScorer)
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
@@ -343,11 +350,17 @@ class IaidoInputMethodService : InputMethodService() {
 
     private val learningEventListener = object : PersonalLearningEvents.Listener {
         override fun onForgotten(word: String) {
-            mainHandler.post { learningDictionary.forget(word) }
+            mainHandler.post {
+                learningDictionary.forget(word)
+                refreshPersonalNgramBoosts()
+            }
         }
 
         override fun onReset() {
-            mainHandler.post { learningDictionary.reset() }
+            mainHandler.post {
+                learningDictionary.reset()
+                refreshPersonalNgramBoosts()
+            }
         }
     }
 
@@ -359,8 +372,11 @@ class IaidoInputMethodService : InputMethodService() {
         if (isDebugBuild()) observeDebugStateRequests()
         correctionExecutor.execute {
             val persisted = learningRepository.entries()
+            val persistedNgrams = learningRepository.ngramOverrides()
             mainHandler.post {
                 learningDictionary.restore(persisted)
+                learningDictionary.restoreNgramOverrides(persistedNgrams)
+                refreshPersonalNgramBoosts()
                 prewarmRecognition(activeLanguage)
             }
         }
@@ -939,10 +955,13 @@ class IaidoInputMethodService : InputMethodService() {
         // A swiped commit is the keyboard's inference, not something the user chose; only typed
         // retypes count as a correction.
         if (deletedWord != null && !swipedWord && activeLanguage == Language.ENGLISH && text.isNotBlank()) {
+            val (previousWord, nextWord) = contextWordsAround(start, start + text.length)
             recordLearning(
                 signal = LearningSignal.DELETE_RETYPE,
                 original = deletedWord,
                 replacement = text,
+                previousWord = previousWord,
+                nextWord = nextWord,
             )
         }
         pendingCandidates?.let { candidates ->
@@ -1519,6 +1538,7 @@ class IaidoInputMethodService : InputMethodService() {
             id = word.id,
         )
         val replacement = displayCandidateForIndex(chip, candidateIndex) ?: return
+        val (previousWord, nextWord) = contextWordsAround(word.start, word.end)
         val changed = replaceSessionWord(word.id, replacement)
         trackSuggestion(
             DiagnosticsSuggestionAction.SUGGESTION_PICK,
@@ -1537,6 +1557,8 @@ class IaidoInputMethodService : InputMethodService() {
                 signal = LearningSignal.SUGGESTION_PICK,
                 original = word.current,
                 replacement = replacement,
+                previousWord = previousWord,
+                nextWord = nextWord,
             )
         }
     }
@@ -1651,16 +1673,24 @@ class IaidoInputMethodService : InputMethodService() {
         signal: LearningSignal,
         original: String? = null,
         replacement: String,
+        previousWord: String? = null,
+        nextWord: String? = null,
     ) {
-        learningDictionary.record(signal, original, replacement)
+        learningDictionary.record(signal, original, replacement, previousWord, nextWord)
+        refreshPersonalNgramBoosts()
         correctionExecutor.execute {
-            learningRepository.record(signal, original, replacement)
+            learningRepository.record(signal, original, replacement, previousWord, nextWord)
         }
+    }
+
+    private fun refreshPersonalNgramBoosts() {
+        personalNgramBoosts.set(learningDictionary.ngramOverrides())
     }
 
     private fun confirmManualEdit() {
         val candidate = pendingManualEdit.value ?: return
-        if (candidate.original != candidate.replacement) {
+        if (candidate.original != candidate.replacement && activeLanguage == Language.ENGLISH) {
+            val (previousWord, nextWord) = contextWordsAround(candidate.start, candidate.end)
             trackResearchCorrection(
                 action = CorrectionAction.MANUAL_EDIT,
                 sourceText = candidate.original,
@@ -1670,9 +1700,21 @@ class IaidoInputMethodService : InputMethodService() {
                 signal = LearningSignal.MANUAL_EDIT,
                 original = candidate.original,
                 replacement = candidate.replacement,
+                previousWord = previousWord,
+                nextWord = nextWord,
             )
         }
         pendingManualEdit.value = null
+    }
+
+    private fun contextWordsAround(start: Int, endExclusive: Int): Pair<String?, String?> {
+        val history = correctionHistory.words()
+        val stripWords = sentenceStripState.value.words
+        val previous = history.filter { it.end <= start }.maxByOrNull { it.end }?.current
+            ?: stripWords.filter { it.endExclusive <= start }.maxByOrNull(SentenceStripWord::endExclusive)?.text
+        val next = history.filter { it.start >= endExclusive }.minByOrNull { it.start }?.current
+            ?: stripWords.filter { it.start >= endExclusive }.minByOrNull(SentenceStripWord::start)?.text
+        return previous to next
     }
 
     private fun observeCurrentEditorText() {

@@ -32,6 +32,25 @@ class FlowCorrectionEngineTest {
     }
 
     @Test
+    fun `right-side sequence evidence can justify a flow correction`() {
+        val engine = FlowCorrectionEngine(
+            NgramContextScorer(bigrams = mapOf(("today" to "of") to 2.0)),
+            margin = 1.0,
+        )
+
+        val result = engine.correct(
+            listOf(
+                FlowWord("tomorrow", listOf("tomorrow", "today")),
+                FlowWord("of", listOf("of")),
+            ),
+            previousWords = emptyList(),
+        )
+
+        assertEquals(listOf("today", "of"), result.words)
+        assertEquals(WordCorrection(0, "tomorrow", "today"), result.corrections.single())
+    }
+
+    @Test
     fun `cascade depth limits how many earlier words can change`() {
         val engine = FlowCorrectionEngine(
             NgramContextScorer(bigrams = mapOf(("word1" to "alt2") to 1.0, ("alt2" to "alt3") to 1.0, ("word3" to "alt4") to 1.0)),

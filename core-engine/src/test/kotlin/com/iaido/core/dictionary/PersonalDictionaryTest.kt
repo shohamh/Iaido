@@ -104,6 +104,55 @@ class PersonalDictionaryTest {
     }
 
     @Test
+    fun `explicit suggestion and manual corrections reinforce surrounding ngrams only`() {
+        val dictionary = PersonalDictionary(listOf(WordEntry("today", 1.0), WordEntry("there", 1.0)))
+
+        dictionary.record(
+            signal = LearningSignal.SUGGESTION_PICK,
+            original = "tomorrow",
+            replacement = "today",
+            previousWord = "see",
+            nextWord = "there",
+        )
+        dictionary.record(
+            signal = LearningSignal.MANUAL_EDIT,
+            original = "thier",
+            replacement = "there",
+            previousWord = "see",
+            nextWord = "now",
+        )
+        dictionary.record(
+            signal = LearningSignal.FLOW_CORRECTION,
+            original = "there",
+            replacement = "today",
+            previousWord = "see",
+            nextWord = "now",
+        )
+
+        assertTrue(dictionary.ngramBoost("see", "today") > 1.0)
+        assertTrue(dictionary.ngramBoost("today", "there") > 1.0)
+        assertTrue(dictionary.ngramBoost("see", "there") > 1.0)
+        assertTrue(dictionary.ngramBoost("there", "now") > 1.0)
+        assertEquals(1.0, dictionary.ngramBoost("today", "now"))
+    }
+
+    @Test
+    fun `restores persisted contextual pair boosts`() {
+        val source = PersonalDictionary(listOf(WordEntry("today", 1.0)))
+        source.record(
+            LearningSignal.SUGGESTION_PICK,
+            original = "tomorrow",
+            replacement = "today",
+            previousWord = "see",
+        )
+        val restored = PersonalDictionary(listOf(WordEntry("today", 1.0)))
+
+        restored.restoreNgramOverrides(source.snapshot().ngramOverrides)
+
+        assertEquals(source.ngramBoost("see", "today"), restored.ngramBoost("see", "today"))
+    }
+
+    @Test
     fun `every learning signal records a usable replacement`() {
         val dictionary = PersonalDictionary(LearningSignal.values().map { WordEntry(it.name.lowercase(), 1e-3) })
 

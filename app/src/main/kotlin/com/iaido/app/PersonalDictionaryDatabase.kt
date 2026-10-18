@@ -10,6 +10,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RoomDatabase
 import com.iaido.core.dictionary.PersonalLearningPolicy
+import com.iaido.core.dictionary.NgramOverrideSnapshot
 import com.iaido.core.dictionary.WordEntry
 
 @Entity(tableName = "personal_overrides")
@@ -126,7 +127,7 @@ class RoomPersonalDictionaryRepository(
         ) {
             penalize(normalizedOriginal)
         }
-        if (learnable && signal == com.iaido.core.dictionary.LearningSignal.DELETE_RETYPE) {
+        if (learnable && signal in CONTEXTUAL_LEARNING_SIGNALS) {
             previousWord?.let { reinforceNgram(it.lowercase(), normalizedReplacement) }
             nextWord?.let { reinforceNgram(normalizedReplacement, it.lowercase()) }
         }
@@ -152,7 +153,29 @@ class RoomPersonalDictionaryRepository(
                 it.nextWord.lowercase() == nextWord.lowercase()
         }?.boost ?: 1.0
 
+    fun ngramOverrides(): List<NgramOverrideSnapshot> = dao.allNgrams()
+        .groupBy { it.previousWord.lowercase() to it.nextWord.lowercase() }
+        .map { (key, rows) ->
+            val row = rows.maxBy { it.boost }
+            NgramOverrideSnapshot(
+                previousWord = key.first,
+                nextWord = key.second,
+                boost = row.boost.coerceIn(PersonalLearningPolicy.MIN_BOOST, PersonalLearningPolicy.DEFAULT_MAX_BOOST),
+                uses = row.uses.coerceAtLeast(0),
+            )
+        }
+        .sortedWith(compareBy(NgramOverrideSnapshot::previousWord, NgramOverrideSnapshot::nextWord))
+
     private fun reinforceNgram(previousWord: String, nextWord: String) {
+        dao.allNgrams()
+            .filterNot { it.previousWord == previousWord && it.nextWord == nextWord }
+            .forEach { other ->
+                dao.saveNgram(
+                    other.copy(
+                        boost = (other.boost * 0.98).coerceAtLeast(PersonalLearningPolicy.MIN_BOOST),
+                    ),
+                )
+            }
         val current = dao.allNgrams().firstOrNull { it.previousWord == previousWord && it.nextWord == nextWord }
         val uses = current?.uses ?: 0
         val boost = ((current?.boost ?: 1.0) + 1.0 / (uses + 1)).coerceAtMost(PersonalLearningPolicy.DEFAULT_MAX_BOOST)
@@ -176,5 +199,13 @@ class RoomPersonalDictionaryRepository(
     fun reset() {
         dao.reset()
         dao.resetNgrams()
+    }
+
+    private companion object {
+        val CONTEXTUAL_LEARNING_SIGNALS = setOf(
+            com.iaido.core.dictionary.LearningSignal.DELETE_RETYPE,
+            com.iaido.core.dictionary.LearningSignal.SUGGESTION_PICK,
+            com.iaido.core.dictionary.LearningSignal.MANUAL_EDIT,
+        )
     }
 }

@@ -10,6 +10,8 @@ internal data class SentenceStripWord(
     val endExclusive: Int,
     val above: String?,
     val below: String?,
+    val aboveReplacementOptionId: String? = null,
+    val belowReplacementOptionId: String? = null,
 )
 
 internal data class SentenceStripReplacement(

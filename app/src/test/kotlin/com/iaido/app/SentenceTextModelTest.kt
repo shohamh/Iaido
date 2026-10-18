@@ -102,7 +102,38 @@ class SentenceTextModelTest {
     }
 
     @Test
-    fun exposesSplitAsOneUniqueInlineAlternativeAndFiltersCaseOnlyStructuredOptions() {
+    fun alignsEqualLengthSequenceAlternativesToTheirSourceWordSlotsAndKeepsAtomicPreview() {
+        val option = ReplacementOption(listOf("teh", "kat"), listOf("the", "cat"), score = 1.0)
+        val state = model("teh kat", cursor = 7, options = listOf(option))
+
+        assertEquals("the", state.words[0].above)
+        assertEquals("cat", state.words[1].above)
+        assertEquals(option.id, state.words[0].aboveReplacementOptionId)
+        assertEquals(option.id, state.words[1].aboveReplacementOptionId)
+
+        val preview = SentenceStripPreviewMath.alternative(state, 1, SentenceAlternativeSide.ABOVE)
+        assertTrue(preview is SentenceReplacementPreview)
+        assertEquals("the cat", preview?.sentenceText)
+    }
+
+    @Test
+    fun keepsUnequalLengthSequenceAlternativesGroupedAndPreviewsTheWholeOutput() {
+        val option = ReplacementOption(
+            sourceWords = listOf("old", "words"),
+            replacementWords = listOf("new", "sequence", "now"),
+            score = 1.0,
+        )
+        val state = model("old words", cursor = 9, options = listOf(option))
+
+        assertEquals("new…", state.words[0].above)
+        assertEquals(null, state.words[1].above)
+        val preview = SentenceStripPreviewMath.alternative(state, 0, SentenceAlternativeSide.ABOVE)
+        assertTrue(preview is SentenceReplacementPreview)
+        assertEquals("new sequence now", preview?.sentenceText)
+    }
+
+    @Test
+    fun exposesGroupedSplitAndJoinChoicesAndFiltersCaseOnlyStructuredOptions() {
         val split = ReplacementOption(listOf("alot"), listOf("a", "lot"), score = 1.0)
         val duplicateJoin = listOf(
             ReplacementOption(listOf("in", "to"), listOf("into"), 1.0, id = "into-one"),
@@ -116,11 +147,18 @@ class SentenceTextModelTest {
             options = listOf(ReplacementOption(listOf("we"), listOf("We"), 1.0)),
         )
 
-        assertTrue("a lot" in listOf(splitState.words[1].above, splitState.words[1].below))
+        assertTrue("a…" in listOf(splitState.words[1].above, splitState.words[1].below))
         assertEquals(1, joinState.replacementOptions.size)
         assertTrue("into" in listOf(joinState.words[0].above, joinState.words[0].below))
         assertTrue("into" in listOf(joinState.words[1].above, joinState.words[1].below))
         assertTrue(caseOnly.replacementOptions.isEmpty())
+
+        val splitPreview = SentenceStripPreviewMath.alternative(splitState, 1, SentenceAlternativeSide.ABOVE)
+        assertTrue(splitPreview is SentenceReplacementPreview)
+        assertEquals("we a lot now", splitPreview?.sentenceText)
+        val joinPreview = SentenceStripPreviewMath.alternative(joinState, 1, SentenceAlternativeSide.ABOVE)
+        assertTrue(joinPreview is SentenceReplacementPreview)
+        assertEquals("into", joinPreview?.sentenceText)
     }
 
     @Test
