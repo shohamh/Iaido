@@ -24,6 +24,7 @@ import com.iaido.core.gesture.GesturePoint
 import com.iaido.core.layout.KeyboardLayout
 import com.iaido.core.recognition.GestureRecognizer
 import com.iaido.core.recognition.InferenceSegmenter
+import com.iaido.core.recognition.ScoringConstants
 import com.iaido.core.recognition.ShapePathScorer
 import com.iaido.core.recognition.TrieCandidateGenerator
 import com.iaido.core.language.Language
@@ -235,17 +236,24 @@ class IaidoInputMethodService : InputMethodService() {
             commitText = typingController::commitWord,
         )
     }
-    private val contextScorer = NgramContextScorer(
-        windowSize = 3,
-        scoreStore = object : NgramScoreStore {
-            override fun bigram(previous: String, next: String): Double =
-                debugAutoSpaceFixture()?.bigram(previous, next)
-                    ?: ngramStores.store(activeLanguage).bigram(previous, next)
+    private val contextScoreStore = object : NgramScoreStore {
+        override fun bigram(previous: String, next: String): Double =
+            debugAutoSpaceFixture()?.bigram(previous, next)
+                ?: ngramStores.store(activeLanguage).bigram(previous, next)
 
-            override fun trigram(first: String, second: String, next: String): Double =
-                debugAutoSpaceFixture()?.trigram(first, second, next)
-                    ?: ngramStores.store(activeLanguage).trigram(first, second, next)
-        },
+        override fun trigram(first: String, second: String, next: String): Double =
+            debugAutoSpaceFixture()?.trigram(first, second, next)
+                ?: ngramStores.store(activeLanguage).trigram(first, second, next)
+    }
+    private val contextScorer = NgramContextScorer(windowSize = 3, scoreStore = contextScoreStore)
+
+    // NKG2 scores are log-ratios; the segmenter's tuned bigram/trigram weights (see ScoringConstants) are lower
+    // than the unit weights the flow corrector and reranker use, so it gets its own scorer over the same store.
+    private val segmenterContextScorer = NgramContextScorer(
+        windowSize = 3,
+        bigramWeight = ScoringConstants.SEGMENTER_BIGRAM_WEIGHT,
+        trigramWeight = ScoringConstants.SEGMENTER_TRIGRAM_WEIGHT,
+        scoreStore = contextScoreStore,
     )
     private val sentenceCandidateReranker = SentenceCandidateReranker(contextScorer)
     private val flowCorrectionEngine = FlowCorrectionEngine(contextScorer)
@@ -293,14 +301,14 @@ class IaidoInputMethodService : InputMethodService() {
 
     private val swipeTypingCoordinator by lazy {
         SwipeTypingCoordinator(
-            segmenter = InferenceSegmenter(contextScorer = contextScorer),
+            segmenter = InferenceSegmenter(contextScorer = segmenterContextScorer),
             spacingMode = { spacingModeForTypingCoordinator },
             recognize = { path, layout -> controller.recognize(path, layout, activeDictionary()) },
             dictionary = ::activeDictionary,
             previousWords = { correctionHistory.words().takeLast(3).map { it.current } },
             cursorPosition = { cursorPosition },
             replaceHostSpan = ::replaceInferenceHostSpan,
-            commitCompletedText = typingController::commitWord,
+            replaceOwnedHostSpan = ::replaceOwnedInferenceHostSpan,
             onFinalizedWords = ::recordFinalizedInferenceWords,
             textBeforeCursor = { currentInputConnection?.getTextBeforeCursor(100, 0)?.toString().orEmpty() },
             hasFollowingWhitespace = {
@@ -314,7 +322,14 @@ class IaidoInputMethodService : InputMethodService() {
                 replacementOptions.value = merged
                 publishSentenceStripState(merged)
             },
-            onInferenceTransactionFinished = sentenceEditHistory::closeGroup,
+            onInferenceTransactionFinished = {
+                pendingCandidates = null
+                sentenceEditHistory.closeGroup()
+            },
+            onSwipeAccepted = {
+                pendingCandidates = null
+                typingController.markSwipeCommitted()
+            },
         )
     }
 
@@ -841,20 +856,45 @@ class IaidoInputMethodService : InputMethodService() {
         )
     }
 
-    private fun recordFinalizedInferenceWords(
+    /** Rewrites only the exact text and collapsed caret span owned by the active swipe run. */
+    private fun replaceOwnedInferenceHostSpan(
         span: HostTextSpan,
+        expectedSourceText: String,
+        replacement: String,
+    ): Boolean {
+        if (span.end - span.start != expectedSourceText.length) return false
+        if (cursorPosition != span.end || selectionEndPosition != span.end) return false
+        val inputConnection = currentInputConnection ?: return false
+        val actualSourceText = if (expectedSourceText.isEmpty()) {
+            ""
+        } else {
+            inputConnection.getTextBeforeCursor(expectedSourceText.length, 0)?.toString() ?: return false
+        }
+        if (actualSourceText != expectedSourceText) return false
+        return replaceInferenceHostSpan(span, replacement)
+    }
+
+    private fun recordFinalizedInferenceWords(
+        spans: List<HostTextSpan>,
         words: List<String>,
         alternatives: List<SegmentationOption>,
     ) {
+        require(spans.size == words.size)
+        if (spans.isEmpty()) return
         sentenceEditHistory.closeGroup()
         pendingCandidates = null
         val candidatesByWord = inferenceWordCandidates(words, alternatives, activeDictionary())
+        val wordSeparator = spans.zipWithNext()
+            .firstOrNull()
+            ?.let { (left, right) -> " ".repeat((right.start - left.end).coerceAtLeast(0)) }
+            ?: " "
         val outputIds = correctionHistory.replaceRange(
-            start = span.start,
-            end = span.end,
+            start = spans.first().start,
+            end = spans.last().end,
             replacementWords = words,
             candidatesByWord = candidatesByWord,
             composite = words.size > 1,
+            wordSeparator = wordSeparator,
         )
         refreshSuggestionChips(outputIds.firstOrNull())
     }

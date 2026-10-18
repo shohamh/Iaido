@@ -24,8 +24,9 @@ class RecognitionBenchmarkTest {
         val en = loadDictionary("en")
         val he = loadDictionary("he")
         val layout = KeyboardLayout.qwertyTestLayout()
+        val enFreq = en.associate { it.word to it.frequency }
         val ngramBytes = assets().resolve("context-ngrams/en.ngram.bin").readBytes()
-        val store = CompactNgramScoreStore.fromBytes(ngramBytes, en.mapIndexed { i, e -> e.word to i }.toMap())
+        val store = CompactNgramScoreStore.fromBytes(ngramBytes, en.mapIndexed { i, e -> e.word to i }.toMap()) { f -> enFreq[f] ?: 0.0 }
         val scorer = NgramContextScorer(scoreStore = store)
         val recognizer = GestureRecognizer(TrieCandidateGenerator(), ShapePathScorer(), scorer)
         val paths = words.map { SwipeFixtures.pathThrough(layout, it) }
@@ -34,7 +35,7 @@ class RecognitionBenchmarkTest {
         once("parse en.csv (JVM, readLines)") { loadDictionary("en") }
         once("parse he.csv") { loadDictionary("he") }
         once("wordIds map (en, 28k)") { en.mapIndexed { i, e -> e.word to i }.toMap() }
-        once("CompactNgramScoreStore init (en)") { CompactNgramScoreStore.fromBytes(ngramBytes, en.mapIndexed { i, e -> e.word to i }.toMap()) }
+        once("CompactNgramScoreStore init (en)") { CompactNgramScoreStore.fromBytes(ngramBytes, en.mapIndexed { i, e -> e.word to i }.toMap()) { f -> enFreq[f] ?: 0.0 } }
         val coldGen = TrieCandidateGenerator()
         once("first en swipe: trie build + generate") { coldGen.generateCandidates(paths[0], layout, en) }
         once("first he swipe: trie build + generate (56k)") { coldGen.generateCandidates(SwipeFixtures.pathThrough(KeyboardLayout.hebrewTestLayout(), "אני"), KeyboardLayout.hebrewTestLayout(), he) }

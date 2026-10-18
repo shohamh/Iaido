@@ -17,10 +17,13 @@ data class HostTextSpan(val start: Int, val end: Int) {
  */
 class SwipeInferenceTransaction(
     private val cursorPosition: () -> Int,
-    private val replaceHostSpan: (HostTextSpan, String) -> Boolean,
-    private val onFinalized: (HostTextSpan, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
+    private val replaceHostSpan: (HostTextSpan, String, String) -> Boolean,
+    private val onFinalized: (List<HostTextSpan>, List<String>, List<SegmentationOption>) -> Unit = { _, _, _ -> },
 ) {
     private val mutableUnits = mutableListOf<GestureUnit>()
+    private var renderedText = ""
+    private var wordSeparator = " "
+    private var trailingSeparator = ""
 
     val units: List<GestureUnit> get() = mutableUnits.toList()
     var currentWords: List<String> = emptyList()
@@ -36,12 +39,21 @@ class SwipeInferenceTransaction(
         return true
     }
 
-    fun replaceCurrent(words: List<String>, alternatives: List<SegmentationOption>): Boolean {
+    fun replaceCurrent(
+        words: List<String>,
+        alternatives: List<SegmentationOption>,
+        separator: String = " ",
+        trailing: String = "",
+    ): Boolean {
         require(words.isNotEmpty()) { "A transaction replacement needs at least one word" }
-        val replacement = words.joinToString(separator = " ")
+        val replacement = words.joinToString(separator = separator) + trailing
         val replacedSpan = sourceSpan ?: cursorPosition().let { cursor -> HostTextSpan(cursor, cursor) }
-        if (!replaceHostSpan(replacedSpan, replacement)) return false
+        val expectedText = if (sourceSpan == null) "" else renderedText
+        if (!replaceHostSpan(replacedSpan, expectedText, replacement)) return false
         sourceSpan = HostTextSpan(replacedSpan.start, replacedSpan.start + replacement.length)
+        renderedText = replacement
+        wordSeparator = separator
+        trailingSeparator = trailing
         currentWords = words
         this.alternatives = alternatives
         return true
@@ -58,29 +70,38 @@ class SwipeInferenceTransaction(
         retainedUnits: List<GestureUnit>,
         retainedWords: List<String>,
         retainedAlternatives: List<SegmentationOption>,
+        separator: String = wordSeparator,
+        trailing: String = trailingSeparator,
     ): Boolean {
         require(finalizedWords.isNotEmpty())
         require(retainedUnits.isNotEmpty())
         require(retainedWords.isNotEmpty())
         val replacedSpan = sourceSpan ?: return false
-        val finalizedText = finalizedWords.joinToString(separator = " ")
-        val retainedText = retainedWords.joinToString(separator = " ")
-        val replacement = "$finalizedText $retainedText"
-        if (!replaceHostSpan(replacedSpan, replacement)) return false
+        val finalizedText = finalizedWords.joinToString(separator = separator)
+        val retainedText = retainedWords.joinToString(separator = separator)
+        val boundary = if (finalizedText.isEmpty() || retainedText.isEmpty()) "" else separator
+        val replacement = "$finalizedText$boundary$retainedText$trailing"
+        if (!replaceHostSpan(replacedSpan, renderedText, replacement)) return false
 
-        val finalizedSpan = HostTextSpan(replacedSpan.start, replacedSpan.start + finalizedText.length)
+        val finalizedSpans = wordSpans(replacedSpan.start, finalizedWords, separator)
         mutableUnits.clear()
         mutableUnits += retainedUnits
-        sourceSpan = HostTextSpan(finalizedSpan.end + 1, replacedSpan.start + replacement.length)
+        val retainedStart = replacedSpan.start + finalizedText.length + boundary.length
+        sourceSpan = HostTextSpan(retainedStart, replacedSpan.start + replacement.length)
+        renderedText = "$retainedText$trailing"
+        wordSeparator = separator
+        trailingSeparator = trailing
         currentWords = retainedWords
         alternatives = retainedAlternatives
-        onFinalized(finalizedSpan, finalizedWords, finalizedAlternatives)
+        onFinalized(finalizedSpans, finalizedWords, finalizedAlternatives)
         return true
     }
 
     fun finalize() {
         val span = sourceSpan ?: return
-        if (currentWords.isNotEmpty()) onFinalized(span, currentWords, alternatives)
+        if (currentWords.isNotEmpty()) {
+            onFinalized(wordSpans(span.start, currentWords, wordSeparator), currentWords, alternatives)
+        }
     }
 
     fun clear() {
@@ -88,6 +109,18 @@ class SwipeInferenceTransaction(
         currentWords = emptyList()
         sourceSpan = null
         alternatives = emptyList()
+        renderedText = ""
+        wordSeparator = " "
+        trailingSeparator = ""
+    }
+
+    private fun wordSpans(start: Int, words: List<String>, separator: String): List<HostTextSpan> {
+        var nextStart = start
+        return words.map { word ->
+            val span = HostTextSpan(nextStart, nextStart + word.length)
+            nextStart = span.end + separator.length
+            span
+        }
     }
 
     companion object {

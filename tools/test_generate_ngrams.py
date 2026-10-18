@@ -3,9 +3,11 @@ import struct
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
-from generate_ngrams import BIGRAM_INDEX, HEADER, TRIGRAM_INDEX, aggregate, build_binary, encode_varint, normalize
+from generate_ngrams import BIGRAM_INDEX, HEADER, TRIGRAM_INDEX, aggregate, build_binary, build_language, encode_varint, iter_sentences, normalize
+from sample_phrases import sentences as sample_sentences
 
 WORDS = ["the", "cat", "sat", "mat", "dog"]
 SENTENCES = ["the cat sat"] * 3 + ["the cat mat"] + ["the dog sat"] * 2
@@ -19,6 +21,19 @@ def write_corpus(root: Path) -> Path:
         info.size = len(payload)
         archive.addfile(info, io.BytesIO(payload))
     return corpus
+
+
+def write_moses_corpus(root: Path) -> Path:
+    corpus = root / "dialogue.en-he.txt.zip"
+    with zipfile.ZipFile(corpus, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("dialogue.en-he.en", "the cat sat\r\nthe dog sat\n")
+        archive.writestr("dialogue.en-he.he", "שלום עולם\nעוד משפט\n")
+    return corpus
+
+
+def write_dictionary(path: Path, words: list[str]) -> Path:
+    path.write_text("word\n" + "".join(f"{word}\n" for word in words), encoding="utf-8")
+    return path
 
 
 def read_varint(data: bytes, position: int) -> tuple[int, int]:
@@ -107,6 +122,53 @@ class GenerateNgramsTest(unittest.TestCase):
             self.assertGreater(result["trigram_contexts"], 0)
             self.assertEqual(output.stat().st_size, result["bytes"])
 
+    def test_opus_moses_reader_selects_the_requested_language_side(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = write_moses_corpus(Path(directory))
+            self.assertEqual(["the cat sat", "the dog sat"], list(iter_sentences(corpus, "en")))
+            self.assertEqual(["שלום עולם", "עוד משפט"], list(iter_sentences(corpus, "he")))
+            self.assertEqual([(0, "the cat sat"), (1, "the dog sat")], list(sample_sentences(corpus, "en")))
+
+    def test_aggregation_combines_sources_without_joining_their_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            news = write_corpus(root)
+            dialogue = write_moses_corpus(root)
+            db = root / "combined.sqlite3"
+
+            stats = aggregate([news, dialogue], "en", WORDS, set(WORDS), db)
+            self.assertEqual(len(SENTENCES) + 2, stats["sentences"])
+            self.assertEqual(sum(len(sentence.split()) for sentence in SENTENCES) + 6, stats["retained_tokens"])
+
+            output = root / "combined.bin"
+            build_binary(db, output, "en", len(WORDS), 1, 32)
+            model = parse(output.read_bytes())
+            the, cat, sat, mat, dog = range(5)
+            # Both sources contribute to the same context, but the final word of one source
+            # must never be linked to the first word of the next source.
+            self.assertEqual({cat: 5, dog: 3}, model["bigrams"][(the,)][2])
+            self.assertNotIn((sat,), model["bigrams"])
+
+    def test_conversation_parity_reserves_disjoint_lines_without_thinning_news(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            news = write_corpus(root)
+            dialogue = write_moses_corpus(root)
+            db = root / "training.sqlite3"
+
+            stats = aggregate(
+                [news, dialogue], "en", WORDS, set(WORDS), db,
+                conversation_paths=[dialogue], conversation_train_parity=0,
+            )
+            self.assertEqual(len(SENTENCES) + 1, stats["sentences"])
+
+            output = root / "training.bin"
+            build_binary(db, output, "en", len(WORDS), 1, 32)
+            model = parse(output.read_bytes())
+            the, cat, _sat, _mat, dog = range(5)
+            # Full news lines remain, while only the even-indexed dialogue line trains this model.
+            self.assertEqual({cat: 5, dog: 2}, model["bigrams"][(the,)][2])
+
     def test_nkg2_stores_exact_counts_and_context_totals(self):
         with tempfile.TemporaryDirectory() as directory:
             model = parse(self.build(Path(directory)))
@@ -143,6 +205,38 @@ class GenerateNgramsTest(unittest.TestCase):
             custom = parse(self.build(Path(directory), "c.bin", discount=0.5))
         self.assertEqual(first, second)
         self.assertEqual(0.5, custom["discount"])
+
+    def test_cached_aggregation_rejects_reordered_dictionary_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = write_corpus(root)
+            dictionary = write_dictionary(root / "dictionary.csv", WORDS)
+            options = dict(
+                language="en", wordfreq_path=None, corpus_paths=[corpus], dictionary_path=dictionary,
+                minimum=1, top_k=32, vocabulary_limit=len(WORDS), context_vocabulary_limit=len(WORDS),
+                db_dir=root / "cache",
+            )
+            build_language(output=root / "first.bin", **options)
+            write_dictionary(dictionary, list(reversed(WORDS)))
+
+            with self.assertRaisesRegex(SystemExit, "aggregated with different settings"):
+                build_language(output=root / "second.bin", **options)
+
+    def test_cached_aggregation_rejects_changed_conversation_source_membership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            news = write_corpus(root)
+            dialogue = write_moses_corpus(root)
+            dictionary = write_dictionary(root / "dictionary.csv", WORDS)
+            options = dict(
+                language="en", wordfreq_path=None, corpus_paths=[news, dialogue], dictionary_path=dictionary,
+                minimum=1, top_k=32, vocabulary_limit=len(WORDS), context_vocabulary_limit=len(WORDS),
+                conversation_train_parity=0, db_dir=root / "cache",
+            )
+            build_language(output=root / "first.bin", conversation_paths=[], **options)
+
+            with self.assertRaisesRegex(SystemExit, "aggregated with different settings"):
+                build_language(output=root / "second.bin", conversation_paths=[dialogue], **options)
 
 
 if __name__ == "__main__":

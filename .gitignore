@@ -14,3 +14,6 @@ artifacts/
 secrets/
 .worktrees/
 .env
+
+# Local output of the opt-in accuracy benchmarks
+acc_*.log
