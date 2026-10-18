@@ -22,7 +22,7 @@
 - Capture previous/next words at correction sites; do not learn automatic corrections.
 - Add core and Room repository regressions for signal policy, scoring, restore, forget, and reset.
 
-## Task 4: Verify and integrate
+## Task 4: Verify and integrate ✓
 
 - Run the full core-engine and app unit suites, generator tests, and diff whitespace checks.
 - Review the final diff and integrate to `main` only after the current remote tip and verification are confirmed.
@@ -34,4 +34,4 @@
 - [x] Tasks 1-3 implementation and regression coverage.
 - [x] Clean core-engine and app unit suites passed.
 - [x] Python generator tests passed (11 tests).
-- [ ] Final diff review, remote-tip check, and integration.
+- [x] Final diff review, remote-tip check, and fast-forward integration to `main`.
