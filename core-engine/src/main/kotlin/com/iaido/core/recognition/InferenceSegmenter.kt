@@ -383,6 +383,12 @@ class InferenceSegmenter(
         val score: Double,
         val wordCount: Int,
         rootContext: List<String>,
+        /**
+         * True when this state's last group split a single touch path's own text into several words.
+         * Those words are arbitrary cut points, so the next group must not take the last fragment as
+         * its context ("today" -> "to day" would otherwise earn the frequent bigram "day of").
+         */
+        private val endsInFragments: Boolean = false,
     ) {
         /** Last few words of previousWords + words: all the n-gram scorer can ever look at. */
         private val contextTail: List<String> by lazy(LazyThreadSafetyMode.NONE) {
@@ -417,14 +423,22 @@ class InferenceSegmenter(
             val contextScore = if (group.isOverFragmented) {
                 0.0
             } else {
+                val tail = if (endsInFragments) emptyList() else contextTail
                 group.words.foldIndexed(0.0) { index, total, word ->
                     total + scorer.score(
-                        if (index == 0) contextTail else contextTail + group.words.subList(0, index),
+                        if (index == 0) tail else tail + group.words.subList(0, index),
                         word,
                     )
                 } * group.languageEvidenceWeight
             }
-            return Partial(this, group, score + group.score + contextScore, wordCount + group.words.size, emptyList())
+            return Partial(
+                this,
+                group,
+                score + group.score + contextScore,
+                wordCount + group.words.size,
+                emptyList(),
+                endsInFragments = group.isOverFragmented,
+            )
         }
 
         companion object {
