@@ -13,3 +13,6 @@ artifacts/
 .ci-art/
 secrets/
 .worktrees/
+
+# Local output of the opt-in accuracy benchmarks
+acc_*.log
