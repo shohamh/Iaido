@@ -129,7 +129,7 @@ telemetry as "unavailable in this build" in Settings.
    This URL is baked into the public release and nightly APKs, so the collector must stay
    tailnet-only (`tailscale serve`, never `tailscale funnel`): otherwise every opted-in user's
    research data, from anyone who installs the APK, would land on this machine.
-3. For local builds: add `iaidoTelemetryBaseUrl=https://<your-host>.<tailnet>.ts.net` to
+3. For local builds: put `IAIDO_TELEMETRY_BASE_URL=https://<your-host>.<tailnet>.ts.net` in a git-ignored `.env` file in the repo root (read by `app/build.gradle.kts`), or add `iaidoTelemetryBaseUrl=https://<your-host>.<tailnet>.ts.net` to
    `~/.gradle/gradle.properties` (not the repo's `gradle.properties`, which only carries a commented
    example).
 4. Android emulators may not resolve the tailnet name; see B9 in

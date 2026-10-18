@@ -14,7 +14,13 @@ android {
     val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
     val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
     val configuredApplicationId = providers.gradleProperty("iaidoApplicationId").getOrElse("com.iaido.app")
-    val telemetryBaseUrl = providers.gradleProperty("iaidoTelemetryBaseUrl").getOrElse("")
+    // Collector URL: -PiaidoTelemetryBaseUrl wins, then a git-ignored `.env` file in the repo root
+    // (IAIDO_TELEMETRY_BASE_URL=https://...), else blank, which shows telemetry as unavailable.
+    val dotEnvTelemetryBaseUrl = rootProject.file(".env").takeIf { it.isFile }?.readLines()
+        ?.map { it.trim() }
+        ?.firstOrNull { it.startsWith("IAIDO_TELEMETRY_BASE_URL=") }
+        ?.substringAfter("=")?.trim()?.trim('"') ?: ""
+    val telemetryBaseUrl = providers.gradleProperty("iaidoTelemetryBaseUrl").getOrElse(dotEnvTelemetryBaseUrl)
     val releaseSigningConfigured = listOf(
         releaseKeystorePath,
         releaseKeystorePassword,
