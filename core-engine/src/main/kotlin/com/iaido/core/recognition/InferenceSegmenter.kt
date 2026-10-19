@@ -66,9 +66,9 @@ class InferenceSegmenter(
 
         return allOptions
             .filter { option ->
-                confidenceMargin == 0.0 ||
-                    option == currentInterpretation ||
-                    option.score >= currentInterpretation.score - confidenceMargin
+                option == currentInterpretation ||
+                    option.score <= currentInterpretation.score ||
+                    option.score - currentInterpretation.score >= confidenceMargin
             }
             .take(maxAlternatives)
     }
