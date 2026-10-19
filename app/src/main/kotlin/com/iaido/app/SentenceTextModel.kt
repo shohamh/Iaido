@@ -236,8 +236,9 @@ internal object SentenceTextModel {
                 sourceIds.map { it to outputWords.single() }
             } else {
                 // Keep split edits atomic without putting a phrase in a single word lane. The
-                // compact marker previews the full group when selected.
-                listOf(sourceIds.first() to "${outputWords.first()}…")
+                // first replacement word is the whole visible word; selecting it still applies
+                // the complete grouped replacement through the attached option ID.
+                listOf(sourceIds.first() to outputWords.first())
             }
             displayed.forEach wordLoop@{ (wordId, candidate) ->
                 val index = result.indexOfFirst { it.id == wordId }

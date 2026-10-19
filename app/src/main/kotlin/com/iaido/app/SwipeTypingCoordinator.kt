@@ -39,6 +39,8 @@ class SwipeTypingCoordinator(
     private val onReplacementOptionsChanged: (List<ReplacementOption>) -> Unit = {},
     private val onInferenceTransactionFinished: () -> Unit = {},
     private val onSwipeAccepted: () -> Unit = {},
+    private val onInferenceRunStarting: () -> Unit = {},
+    private val onInferenceTransactionFinalized: () -> Unit = {},
 ) {
     private val transaction = SwipeInferenceTransaction(
         cursorPosition = cursorPosition,
@@ -190,6 +192,7 @@ class SwipeTypingCoordinator(
             return
         }
         if (transaction.sourceSpan == null) {
+            onInferenceRunStarting()
             activeSpacingMode = SpacingMode.INFER_SPACES
             activeWordSeparator = " "
             activeTrailingSeparator = ""
@@ -198,7 +201,7 @@ class SwipeTypingCoordinator(
         check(transaction.append(unit))
         val alternatives = preserveSingleGestureTopWord(
             unit,
-            segmenter.rank(transaction.units, previousWords(), dictionary()),
+            rankInference(transaction.units, previousWords()),
         )
         val words = applyPendingCapitalization(alternatives.firstOrNull()?.words ?: unit.topWords())
         replacementSelection = null
@@ -212,6 +215,7 @@ class SwipeTypingCoordinator(
             return
         }
         if (transaction.sourceSpan == null) {
+            onInferenceRunStarting()
             activeSpacingMode = mode
             activeWordSeparator = if (mode == SpacingMode.MANUAL) "" else " "
             activeTrailingSeparator = if (mode == SpacingMode.AFTER_SWIPE && !hasFollowingWhitespace()) " " else ""
@@ -285,9 +289,29 @@ class SwipeTypingCoordinator(
         )
     }
 
+    private fun rankInference(units: List<GestureUnit>, context: List<String>): List<SegmentationOption> {
+        val ranked = segmenter.rank(units, context, dictionary())
+        if (ranked.isNotEmpty()) return ranked
+
+        // Keep the recognizer's best words available even if the dictionary cannot produce a
+        // segmentation. Without this option, the swipe still replaces host text but its active
+        // correction reel is empty and finalization has no source candidate to retain.
+        val words = units.flatMap { it.topWords() }
+        if (words.isEmpty()) return emptyList()
+        return listOf(
+            SegmentationOption(
+                words = words,
+                score = units.sumOf { unit ->
+                    unit.candidates.sumOf { pathCandidates -> pathCandidates.firstOrNull()?.score ?: 0.0 }
+                },
+                sourceGestureIds = units.map(GestureUnit::id),
+            ),
+        )
+    }
+
     private fun slideInferenceWindow(nextUnit: GestureUnit) {
         val oldestUnit = transaction.units.first()
-        val finalizedAlternatives = segmenter.rank(listOf(oldestUnit), previousWords(), dictionary())
+        val finalizedAlternatives = rankInference(listOf(oldestUnit), previousWords())
         val rawFinalizedWords = finalizedAlternatives.firstOrNull()?.words ?: oldestUnit.topWords()
         // The transaction's original leading word (if any) is finalized here — apply and
         // consume the capitalization decision now so the retained window's new leading
@@ -295,7 +319,7 @@ class SwipeTypingCoordinator(
         val finalizedWords = applyPendingCapitalization(rawFinalizedWords)
         capitalizeFirstWord = false
         val retainedUnits = transaction.units.drop(1) + nextUnit
-        val alternatives = segmenter.rank(retainedUnits, previousWords() + rawFinalizedWords, dictionary())
+        val alternatives = rankInference(retainedUnits, previousWords() + rawFinalizedWords)
         val retainedWords = alternatives.firstOrNull()?.words ?: nextUnit.topWords()
         replacementSelection = null
         if (!transaction.slideWindow(
@@ -329,7 +353,10 @@ class SwipeTypingCoordinator(
         activeTrailingSeparator = ""
         if (finalize) transaction.finalize()
         transaction.clear()
-        if (hadActiveTransaction) onInferenceTransactionFinished()
+        if (hadActiveTransaction) {
+            onInferenceTransactionFinished()
+            if (finalize) onInferenceTransactionFinalized()
+        }
         notifyReplacementOptionsChanged()
     }
 
@@ -342,8 +369,81 @@ class SwipeTypingCoordinator(
 
     private fun activeReplacementSelection(): ReplacementSelection? =
         transaction.currentWords.takeIf { it.isNotEmpty() }
-            ?.takeIf { transaction.alternatives.isNotEmpty() }
-            ?.let { words -> ReplacementSelection(words, transaction.alternatives) }
+            ?.let { words ->
+                val alternatives = addMissingWordAlternatives(
+                    words = words,
+                    alternatives = transaction.alternatives,
+                    units = transaction.units,
+                )
+                alternatives.takeIf { it.isNotEmpty() }?.let { ReplacementSelection(words, it) }
+            }
+
+    /** Keep every active word lane useful even when phrase-wide ranking omitted that position. */
+    private fun addMissingWordAlternatives(
+        words: List<String>,
+        alternatives: List<SegmentationOption>,
+        units: List<GestureUnit>,
+    ): List<SegmentationOption> {
+        val result = alternatives.toMutableList()
+        val recognizedPaths = units.flatMap { unit ->
+            unit.candidates.map { candidates -> unit.id to candidates }
+        }.takeIf { it.size == words.size }
+        var dictionaryEntries: List<WordEntry>? = null
+
+        words.forEachIndexed { index, currentWord ->
+            if (result.any { option ->
+                    option.words.size == words.size &&
+                        !option.words[index].equals(currentWord, ignoreCase = true)
+                }
+            ) return@forEachIndexed
+
+            val candidates = mutableListOf<Pair<String, Double>>()
+            recognizedPaths?.get(index)?.second.orEmpty().forEach { recognized ->
+                val candidate = recognized.word.word
+                if (isDistinctWordCandidate(candidate, currentWord) &&
+                    candidates.none { it.first.equals(candidate, ignoreCase = true) }
+                ) {
+                    candidates += candidate to recognized.score
+                }
+            }
+            if (candidates.size < MAX_ACTIVE_WORD_CANDIDATES) {
+                val entries = dictionaryEntries ?: dictionary().also { dictionaryEntries = it }
+                typedWordCandidates(
+                    word = currentWord,
+                    dictionary = entries,
+                    limit = MAX_ACTIVE_WORD_CANDIDATES,
+                ).forEach { candidate ->
+                    if (candidates.size < MAX_ACTIVE_WORD_CANDIDATES &&
+                        isDistinctWordCandidate(candidate, currentWord) &&
+                        candidates.none { it.first.equals(candidate, ignoreCase = true) }
+                    ) {
+                        candidates += candidate to 0.0
+                    }
+                }
+            }
+
+            candidates.forEach { (candidate, score) ->
+                val replacement = words.toMutableList().also { it[index] = candidate }
+                if (result.none { option -> sameWords(option.words, replacement) }) {
+                    result += SegmentationOption(
+                        words = replacement,
+                        score = score,
+                        sourceGestureIds = units.map(GestureUnit::id),
+                    )
+                }
+            }
+        }
+        return result
+    }
+
+    private fun isDistinctWordCandidate(candidate: String, currentWord: String): Boolean =
+        candidate.isNotBlank() && candidate.none { it.isWhitespace() } &&
+            !candidate.equals(currentWord, ignoreCase = true)
+
+    private fun sameWords(first: List<String>, second: List<String>): Boolean =
+        first.size == second.size && first.zip(second).all { (left, right) ->
+            left.equals(right, ignoreCase = true)
+        }
 
     private fun replacementOption(
         selection: ReplacementSelection,
@@ -388,5 +488,6 @@ class SwipeTypingCoordinator(
 
     private companion object {
         const val DEFAULT_GRACE_WINDOW_MS = 350L
+        const val MAX_ACTIVE_WORD_CANDIDATES = 4
     }
 }

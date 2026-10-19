@@ -125,7 +125,7 @@ class SentenceTextModelTest {
         )
         val state = model("old words", cursor = 9, options = listOf(option))
 
-        assertEquals("new…", state.words[0].above)
+        assertEquals("new", state.words[0].above)
         assertEquals(null, state.words[1].above)
         val preview = SentenceStripPreviewMath.alternative(state, 0, SentenceAlternativeSide.ABOVE)
         assertTrue(preview is SentenceReplacementPreview)
@@ -147,7 +147,7 @@ class SentenceTextModelTest {
             options = listOf(ReplacementOption(listOf("we"), listOf("We"), 1.0)),
         )
 
-        assertTrue("a…" in listOf(splitState.words[1].above, splitState.words[1].below))
+        assertTrue("a" in listOf(splitState.words[1].above, splitState.words[1].below))
         assertEquals(1, joinState.replacementOptions.size)
         assertTrue("into" in listOf(joinState.words[0].above, joinState.words[0].below))
         assertTrue("into" in listOf(joinState.words[1].above, joinState.words[1].below))

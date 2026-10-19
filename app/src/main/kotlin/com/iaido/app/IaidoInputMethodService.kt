@@ -337,6 +337,8 @@ class IaidoInputMethodService : InputMethodService() {
                 pendingCandidates = null
                 typingController.markSwipeCommitted()
             },
+            onInferenceRunStarting = ::separateBeforeNewSwipe,
+            onInferenceTransactionFinalized = ::scheduleFlowCorrection,
         )
     }
 
@@ -912,7 +914,22 @@ class IaidoInputMethodService : InputMethodService() {
             composite = words.size > 1,
             wordSeparator = wordSeparator,
         )
-        refreshSuggestionChips(outputIds.firstOrNull())
+        rerankFinalizedWords(outputIds)
+        refreshSuggestionChips()
+    }
+
+    private fun rerankFinalizedWords(wordIds: List<Int>) {
+        if (wordIds.isEmpty()) return
+        var words = correctionHistory.words()
+        val affectedIds = linkedSetOf<Int>()
+        wordIds.forEach { id ->
+            val result = sentenceCandidateReranker.rerank(words, id)
+            words = result.words
+            affectedIds += result.affectedIds
+        }
+        affectedIds.forEach { id ->
+            words.firstOrNull { it.id == id }?.let { correctionHistory.updateCandidates(id, it.candidates) }
+        }
     }
 
     private fun commitText(text: String) {
@@ -977,6 +994,37 @@ class IaidoInputMethodService : InputMethodService() {
             refreshSuggestionChips(updateTypedWord(closed ?: typedWords.openSpan()))
         }
         if (swipedWord) refreshSuggestionChips()
+    }
+
+    /** Start a fresh swipe token after typed text or sentence-closing punctuation. */
+    private fun separateBeforeNewSwipe() {
+        val typedSpan = typedWords.openSpan()
+        if (typedSpan != null) {
+            if (typedSpan.end == cursorPosition) {
+                if (!hasFollowingWhitespace()) commitText(" ")
+                else typedWords.reset()
+                return
+            }
+            typedWords.reset()
+        }
+
+        if (hasFollowingWhitespace()) return
+        val previous = currentInputConnection?.getTextBeforeCursor(1, 0)?.firstOrNull() ?: return
+        if (previous.isWhitespace() || !endsSwipeToken(previous)) return
+        commitText(" ")
+    }
+
+    private fun hasFollowingWhitespace(): Boolean =
+        currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.isWhitespace() == true
+
+    private fun endsSwipeToken(character: Char): Boolean {
+        if (character.isLetterOrDigit()) return true
+        return when (Character.getType(character).toInt()) {
+            Character.END_PUNCTUATION.toInt(),
+            Character.FINAL_QUOTE_PUNCTUATION.toInt(),
+            Character.OTHER_PUNCTUATION.toInt(), -> true
+            else -> false
+        }
     }
 
     private fun captureEditorEdit(start: Int, endExclusive: Int): CapturedEditorEdit? {
@@ -1443,6 +1491,9 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun releaseReplacementOption(option: ReplacementOption): Boolean {
+        if (option.id !in liveReplacementOptionIds.value) {
+            swipeTypingCoordinator.onNonSwipeInput()
+        }
         val historyMatch = correctionHistory.aroundCursor(cursorPosition).zipWithNext()
             .firstOrNull { (first, second) -> listOf(first.current, second.current) == option.sourceWords }
         val released = if (historyMatch != null) {
@@ -1477,6 +1528,7 @@ class IaidoInputMethodService : InputMethodService() {
         if (current.option.id in liveReplacementOptionIds.value) {
             return releaseReplacementOption(current.option)
         }
+        swipeTypingCoordinator.onNonSwipeInput()
 
         if (current.sourceWordIds.size == 2 && current.option.replacementWords.size == 1) {
             val ids = current.sourceWordIds.map { id ->
@@ -1529,15 +1581,17 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun releaseSuggestion(displayIndex: Int, candidateIndex: Int) {
-        val word = wordForDisplayIndex(displayIndex) ?: return
+        val selectedWord = wordForDisplayIndex(displayIndex) ?: return
         val chip = SuggestionChip(
-            word = word.current,
-            alternatives = word.candidates,
-            selectedIndex = word.candidates.indexOf(word.current).coerceAtLeast(0),
-            corrected = word.corrected,
-            id = word.id,
+            word = selectedWord.current,
+            alternatives = selectedWord.candidates,
+            selectedIndex = selectedWord.candidates.indexOf(selectedWord.current).coerceAtLeast(0),
+            corrected = selectedWord.corrected,
+            id = selectedWord.id,
         )
         val replacement = displayCandidateForIndex(chip, candidateIndex) ?: return
+        swipeTypingCoordinator.onNonSwipeInput()
+        val word = correctionHistory.words().firstOrNull { it.id == selectedWord.id } ?: return
         val (previousWord, nextWord) = contextWordsAround(word.start, word.end)
         val changed = replaceSessionWord(word.id, replacement)
         trackSuggestion(
@@ -1564,7 +1618,10 @@ class IaidoInputMethodService : InputMethodService() {
     }
 
     private fun undoSuggestion(displayIndex: Int) {
-        val word = wordForDisplayIndex(displayIndex) ?: return
+        val selectedWord = wordForDisplayIndex(displayIndex) ?: return
+        if (!selectedWord.corrected) return
+        swipeTypingCoordinator.onNonSwipeInput()
+        val word = correctionHistory.words().firstOrNull { it.id == selectedWord.id } ?: return
         if (!word.corrected) return
         val undone = replaceSessionWord(word.id, word.original)
         trackSuggestion(
